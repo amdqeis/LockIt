@@ -1,0 +1,80 @@
+# ─── DEPENDENCIES ───────────────────────────────────────────
+node_modules/
+/.pnp
+.pnp.js
+
+# ─── ENVIRONMENT VARIABLES & SECRETS ────────────────────────
+.env
+.env*.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Pastikan template .env.example tetap di-commit
+!.env.example
+
+# ─── NEXT.JS & BUILD ARTIFACTS ──────────────────────────────
+.next/
+out/
+build/
+dist/
+
+# ─── TYPESCRIPT ─────────────────────────────────────────────
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+next-env.d.ts
+
+# ─── USER UPLOADS & MEDIA ───────────────────────────────────
+# Abaikan file upload ujian pengguna, simpan folder strukturnya
+public/uploads/*
+!public/uploads/.gitkeep
+
+# ─── LOGS & DEBUGGING ───────────────────────────────────────
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ─── TESTING & COVERAGE ─────────────────────────────────────
+coverage/
+.nyc_output/
+*.lcov
+
+# ─── OS & SYSTEM ARTIFACTS ──────────────────────────────────
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ─── IDE & EDITORS ──────────────────────────────────────────
+.idea/
+*.sublime-project
+*.sublime-workspace
+*.swp
+*.swo
+*~
+
+# VS Code (abaikan semua kecuali rekomendasi extensions & settings opsional)
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# ─── DATABASE & DOCKER ARTIFACTS ────────────────────────────
+postgres_data/
+docker-data/
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
