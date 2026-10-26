@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import DashboardShell from "@/app/components/DashboardShell";
+import { mockQuestionBanks, QuestionBank } from "@/lib/mockData";
 
 export default function NewExamPage() {
   const [form, setForm] = useState({
@@ -17,6 +18,9 @@ export default function NewExamPage() {
     detectRightClick: false,
     detectDevTools: false,
   });
+  const [bankMode, setBankMode] = useState<"select" | "upload">("select");
+  const [selectedBank, setSelectedBank] = useState<QuestionBank | null>(null);
+  const [bankSearch, setBankSearch] = useState("");
   const [uploadState, setUploadState] = useState<"idle" | "uploading" | "success" | "error">("idle");
   const [fileName, setFileName] = useState("");
   const [questionCount, setQuestionCount] = useState(0);
@@ -25,6 +29,7 @@ export default function NewExamPage() {
   const [showPreview, setShowPreview] = useState(false);
   const [previewQuestion, setPreviewQuestion] = useState(0);
   const [toast, setToast] = useState<{ type: string; msg: string } | null>(null);
+
 
   const set = (key: string, val: unknown) => setForm(f => ({ ...f, [key]: val }));
 
@@ -48,7 +53,8 @@ export default function NewExamPage() {
     if (!form.title) err.title = "Judul ujian wajib diisi";
     if (!form.duration) err.duration = "Durasi wajib diisi";
     else if (parseInt(form.duration) < 1 || parseInt(form.duration) > 480) err.duration = "Durasi harus antara 1-480 menit";
-    if (uploadState !== "success") err.questions = "Bank soal wajib diupload";
+    if (bankMode === "select" && !selectedBank) err.questions = "Pilih bank soal terlebih dahulu";
+    if (bankMode === "upload" && uploadState !== "success") err.questions = "Bank soal wajib diupload";
     return err;
   };
 
@@ -109,46 +115,144 @@ export default function NewExamPage() {
               {/* Section 2: Bank Soal */}
               <div className="form-section">
                 <div className="form-section-title">📁 Bank Soal</div>
-                {uploadState === "idle" && (
-                  <div className="file-upload-zone" onClick={handleFileUpload}>
-                    <div className="file-upload-icon">☁️</div>
-                    <div className="file-upload-text">Drag file ke sini atau <strong>klik untuk pilih</strong></div>
-                    <div className="file-upload-hint">Format: .json atau .xml · Maks. 5MB</div>
+
+                {/* Mode tabs */}
+                <div style={{ display: "flex", gap: "0", marginBottom: "18px", border: "1px solid #E2E8F0", borderRadius: "8px", overflow: "hidden", width: "fit-content" }}>
+                  {(["select", "upload"] as const).map(mode => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => { setBankMode(mode); setSelectedBank(null); setUploadState("idle"); setFileName(""); setQuestionCount(0); }}
+                      style={{
+                        padding: "8px 18px",
+                        fontSize: "13px",
+                        fontWeight: bankMode === mode ? 700 : 500,
+                        color: bankMode === mode ? "var(--color-primary)" : "#64748B",
+                        background: bankMode === mode ? "#E0F4FD" : "white",
+                        border: "none",
+                        cursor: "pointer",
+                        transition: "background 0.15s ease",
+                      }}
+                    >
+                      {mode === "select" ? "📚 Pilih dari Bank Soal" : "☁️ Upload File"}
+                    </button>
+                  ))}
+                </div>
+
+                {/* MODE: Select from bank */}
+                {bankMode === "select" && (
+                  <div>
+                    {!selectedBank ? (
+                      <>
+                        {/* Search */}
+                        <div style={{ position: "relative", marginBottom: "12px" }}>
+                          <span style={{ position: "absolute", left: "12px", top: "50%", transform: "translateY(-50%)", fontSize: "14px", color: "#94A3B8", pointerEvents: "none" }}>🔍</span>
+                          <input className="form-input" style={{ paddingLeft: "36px" }} placeholder="Cari bank soal..." value={bankSearch} onChange={e => setBankSearch(e.target.value)} />
+                        </div>
+                        {/* Bank list */}
+                        <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "340px", overflowY: "auto" }}>
+                          {mockQuestionBanks
+                            .filter(b => b.status === "active")
+                            .filter(b => {
+                              const q = bankSearch.toLowerCase();
+                              return !q || b.title.toLowerCase().includes(q) || b.subject.toLowerCase().includes(q) || b.tags.some(t => t.toLowerCase().includes(q));
+                            })
+                            .map(bank => (
+                              <div
+                                key={bank.id}
+                                onClick={() => setSelectedBank(bank)}
+                                style={{
+                                  display: "flex", alignItems: "center", gap: "14px",
+                                  padding: "14px 16px", border: "1.5px solid #E2E8F0",
+                                  borderRadius: "10px", cursor: "pointer",
+                                  background: "white", transition: "border-color 0.15s ease, background 0.15s ease",
+                                }}
+                                onMouseEnter={e => { e.currentTarget.style.borderColor = "var(--color-primary)"; e.currentTarget.style.background = "#F0FAFF"; }}
+                                onMouseLeave={e => { e.currentTarget.style.borderColor = "#E2E8F0"; e.currentTarget.style.background = "white"; }}
+                              >
+                                <div style={{ width: "40px", height: "40px", borderRadius: "10px", background: "#E0F4FD", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "20px", flexShrink: 0 }}>📚</div>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ fontWeight: 700, color: "#0F172A", fontSize: "14px", marginBottom: "2px" }}>{bank.title}</div>
+                                  <div style={{ fontSize: "12px", color: "#64748B" }}>📚 {bank.subject} · {bank.questionCount} soal · {bank.totalPoints} poin</div>
+                                  {bank.tags.length > 0 && (
+                                    <div style={{ display: "flex", gap: "4px", flexWrap: "wrap", marginTop: "4px" }}>
+                                      {bank.tags.slice(0, 3).map(t => (
+                                        <span key={t} style={{ fontSize: "11px", padding: "1px 7px", borderRadius: "99px", background: "#F1F5F9", color: "#475569" }}>{t}</span>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                                <span style={{ fontSize: "20px", color: "#CBD5E1" }}>›</span>
+                              </div>
+                            ))}
+                        </div>
+                        {mockQuestionBanks.filter(b => b.status === "active").length === 0 && (
+                          <div style={{ textAlign: "center", padding: "32px", color: "#94A3B8", fontSize: "14px" }}>
+                            Belum ada bank soal aktif.{" "}
+                            <Link href="/dashboard/question-bank" style={{ color: "var(--color-primary)", fontWeight: 600 }}>Buat sekarang →</Link>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      /* Selected bank card */
+                      <div style={{ padding: "18px", border: "2px solid var(--color-primary)", borderRadius: "10px", background: "var(--color-primary-light)", display: "flex", alignItems: "center", gap: "16px" }}>
+                        <span style={{ fontSize: "28px" }}>✅</span>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 700, color: "var(--color-primary-dark)", fontSize: "15px" }}>{selectedBank.title}</div>
+                          <div style={{ fontSize: "13px", color: "#475569", marginTop: "2px" }}>📚 {selectedBank.subject} · {selectedBank.questionCount} soal · Total poin: {selectedBank.totalPoints}</div>
+                        </div>
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setSelectedBank(null)}>🔄 Ganti</button>
+                      </div>
+                    )}
                   </div>
                 )}
-                {uploadState === "uploading" && (
-                  <div style={{ padding: "24px", textAlign: "center", border: "2px dashed var(--color-primary)", borderRadius: "var(--radius-lg)", background: "var(--color-primary-light)" }}>
-                    <div style={{ fontSize: "24px", marginBottom: "8px", animation: "spin 1s linear infinite", display: "inline-block" }}>⟳</div>
-                    <div style={{ color: "var(--color-primary)", fontWeight: 500 }}>Mengupload soal...</div>
-                    <div className="progress-bar" style={{ marginTop: "12px" }}>
-                      <div className="progress-fill" style={{ width: "60%" }} />
-                    </div>
+
+                {/* MODE: Upload file */}
+                {bankMode === "upload" && (
+                  <div>
+                    {uploadState === "idle" && (
+                      <div className="file-upload-zone" onClick={handleFileUpload}>
+                        <div className="file-upload-icon">☁️</div>
+                        <div className="file-upload-text">Drag file ke sini atau <strong>klik untuk pilih</strong></div>
+                        <div className="file-upload-hint">Format: .json atau .xml · Maks. 5MB</div>
+                      </div>
+                    )}
+                    {uploadState === "uploading" && (
+                      <div style={{ padding: "24px", textAlign: "center", border: "2px dashed var(--color-primary)", borderRadius: "var(--radius-lg)", background: "var(--color-primary-light)" }}>
+                        <div style={{ fontSize: "24px", marginBottom: "8px", animation: "spin 1s linear infinite", display: "inline-block" }}>⟳</div>
+                        <div style={{ color: "var(--color-primary)", fontWeight: 500 }}>Mengupload soal...</div>
+                        <div className="progress-bar" style={{ marginTop: "12px" }}>
+                          <div className="progress-fill" style={{ width: "60%" }} />
+                        </div>
+                      </div>
+                    )}
+                    {uploadState === "success" && (
+                      <div className="file-upload-success">
+                        <span style={{ fontSize: "24px" }}>✅</span>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 600, color: "var(--color-success)" }}>{questionCount} soal berhasil diproses</div>
+                          <div style={{ fontSize: "13px", color: "var(--color-neutral-500)" }}>{fileName} · Total poin: {questionCount * 10}</div>
+                        </div>
+                        <div style={{ display: "flex", gap: "8px" }}>
+                          <button type="button" className="btn btn-ghost-primary btn-sm" onClick={() => setShowPreview(true)}>👁 Preview Soal</button>
+                          <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setUploadState("idle"); setFileName(""); setQuestionCount(0); }}>🔄 Ganti File</button>
+                        </div>
+                      </div>
+                    )}
+                    {uploadState === "error" && (
+                      <div className="file-upload-error">
+                        <div style={{ fontWeight: 600, color: "var(--color-danger)", marginBottom: "8px" }}>❌ File tidak valid</div>
+                        <div style={{ fontSize: "13px", color: "var(--color-neutral-600)" }}>
+                          <div>• Soal #3: field &apos;options&apos; wajib ada</div>
+                          <div>• Soal #7: tidak ada jawaban benar</div>
+                        </div>
+                        <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: "12px" }} onClick={() => setUploadState("idle")}>Upload Ulang</button>
+                      </div>
+                    )}
                   </div>
                 )}
-                {uploadState === "success" && (
-                  <div className="file-upload-success">
-                    <span style={{ fontSize: "24px" }}>✅</span>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 600, color: "var(--color-success)" }}>{questionCount} soal berhasil diproses</div>
-                      <div style={{ fontSize: "13px", color: "var(--color-neutral-500)" }}>{fileName} · Total poin: {questionCount * 10}</div>
-                    </div>
-                    <div style={{ display: "flex", gap: "8px" }}>
-                      <button type="button" className="btn btn-ghost-primary btn-sm" onClick={() => setShowPreview(true)}>👁 Preview Soal</button>
-                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setUploadState("idle"); setFileName(""); setQuestionCount(0); }}>🔄 Ganti File</button>
-                    </div>
-                  </div>
-                )}
-                {uploadState === "error" && (
-                  <div className="file-upload-error">
-                    <div style={{ fontWeight: 600, color: "var(--color-danger)", marginBottom: "8px" }}>❌ File tidak valid</div>
-                    <div style={{ fontSize: "13px", color: "var(--color-neutral-600)" }}>
-                      <div>• Soal #3: field &apos;options&apos; wajib ada</div>
-                      <div>• Soal #7: tidak ada jawaban benar</div>
-                    </div>
-                    <button type="button" className="btn btn-primary btn-sm" style={{ marginTop: "12px" }} onClick={() => setUploadState("idle")}>Upload Ulang</button>
-                  </div>
-                )}
-                {errors.questions && <span className="form-error">⚠️ {errors.questions}</span>}
+
+                {errors.questions && <span className="form-error" style={{ marginTop: "8px", display: "block" }}>⚠️ {errors.questions}</span>}
               </div>
 
               {/* Section 3: Pengaturan Soal */}

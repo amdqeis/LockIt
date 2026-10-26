@@ -20,11 +20,11 @@ export default function DashboardShell({ children }: Props) {
   const pathname = usePathname();
   const [examOpen, setExamOpen] = useState(true);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
 
   const isActive = (href: string) => pathname === href;
   const isExamActive = pathname.startsWith("/dashboard/exams");
-  const isMonitorActive = pathname.includes("/monitor");
+  const isBankSoalActive = pathname.startsWith("/dashboard/question-bank");
+  const isMonitorActive = pathname.includes("/monitor") || pathname.includes("/live-feed");
   const isResultsActive = pathname.includes("/results");
 
   return (
@@ -72,59 +72,6 @@ export default function DashboardShell({ children }: Props) {
           </Link>
         </div>
 
-        {/* Search Bar */}
-        <div style={{ padding: "0 16px 14px" }}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              padding: "7px 10px",
-              border: "1px solid #E2E8F0",
-              borderRadius: "6px",
-              background: "#F8FAFC",
-              color: "#64748B",
-              boxShadow: "0 1px 3px rgba(15,30,40,0.07), 0 1px 2px rgba(15,30,40,0.04)",
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: "8px", flex: 1, minWidth: 0 }}>
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="11" cy="11" r="8" />
-                <line x1="21" y1="21" x2="16.65" y2="16.65" />
-              </svg>
-              <input
-                type="text"
-                placeholder="Cari ujian..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                style={{
-                  border: "none",
-                  outline: "none",
-                  background: "transparent",
-                  fontSize: "13px",
-                  color: "#0F172A",
-                  width: "100%",
-                  fontFamily: "inherit",
-                }}
-              />
-            </div>
-            <kbd
-              style={{
-                fontSize: "11px",
-                color: "#64748B",
-                background: "#FFFFFF",
-                padding: "2px 5px",
-                borderRadius: "4px",
-                border: "1px solid #E2E8F0",
-                fontWeight: 600,
-                fontFamily: "inherit",
-                lineHeight: 1,
-              }}
-            >
-              ⌘
-            </kbd>
-          </div>
-        </div>
 
         {/* Nav Items Container */}
         <nav style={{ flex: 1, display: "flex", flexDirection: "column" }}>
@@ -330,6 +277,64 @@ export default function DashboardShell({ children }: Props) {
             )}
           </div>
 
+          {/* SECTION HEADER: KONTEN */}
+          <div style={{ fontSize: "11px", fontWeight: 700, color: "#94A3B8", textTransform: "uppercase", letterSpacing: "0.06em", padding: "16px 20px 6px" }}>
+            KONTEN
+          </div>
+
+          {/* Bank Soal */}
+          {(() => {
+            const active = isBankSoalActive;
+            return (
+              <Link
+                href="/dashboard/question-bank"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  width: "100%",
+                  height: "46px",
+                  padding: "0 20px",
+                  position: "relative",
+                  background: active ? COLOR_PRIMARY_BG : "transparent",
+                  color: active ? COLOR_PRIMARY_TEXT : "#475569",
+                  textDecoration: "none",
+                  transition: "background 0.15s ease, color 0.15s ease",
+                }}
+              >
+                {active && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      left: 0, top: 0, bottom: 0,
+                      width: "4px",
+                      background: COLOR_PRIMARY,
+                    }}
+                  />
+                )}
+                <div
+                  style={{
+                    width: "24px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    marginRight: "12px",
+                    color: active ? COLOR_PRIMARY : "#94A3B8",
+                    flexShrink: 0,
+                  }}
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <ellipse cx="12" cy="5" rx="9" ry="3" />
+                    <path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5" />
+                    <path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3" />
+                  </svg>
+                </div>
+                <span style={{ fontSize: "14px", fontWeight: active ? 600 : 500, letterSpacing: "-0.01em" }}>
+                  Bank Soal
+                </span>
+              </Link>
+            );
+          })()}
+
           {/* SECTION HEADER: PENGAWASAN & HASIL */}
           <div style={{ fontSize: "11px", fontWeight: 700, color: "#94A3B8", textTransform: "uppercase", letterSpacing: "0.06em", padding: "16px 20px 6px" }}>
             PENGAWASAN & HASIL
@@ -340,7 +345,7 @@ export default function DashboardShell({ children }: Props) {
             const active = isMonitorActive;
             return (
               <Link
-                href="/dashboard?filter=active"
+                href="/dashboard/exams/exam-1/monitor"
                 style={{
                   display: "flex",
                   alignItems: "center",
