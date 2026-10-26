@@ -1171,7 +1171,7 @@ function EditExamPage() {
         role="toolbar"
         aria-label="Aksi form"
         style={{
-          position: "fixed", bottom: 0, left: "240px", right: 0,
+          position: "fixed", bottom: 0, left: "248px", right: 0,
           background: T.bgCard,
           borderTop: `1px solid ${T.border}`,
           boxShadow: T.shadowBar,

@@ -4,7 +4,75 @@
    DESIGN TOKENS
    ============================================================ */
 :root {
-  /* Colors — Sky Blue palette sesuai UIReference/image(3).png */
+  /* ============================================================
+     SPEC §7 UNIFIED DESIGN TOKENS (Dashboard, Exam Form, Live Feed)
+     ============================================================ */
+  /* Surfaces */
+  --bg-page:              #F6F8FB;
+  --bg-card:              #FFFFFF;
+  --bg-subtle:            #F0F3F8;
+  --border:               #E1E6ED;
+  --border-input:         #8391A7;
+
+  /* Text */
+  --text-primary:         #172033;
+  --text-secondary:       #5B6778;
+  --text-placeholder:     #6B7788;
+
+  /* Primary */
+  --primary:              #1B76BF;
+  --primary-hover:        #155E99;
+  --primary-active:       #114E80;
+  --primary-tint:         #E6F1FA;
+  --primary-tint-border:  #9CC7EA;
+  --primary-ring:         rgba(27, 118, 191, 0.25);
+
+  /* Feedback */
+  --success:              #177A4B;
+  --warning-text:         #9A5B00;
+  --warning-bg:           #FFF4DB;
+  --danger:               #C73E3E;
+  --danger-bg:            #FCE9E9;
+
+  /* Exam status dots */
+  --status-active:        var(--success);
+  --status-scheduled:     var(--primary);
+  --status-draft:         #8391A7;
+  --status-finished:      #5B6778;
+  --status-archived:      #A8B2C0;
+
+  /* Proctoring flags */
+  --flag-camera-off:      #EF6F6C;
+  --flag-out-of-frame:    #F2DC3D;
+  --flag-switched-tabs:   #F5A24B;
+  --flag-multiple-people: #D470DD;
+
+  /* Controls */
+  --toggle-off:           #8391A7;
+  --toggle-on:            var(--primary);
+
+  /* Shape and depth */
+  --radius-card:          8px;
+  --radius-control:       8px;
+  --radius-pill:          999px;
+  --shadow-card:          0 2px 8px rgba(20, 24, 40, 0.08);
+  --shadow-card-hover:    0 4px 14px rgba(20, 24, 40, 0.14);
+  --shadow-bar:           0 -2px 8px rgba(20, 24, 40, 0.06);
+
+  /* Layout */
+  --sidebar-width:        248px;
+  --sidebar-rail:         72px;
+  --space-page-x:         32px;
+  --space-card-pad:       16px;
+  --space-grid-gap:       16px;
+
+  /* Spec §8 Token Additions (Join & Login) */
+  --font-mono:            ui-monospace, SFMono-Regular, Menlo, monospace;
+  --control-height-lg:    56px;   /* code input */
+  --auth-content-width:   360px; /* join column */
+  --auth-card-width:      400px; /* login card */
+
+  /* Colors — Legacy Sky Blue palette */
   --color-primary: #29ABE2;
   --color-primary-dark: #0EA5E9;
   --color-primary-light: #E0F4FD;

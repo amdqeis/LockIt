@@ -2,39 +2,146 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { mockTeacher } from "@/lib/mockData";
+import { usePathname, useSearchParams } from "next/navigation";
+import { mockTeacher, mockDashboardStats } from "@/lib/mockData";
 
 interface Props {
   children: React.ReactNode;
 }
 
-// Primary color token: Sky Blue #29ABE2 (sesuai globals.css design token)
-const COLOR_PRIMARY = "#29ABE2";
-const COLOR_PRIMARY_DARK = "#0EA5E9";
-const COLOR_PRIMARY_BG = "#E0F4FD";
-const COLOR_PRIMARY_TEXT = "#0369A1";
-const SIDEBAR_W = 240;
+// Unified Design Tokens (Spec §7)
+const T = {
+  bgPage: "#F6F8FB",
+  bgCard: "#FFFFFF",
+  bgSubtle: "#F0F3F8",
+  border: "#E1E6ED",
+  textPrimary: "#172033",
+  textSecondary: "#5B6778",
+  primary: "#1B76BF",
+  primaryHover: "#155E99",
+  primaryTint: "#E6F1FA",
+  success: "#177A4B",
+  danger: "#C73E3E",
+  dangerBg: "#FCE9E9",
+  radiusCard: "8px",
+  radiusControl: "8px",
+  sidebarWidth: 248,
+};
 
 export default function DashboardShell({ children }: Props) {
   const pathname = usePathname();
-  const [examOpen, setExamOpen] = useState(true);
+  const searchParams = useSearchParams();
+  const filterParam = searchParams ? searchParams.get("filter") : null;
   const [userMenuOpen, setUserMenuOpen] = useState(false);
 
-  const isActive = (href: string) => pathname === href;
-  const isExamActive = pathname.startsWith("/dashboard/exams");
-  const isBankSoalActive = pathname.startsWith("/dashboard/question-bank");
-  const isMonitorActive = pathname.includes("/monitor") || pathname.includes("/live-feed");
-  const isResultsActive = pathname.includes("/results");
+  // Exact route matching: each route owns exactly ONE nav item (Spec §2 #6, §4.1)
+  const isResults = pathname.includes("/results") || (pathname === "/dashboard" && filterParam === "ended");
+  const isMonitor = pathname.includes("/monitor") || pathname.includes("/live-feed");
+  const isQuestionBank = pathname.startsWith("/dashboard/question-bank");
+  const isExamRoute = (pathname === "/dashboard/exams" || pathname.startsWith("/dashboard/exams/")) && !isMonitor && !isResults;
+  const isDashboard = pathname === "/dashboard" && !filterParam && !isResults;
+
+  const activeCount = mockDashboardStats.activeExams;
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh", background: "#EDF6FC", fontFamily: "var(--font-family)" }}>
-      {/* ====== SIDEBAR ====== */}
+    <div
+      style={{
+        display: "flex",
+        minHeight: "100vh",
+        background: T.bgPage,
+        fontFamily: "var(--font-family, 'Poppins', sans-serif)",
+      }}
+    >
+      <style>{`
+        .sidebar-nav-link {
+          display: flex;
+          align-items: center;
+          height: 40px;
+          margin: 2px 8px;
+          padding: 0 12px;
+          border-radius: ${T.radiusControl};
+          text-decoration: none;
+          color: ${T.textSecondary};
+          font-size: 14px;
+          font-weight: 500;
+          transition: background-color 150ms ease, color 150ms ease;
+          outline: none;
+        }
+        .sidebar-nav-link:hover {
+          background-color: ${T.bgSubtle};
+          color: ${T.textPrimary};
+        }
+        .sidebar-nav-link:focus-visible {
+          outline: 2px solid ${T.primary};
+          outline-offset: 2px;
+        }
+        .sidebar-nav-link.active {
+          background-color: ${T.primaryTint};
+          color: ${T.primary};
+          font-weight: 600;
+        }
+        .sidebar-nav-link.active svg {
+          stroke: ${T.primary};
+        }
+        .user-chip-btn {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          width: 100%;
+          padding: 8px;
+          background: transparent;
+          border: none;
+          border-radius: ${T.radiusControl};
+          cursor: pointer;
+          text-align: left;
+          transition: background-color 150ms ease;
+          outline: none;
+        }
+        .user-chip-btn:hover {
+          background-color: ${T.bgSubtle};
+        }
+        .user-chip-btn:focus-visible {
+          outline: 2px solid ${T.primary};
+          outline-offset: 2px;
+        }
+        .user-menu-item {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          padding: 8px 12px;
+          font-size: 13px;
+          color: ${T.textPrimary};
+          text-decoration: none;
+          border-radius: 6px;
+          transition: background-color 120ms ease;
+          outline: none;
+          border: none;
+          width: 100%;
+          background: transparent;
+          cursor: pointer;
+          text-align: left;
+        }
+        .user-menu-item:hover {
+          background-color: ${T.bgSubtle};
+        }
+        .user-menu-item:focus-visible {
+          outline: 2px solid ${T.primary};
+          outline-offset: 1px;
+        }
+        .user-menu-item.danger {
+          color: ${T.danger};
+        }
+        .user-menu-item.danger:hover {
+          background-color: ${T.dangerBg};
+        }
+      `}</style>
+
+      {/* ====== SIDEBAR (248 px, white, 1px right border, full height fixed) ====== */}
       <aside
         style={{
-          width: `${SIDEBAR_W}px`,
-          background: "#FFFFFF",
-          borderRight: "1px solid #E2E8F0",
+          width: `${T.sidebarWidth}px`,
+          background: T.bgCard,
+          borderRight: `1px solid ${T.border}`,
           display: "flex",
           flexDirection: "column",
           position: "fixed",
@@ -42,519 +149,419 @@ export default function DashboardShell({ children }: Props) {
           top: 0,
           bottom: 0,
           zIndex: 100,
-          overflowY: "auto",
-          overflowX: "hidden",
         }}
       >
-        {/* Brand Header */}
-        <div style={{ padding: "18px 20px 14px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <Link href="/dashboard" style={{ display: "flex", alignItems: "center", gap: "10px", textDecoration: "none" }}>
-            <div
-              style={{
-                width: "36px",
-                height: "36px",
-                background: `linear-gradient(135deg, ${COLOR_PRIMARY}, ${COLOR_PRIMARY_DARK})`,
-                borderRadius: "6px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: "18px",
-                boxShadow: `0 2px 6px rgba(41, 171, 226, 0.22), 0 1px 2px rgba(41, 171, 226, 0.14)`,
-                color: "#FFFFFF",
-              }}
-            >
-              🔒
-            </div>
-            <div>
-              <div style={{ fontSize: "16px", fontWeight: 800, color: "#0F172A", letterSpacing: "-0.02em" }}>LockIt</div>
-              <div style={{ fontSize: "11px", fontWeight: 500, color: "#64748B" }}>Proctoring Platform</div>
-            </div>
-          </Link>
-        </div>
-
-
-        {/* Nav Items Container */}
-        <nav style={{ flex: 1, display: "flex", flexDirection: "column" }}>
-          {/* SECTION HEADER: MAIN */}
-          <div style={{ fontSize: "11px", fontWeight: 700, color: "#94A3B8", textTransform: "uppercase", letterSpacing: "0.06em", padding: "6px 20px 6px" }}>
-            MAIN
-          </div>
-
-          {/* 1. Dashboard */}
-          {(() => {
-            const active = isActive("/dashboard") && !isExamActive;
-            return (
-              <Link
-                href="/dashboard"
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  width: "100%",
-                  height: "46px",
-                  padding: "0 20px",
-                  position: "relative",
-                  background: active ? COLOR_PRIMARY_BG : "transparent",
-                  color: active ? COLOR_PRIMARY_TEXT : "#475569",
-                  textDecoration: "none",
-                  transition: "background 0.15s ease, color 0.15s ease",
-                }}
-              >
-                {active && (
-                  <div
-                    style={{
-                      position: "absolute",
-                      left: 0, top: 0, bottom: 0,
-                      width: "4px",
-                      background: COLOR_PRIMARY,
-                    }}
-                  />
-                )}
-                <div
-                  style={{
-                    width: "24px",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    marginRight: "12px",
-                    color: active ? COLOR_PRIMARY : "#94A3B8",
-                    flexShrink: 0,
-                  }}
-                >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                    <rect x="3" y="3" width="7.5" height="7.5" rx="2" />
-                    <rect x="13.5" y="3" width="7.5" height="7.5" rx="2" />
-                    <rect x="3" y="13.5" width="7.5" height="7.5" rx="2" />
-                    <rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2" />
-                  </svg>
-                </div>
-                <span style={{ fontSize: "14px", fontWeight: active ? 600 : 500, letterSpacing: "-0.01em" }}>
-                  Dashboard
-                </span>
-              </Link>
-            );
-          })()}
-
-          {/* 2. Ujian (Collapsible) */}
-          <div>
-            {(() => {
-              const active = isExamActive;
-              return (
-                <button
-                  onClick={() => setExamOpen((prev) => !prev)}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    width: "100%",
-                    height: "46px",
-                    padding: "0 20px",
-                    position: "relative",
-                    background: active ? COLOR_PRIMARY_BG : "transparent",
-                    color: active ? COLOR_PRIMARY_TEXT : "#475569",
-                    border: "none",
-                    cursor: "pointer",
-                    textAlign: "left",
-                    transition: "background 0.15s ease, color 0.15s ease",
-                  }}
-                >
-                  {active && (
-                    <div
-                      style={{
-                        position: "absolute",
-                        left: 0, top: 0, bottom: 0,
-                        width: "4px",
-                        background: COLOR_PRIMARY,
-                      }}
-                    />
-                  )}
-                  <div style={{ display: "flex", alignItems: "center" }}>
-                    <div
-                      style={{
-                        width: "24px",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        marginRight: "12px",
-                        color: active ? COLOR_PRIMARY : "#94A3B8",
-                        flexShrink: 0,
-                      }}
-                    >
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <rect x="3" y="4" width="18" height="18" rx="2" />
-                        <line x1="16" y1="2" x2="16" y2="6" />
-                        <line x1="8" y1="2" x2="8" y2="6" />
-                        <line x1="3" y1="10" x2="21" y2="10" />
-                        <path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01M16 18h.01" />
-                      </svg>
-                    </div>
-                    <span style={{ fontSize: "14px", fontWeight: active ? 600 : 500, letterSpacing: "-0.01em" }}>
-                      Ujian
-                    </span>
-                  </div>
-                  <svg
-                    width="14"
-                    height="14"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke={active ? COLOR_PRIMARY : "#94A3B8"}
-                    strokeWidth="2.2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    style={{
-                      transition: "transform 0.2s ease",
-                      transform: examOpen ? "rotate(180deg)" : "rotate(0deg)",
-                    }}
-                  >
-                    <polyline points="6 9 12 15 18 9" />
-                  </svg>
-                </button>
-              );
-            })()}
-
-            {/* Sub-items Ujian */}
-            {examOpen && (
-              <div style={{ background: "#F8FAFC", borderTop: "1px solid #F1F5F9", borderBottom: "1px solid #F1F5F9" }}>
-                <Link
-                  href="/dashboard"
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    height: "38px",
-                    padding: "0 20px 0 46px",
-                    position: "relative",
-                    background: isActive("/dashboard") && !isExamActive ? COLOR_PRIMARY_BG : "transparent",
-                    color: isActive("/dashboard") && !isExamActive ? COLOR_PRIMARY_TEXT : "#64748B",
-                    fontSize: "13px",
-                    fontWeight: isActive("/dashboard") && !isExamActive ? 600 : 500,
-                    textDecoration: "none",
-                  }}
-                >
-                  {isActive("/dashboard") && !isExamActive && (
-                    <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: "4px", background: COLOR_PRIMARY }} />
-                  )}
-                  <span
-                    style={{
-                      width: "6px",
-                      height: "6px",
-                      borderRadius: "50%",
-                      background: isActive("/dashboard") && !isExamActive ? COLOR_PRIMARY : "#CBD5E1",
-                      marginRight: "10px",
-                    }}
-                  />
-                  <span>Semua Ujian</span>
-                </Link>
-
-                <Link
-                  href="/dashboard/exams/new"
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    height: "38px",
-                    padding: "0 20px 0 46px",
-                    position: "relative",
-                    background: isActive("/dashboard/exams/new") ? COLOR_PRIMARY_BG : "transparent",
-                    color: isActive("/dashboard/exams/new") ? COLOR_PRIMARY_TEXT : "#64748B",
-                    fontSize: "13px",
-                    fontWeight: isActive("/dashboard/exams/new") ? 600 : 500,
-                    textDecoration: "none",
-                  }}
-                >
-                  {isActive("/dashboard/exams/new") && (
-                    <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: "4px", background: COLOR_PRIMARY }} />
-                  )}
-                  <span
-                    style={{
-                      width: "6px",
-                      height: "6px",
-                      borderRadius: "50%",
-                      background: isActive("/dashboard/exams/new") ? COLOR_PRIMARY : "#CBD5E1",
-                      marginRight: "10px",
-                    }}
-                  />
-                  <span>+ Buat Ujian</span>
-                </Link>
-              </div>
-            )}
-          </div>
-
-          {/* SECTION HEADER: KONTEN */}
-          <div style={{ fontSize: "11px", fontWeight: 700, color: "#94A3B8", textTransform: "uppercase", letterSpacing: "0.06em", padding: "16px 20px 6px" }}>
-            KONTEN
-          </div>
-
-          {/* Bank Soal */}
-          {(() => {
-            const active = isBankSoalActive;
-            return (
-              <Link
-                href="/dashboard/question-bank"
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  width: "100%",
-                  height: "46px",
-                  padding: "0 20px",
-                  position: "relative",
-                  background: active ? COLOR_PRIMARY_BG : "transparent",
-                  color: active ? COLOR_PRIMARY_TEXT : "#475569",
-                  textDecoration: "none",
-                  transition: "background 0.15s ease, color 0.15s ease",
-                }}
-              >
-                {active && (
-                  <div
-                    style={{
-                      position: "absolute",
-                      left: 0, top: 0, bottom: 0,
-                      width: "4px",
-                      background: COLOR_PRIMARY,
-                    }}
-                  />
-                )}
-                <div
-                  style={{
-                    width: "24px",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    marginRight: "12px",
-                    color: active ? COLOR_PRIMARY : "#94A3B8",
-                    flexShrink: 0,
-                  }}
-                >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <ellipse cx="12" cy="5" rx="9" ry="3" />
-                    <path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5" />
-                    <path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3" />
-                  </svg>
-                </div>
-                <span style={{ fontSize: "14px", fontWeight: active ? 600 : 500, letterSpacing: "-0.01em" }}>
-                  Bank Soal
-                </span>
-              </Link>
-            );
-          })()}
-
-          {/* SECTION HEADER: PENGAWASAN & HASIL */}
-          <div style={{ fontSize: "11px", fontWeight: 700, color: "#94A3B8", textTransform: "uppercase", letterSpacing: "0.06em", padding: "16px 20px 6px" }}>
-            PENGAWASAN & HASIL
-          </div>
-
-          {/* 3. Monitoring Live — mengarah ke daftar ujian aktif */}
-          {(() => {
-            const active = isMonitorActive;
-            return (
-              <Link
-                href="/dashboard/exams/exam-1/monitor"
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  width: "100%",
-                  height: "46px",
-                  padding: "0 20px",
-                  position: "relative",
-                  background: active ? COLOR_PRIMARY_BG : "transparent",
-                  color: active ? COLOR_PRIMARY_TEXT : "#475569",
-                  textDecoration: "none",
-                  transition: "background 0.15s ease, color 0.15s ease",
-                }}
-              >
-                {active && (
-                  <div
-                    style={{
-                      position: "absolute",
-                      left: 0, top: 0, bottom: 0,
-                      width: "4px",
-                      background: COLOR_PRIMARY,
-                    }}
-                  />
-                )}
-                <div
-                  style={{
-                    width: "24px",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    marginRight: "12px",
-                    color: active ? COLOR_PRIMARY : "#94A3B8",
-                    flexShrink: 0,
-                  }}
-                >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-                  </svg>
-                </div>
-                <span style={{ fontSize: "14px", fontWeight: active ? 600 : 500, letterSpacing: "-0.01em" }}>
-                  Monitoring Live
-                </span>
-                {/* Badge "Buka ujian aktif" hint */}
-                <span style={{
-                  marginLeft: "auto",
-                  fontSize: "10px",
-                  color: "#94A3B8",
-                  background: "#F1F5F9",
-                  padding: "2px 6px",
-                  borderRadius: "4px",
-                  whiteSpace: "nowrap",
-                }}>
-                  Ujian aktif
-                </span>
-              </Link>
-            );
-          })()}
-
-          {/* 4. Rekap Hasil — mengarah ke daftar ujian selesai */}
-          {(() => {
-            const active = isResultsActive;
-            return (
-              <Link
-                href="/dashboard?filter=ended"
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  width: "100%",
-                  height: "46px",
-                  padding: "0 20px",
-                  position: "relative",
-                  background: active ? COLOR_PRIMARY_BG : "transparent",
-                  color: active ? COLOR_PRIMARY_TEXT : "#475569",
-                  textDecoration: "none",
-                  transition: "background 0.15s ease, color 0.15s ease",
-                }}
-              >
-                {active && (
-                  <div
-                    style={{
-                      position: "absolute",
-                      left: 0, top: 0, bottom: 0,
-                      width: "4px",
-                      background: COLOR_PRIMARY,
-                    }}
-                  />
-                )}
-                <div
-                  style={{
-                    width: "24px",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    marginRight: "12px",
-                    color: active ? COLOR_PRIMARY : "#94A3B8",
-                    flexShrink: 0,
-                  }}
-                >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                    <path
-                      fillRule="evenodd"
-                      d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm1 5a1 1 0 10-2 0v5a1 1 0 00.4.8l3 2.25a1 1 0 101.2-1.6L13 11.55V7z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                </div>
-                <span style={{ fontSize: "14px", fontWeight: active ? 600 : 500, letterSpacing: "-0.01em" }}>
-                  Rekap Hasil
-                </span>
-                <span style={{
-                  marginLeft: "auto",
-                  fontSize: "10px",
-                  color: "#94A3B8",
-                  background: "#F1F5F9",
-                  padding: "2px 6px",
-                  borderRadius: "4px",
-                  whiteSpace: "nowrap",
-                }}>
-                  Selesai
-                </span>
-              </Link>
-            );
-          })()}
-        </nav>
-
-        {/* User Card at Bottom */}
-        <div style={{ padding: "14px 16px", borderTop: "1px solid #E2E8F0", background: "#FFFFFF", position: "relative" }}>
-          <div
-            onClick={() => setUserMenuOpen((s) => !s)}
+        {/* Brand Header (Height: 72px per spec §4.1) */}
+        <div
+          style={{
+            height: "72px",
+            padding: "0 20px",
+            display: "flex",
+            alignItems: "center",
+            borderBottom: `1px solid ${T.border}`,
+            flexShrink: 0,
+          }}
+        >
+          <Link
+            href="/dashboard"
             style={{
               display: "flex",
               alignItems: "center",
               gap: "10px",
-              cursor: "pointer",
-              padding: "6px 8px",
-              borderRadius: "6px",
-              transition: "background 0.15s ease",
+              textDecoration: "none",
+              outline: "none",
             }}
+            aria-label="LockIt Dashboard"
           >
+            {/* 32px rounded square in --primary with white line lock mark (SVG, not emoji) */}
             <div
               style={{
-                width: "36px",
-                height: "36px",
-                borderRadius: "6px",
-                background: `linear-gradient(135deg, ${COLOR_PRIMARY}, ${COLOR_PRIMARY_DARK})`,
+                width: "32px",
+                height: "32px",
+                background: T.primary,
+                borderRadius: "8px",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                color: "white",
-                fontWeight: 700,
+                flexShrink: 0,
+              }}
+            >
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="#FFFFFF"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+              </svg>
+            </div>
+            <div>
+              <div
+                style={{
+                  fontSize: "16px",
+                  fontWeight: 600,
+                  color: T.textPrimary,
+                  letterSpacing: "-0.01em",
+                  lineHeight: "20px",
+                }}
+              >
+                LockIt
+              </div>
+              <div
+                style={{
+                  fontSize: "12px",
+                  fontWeight: 400,
+                  color: T.textSecondary,
+                  lineHeight: "16px",
+                }}
+              >
+                Proctoring platform
+              </div>
+            </div>
+          </Link>
+        </div>
+
+        {/* Navigation list */}
+        <nav
+          aria-label="Menu utama"
+          style={{
+            flex: 1,
+            display: "flex",
+            flexDirection: "column",
+            paddingTop: "12px",
+            paddingBottom: "12px",
+            overflowY: "auto",
+          }}
+        >
+          {/* GROUP: Utama */}
+          <div
+            style={{
+              fontSize: "12px",
+              fontWeight: 600,
+              color: T.textSecondary,
+              padding: "8px 20px 4px",
+              lineHeight: "18px",
+            }}
+          >
+            Utama
+          </div>
+
+          {/* 1. Dashboard */}
+          <Link
+            href="/dashboard"
+            className={`sidebar-nav-link ${isDashboard ? "active" : ""}`}
+            aria-current={isDashboard ? "page" : undefined}
+          >
+            <span style={{ width: "18px", height: "18px", marginRight: "12px", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <rect x="3" y="3" width="7" height="7" rx="1" />
+                <rect x="14" y="3" width="7" height="7" rx="1" />
+                <rect x="14" y="14" width="7" height="7" rx="1" />
+                <rect x="3" y="14" width="7" height="7" rx="1" />
+              </svg>
+            </span>
+            <span style={{ flex: 1 }}>Dashboard</span>
+          </Link>
+
+          {/* 2. Ujian (single item, no accordion per spec §4.1) */}
+          <Link
+            href="/dashboard/exams"
+            className={`sidebar-nav-link ${isExamRoute ? "active" : ""}`}
+            aria-current={isExamRoute ? "page" : undefined}
+          >
+            <span style={{ width: "18px", height: "18px", marginRight: "12px", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+                <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
+                <path d="M9 12h6" />
+                <path d="M9 16h6" />
+              </svg>
+            </span>
+            <span style={{ flex: 1 }}>Ujian</span>
+          </Link>
+
+          {/* GROUP: Konten */}
+          <div
+            style={{
+              fontSize: "12px",
+              fontWeight: 600,
+              color: T.textSecondary,
+              padding: "16px 20px 4px",
+              lineHeight: "18px",
+            }}
+          >
+            Konten
+          </div>
+
+          {/* 3. Bank soal */}
+          <Link
+            href="/dashboard/question-bank"
+            className={`sidebar-nav-link ${isQuestionBank ? "active" : ""}`}
+            aria-current={isQuestionBank ? "page" : undefined}
+          >
+            <span style={{ width: "18px", height: "18px", marginRight: "12px", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                <line x1="9" y1="7" x2="15" y2="7" />
+                <line x1="9" y1="11" x2="13" y2="11" />
+              </svg>
+            </span>
+            <span style={{ flex: 1 }}>Bank soal</span>
+          </Link>
+
+          {/* GROUP: Pengawasan & hasil */}
+          <div
+            style={{
+              fontSize: "12px",
+              fontWeight: 600,
+              color: T.textSecondary,
+              padding: "16px 20px 4px",
+              lineHeight: "18px",
+            }}
+          >
+            Pengawasan & hasil
+          </div>
+
+          {/* 4. Monitoring live */}
+          <Link
+            href="/dashboard/exams/exam-1/monitor"
+            className={`sidebar-nav-link ${isMonitor ? "active" : ""}`}
+            aria-current={isMonitor ? "page" : undefined}
+          >
+            <span style={{ width: "18px", height: "18px", marginRight: "12px", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+              </svg>
+            </span>
+            <span style={{ flex: 1, whiteSpace: "nowrap" }}>Monitoring live</span>
+
+            {/* Badge: dot + count only, right-aligned, hidden at 0 per spec §4.1 */}
+            {activeCount > 0 && (
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "5px",
+                  marginLeft: "auto",
+                  padding: "1px 6px",
+                  borderRadius: "10px",
+                  background: isMonitor ? "rgba(27,118,191,0.12)" : T.bgSubtle,
+                  flexShrink: 0,
+                }}
+                aria-label={`${activeCount} ujian aktif`}
+              >
+                <span
+                  style={{
+                    width: "6px",
+                    height: "6px",
+                    borderRadius: "50%",
+                    background: T.success,
+                    display: "inline-block",
+                  }}
+                />
+                <span
+                  style={{
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    color: isMonitor ? T.primary : T.textSecondary,
+                    lineHeight: 1,
+                  }}
+                >
+                  {activeCount}
+                </span>
+              </span>
+            )}
+          </Link>
+
+          {/* 5. Rekap hasil */}
+          <Link
+            href="/dashboard?filter=ended"
+            className={`sidebar-nav-link ${isResults ? "active" : ""}`}
+            aria-current={isResults ? "page" : undefined}
+          >
+            <span style={{ width: "18px", height: "18px", marginRight: "12px", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <line x1="18" y1="20" x2="18" y2="10" />
+                <line x1="12" y1="20" x2="12" y2="4" />
+                <line x1="6" y1="20" x2="6" y2="14" />
+              </svg>
+            </span>
+            <span style={{ flex: 1 }}>Rekap hasil</span>
+          </Link>
+        </nav>
+
+        {/* User Chip at bottom (Spec §4.1) */}
+        <div
+          style={{
+            padding: "12px",
+            borderTop: `1px solid ${T.border}`,
+            background: T.bgCard,
+            position: "relative",
+            flexShrink: 0,
+          }}
+        >
+          <button
+            type="button"
+            className="user-chip-btn"
+            onClick={() => setUserMenuOpen((s) => !s)}
+            aria-expanded={userMenuOpen}
+            aria-haspopup="true"
+            aria-label={`Menu pengguna ${mockTeacher.name}`}
+          >
+            {/* 32px avatar */}
+            <div
+              style={{
+                width: "32px",
+                height: "32px",
+                borderRadius: "8px",
+                background: T.primary,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "#FFFFFF",
+                fontWeight: 600,
                 fontSize: "13px",
                 flexShrink: 0,
               }}
             >
               {mockTeacher.initials}
             </div>
+
+            {/* Name & email with ellipsis + title attribute */}
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: "13px", fontWeight: 600, color: "#0F172A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <div
+                title={mockTeacher.name}
+                style={{
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  color: T.textPrimary,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  lineHeight: "18px",
+                }}
+              >
                 {mockTeacher.name}
               </div>
-              <div style={{ fontSize: "11px", color: "#64748B", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <div
+                title={mockTeacher.email}
+                style={{
+                  fontSize: "12px",
+                  color: T.textSecondary,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  lineHeight: "16px",
+                }}
+              >
                 {mockTeacher.email}
               </div>
             </div>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94A3B8" strokeWidth="2">
-              <path d="M6 9l6 6 6-6" />
-            </svg>
-          </div>
 
+            {/* Chevron icon */}
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke={T.textSecondary}
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              style={{
+                transition: "transform 150ms ease",
+                transform: userMenuOpen ? "rotate(180deg)" : "rotate(0deg)",
+                flexShrink: 0,
+              }}
+              aria-hidden="true"
+            >
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </button>
+
+          {/* User Popover Menu */}
           {userMenuOpen && (
             <div
+              role="menu"
               style={{
                 position: "absolute",
-                bottom: "calc(100% + 6px)",
-                left: "14px",
-                right: "14px",
-                background: "white",
-                border: "1px solid rgba(15,30,40,0.06)",
-                borderRadius: "8px",
-                boxShadow: "0 8px 24px rgba(15,30,40,0.14), 0 2px 8px rgba(15,30,40,0.08), 0 0 0 1px rgba(15,30,40,0.04)",
+                bottom: "calc(100% + 8px)",
+                left: "12px",
+                right: "12px",
+                background: T.bgCard,
+                border: `1px solid ${T.border}`,
+                borderRadius: T.radiusCard,
+                boxShadow: "0 4px 16px rgba(20,24,40,0.12)",
                 padding: "6px",
                 zIndex: 200,
               }}
             >
-              <div style={{ padding: "8px 10px 6px", borderBottom: "1px solid #F1F5F9", marginBottom: "4px" }}>
-                <div style={{ fontSize: "12px", fontWeight: 700, color: "#0F172A" }}>{mockTeacher.name}</div>
-                <div style={{ fontSize: "11px", color: "#64748B" }}>Dosen Pengampu</div>
+              <div style={{ padding: "8px 12px 6px", borderBottom: `1px solid ${T.border}`, marginBottom: "4px" }}>
+                <div style={{ fontSize: "12px", fontWeight: 600, color: T.textPrimary }}>{mockTeacher.name}</div>
+                <div style={{ fontSize: "11px", color: T.textSecondary }}>Dosen Pengampu</div>
               </div>
+
+              <button
+                type="button"
+                className="user-menu-item"
+                role="menuitem"
+                onClick={() => setUserMenuOpen(false)}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                  <circle cx="12" cy="7" r="4" />
+                </svg>
+                Profil
+              </button>
+
+              <button
+                type="button"
+                className="user-menu-item"
+                role="menuitem"
+                onClick={() => setUserMenuOpen(false)}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="3" />
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                </svg>
+                Pengaturan
+              </button>
+
               <Link
                 href="/login"
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px",
-                  padding: "8px 10px",
-                  borderRadius: "4px",
-                  color: "#E05050",
-                  fontSize: "13px",
-                  textDecoration: "none",
-                }}
+                className="user-menu-item danger"
+                role="menuitem"
+                onClick={() => setUserMenuOpen(false)}
               >
-                🚪 Keluar
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                  <polyline points="16 17 21 12 16 7" />
+                  <line x1="21" y1="12" x2="9" y2="12" />
+                </svg>
+                Keluar
               </Link>
             </div>
           )}
         </div>
       </aside>
 
-      {/* ====== MAIN ====== */}
-      <main style={{ marginLeft: `${SIDEBAR_W}px`, flex: 1, minWidth: 0 }}>
+      {/* ====== MAIN CONTENT ====== */}
+      <main
+        style={{
+          marginLeft: `${T.sidebarWidth}px`,
+          flex: 1,
+          minWidth: 0,
+          background: T.bgPage,
+          minHeight: "100vh",
+        }}
+      >
         {children}
       </main>
     </div>

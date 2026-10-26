@@ -7,6 +7,33 @@ export const mockTeacher = {
   initials: "AF",
 };
 
+export type FlagKey = "camera_off" | "out_of_frame" | "switched_tabs" | "multiple_people";
+
+export interface LiveSession {
+  examId: string;
+  title: string;
+  online: number;
+  enrolled: number;
+  endsAt: string; // ISO 8601
+  flags: Record<FlagKey, number>;
+}
+
+export const mockLiveSessions: LiveSession[] = [
+  {
+    examId: "exam-1",
+    title: "UTS Pemrograman Web 2026",
+    online: 28,
+    enrolled: 34,
+    endsAt: "2026-10-26T10:30:00+07:00",
+    flags: {
+      camera_off: 2,
+      out_of_frame: 1,
+      switched_tabs: 3,
+      multiple_people: 0,
+    },
+  },
+];
+
 export const mockExams = [
   {
     id: "exam-1",
@@ -17,13 +44,38 @@ export const mockExams = [
     questionCount: 25,
     accessCode: "WEB2026",
     createdAt: "2026-10-05",
-    totalParticipants: 42,
+    totalParticipants: 34,
+    online: 28,
+    enrolled: 34,
+    flagCount: 3,
+    endsAt: "2026-10-26T10:30:00+07:00",
     violationPolicy: {
       maxViolations: 3,
       action: "auto-lock",
       detectCopyPaste: true,
       detectRightClick: true,
       detectDevTools: false,
+    },
+    questionMode: "one-by-one" as const,
+    shuffleQuestions: true,
+  },
+  {
+    id: "exam-5",
+    title: "UAS Rekayasa Perangkat Lunak",
+    description: "Ujian Akhir Semester topik SDLC, agile, dan software testing.",
+    status: "scheduled" as const,
+    duration: 90,
+    questionCount: 30,
+    accessCode: "RPL2026",
+    createdAt: "2026-10-15",
+    startsAt: "2026-11-02T09:00:00+07:00",
+    totalParticipants: 40,
+    violationPolicy: {
+      maxViolations: 3,
+      action: "auto-lock",
+      detectCopyPaste: true,
+      detectRightClick: true,
+      detectDevTools: true,
     },
     questionMode: "one-by-one" as const,
     shuffleQuestions: true,
@@ -37,6 +89,7 @@ export const mockExams = [
     questionCount: 40,
     accessCode: "BD2026X",
     createdAt: "2026-10-08",
+    updatedAt: "2 hari lalu",
     totalParticipants: 0,
     violationPolicy: {
       maxViolations: 5,
@@ -93,8 +146,11 @@ export const mockExams = [
 export const mockDashboardStats = {
   totalExams: 12,
   activeExams: 1,
+  scheduledExams: 2,
+  draftExams: 3,
   totalParticipants: 340,
   completedExams: 9,
+  archivedExams: 1,
 };
 
 export const mockParticipants = [
