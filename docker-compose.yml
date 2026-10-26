@@ -33,7 +33,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    restart: unless-stopped
+    restart: "no"
 
   frontend:
     build:
@@ -47,7 +47,7 @@ services:
       - NEXT_PUBLIC_API_URL=http://backend:3001
     depends_on:
       - backend
-    restart: unless-stopped
+    restart: "no"
 
 volumes:
   postgres_data:
