@@ -78,3 +78,8 @@ docker-data/
 *.sqlite3
 *.db
 *.db-journal
+
+# ─── MONOREPO ROOT ───────────────────────────────────────────
+# Root node_modules dari npm workspaces
+/node_modules/
+/package-lock.json
