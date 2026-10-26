@@ -35,6 +35,6 @@ COPY --from=builder /app/node_modules ./node_modules
 
 USER nextjs
 
-EXPOSE 3001
+EXPOSE 3000
 
 CMD ["node", "-e", "require('tsx/cjs'); require('./server.ts')"]

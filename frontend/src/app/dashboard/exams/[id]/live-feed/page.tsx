@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, Suspense } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 
@@ -108,6 +108,25 @@ function formatCountdown(secs: number): string {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
+// ─── FlagDot ──────────────────────────────────────────────────────────────────
+function FlagDot({ flagKey, size = 8 }: { flagKey: FlagKey | null; size?: number }) {
+  if (!flagKey) return null;
+  const cfg = FLAG_CONFIG[flagKey];
+  return (
+    <span
+      style={{
+        width: size,
+        height: size,
+        borderRadius: "50%",
+        backgroundColor: cfg.color,
+        display: "inline-block",
+        flexShrink: 0,
+      }}
+      title={cfg.label}
+    />
+  );
+}
+
 // ─── Avatar ───────────────────────────────────────────────────────────────────
 function Avatar({ name, size, grayscale }: { name: string; size: number; grayscale?: boolean }) {
   return (
@@ -126,7 +145,12 @@ function Avatar({ name, size, grayscale }: { name: string; size: number; graysca
       }}
       aria-hidden="true"
     >
-      {getIni// ─── Student Card ────────────────────────────────────────────────────────────────
+      {getInitials(name)}
+    </div>
+  );
+}
+
+// ─── Student Card ────────────────────────────────────────────────────────────────
 function StudentCard({ student, isSelected, onClick }: {
   student: StudentFeedItem; isSelected: boolean; onClick: () => void;
 }) {
@@ -265,31 +289,6 @@ function StudentCard({ student, isSelected, onClick }: {
 
       {/* Violation label chip */}
       {topFlag && !isDimmed && (
-        <div style={{
-          marginTop: 6, fontSize: 9, fontWeight: 600, color: flagCfg?.color,
-          background: `${flagCfg?.color}18`, borderRadius: 99, padding: "1px 7px",
-          lineHeight: "15px", display: "flex", alignItems: "center", gap: 3,
-          maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-        }}>
-          <span style={{ fontSize: 9 }}>{FLAG_CONFIG[topFlag].icon}</span>
-          {FLAG_CONFIG[topFlag].label}
-        </div>
-      )}
-    </button>
-  );
-}/}
-      <div style={{
-        fontSize: 10, color: "#8A8F99",
-        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-        width: "100%", paddingInline: 4, lineHeight: 1.3,
-      }}>
-        {isOffline
-          ? <span style={{ color: "#9CA3AF", fontStyle: "italic" }}>Offline</span>
-          : `${student.identifierLabel}: ${student.identifier}`}
-      </div>
-
-      {/* Flag label chip */}
-      {topFlag && !isOffline && (
         <div style={{
           marginTop: 6, fontSize: 9, fontWeight: 600, color: flagCfg?.color,
           background: `${flagCfg?.color}18`, borderRadius: 99, padding: "1px 7px",
@@ -492,7 +491,7 @@ function DetailPanel({ student, onClose }: { student: StudentFeedItem; onClose: 
 }
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
-export default function LiveFeedPage() {
+function LiveFeedContent() {
   const params = useParams();
   const examId = (params?.id as string) ?? "1";
 
@@ -513,7 +512,7 @@ export default function LiveFeedPage() {
 
   // Simulate real-time flag changes
   useEffect(() => {
-    const allFlags: FlagKey[] = ["camera_off", "out_of_frame", "switched_tabs", "multiple_people"];
+    const allFlags: FlagKey[] = ["tab_switch", "copy_paste", "duplicate_screen", "right_click", "fullscreen_exit", "devtools_open"];
     const interval = setInterval(() => {
       setStudents((prev) => {
         const idx = Math.floor(Math.random() * prev.length);
@@ -847,5 +846,13 @@ export default function LiveFeedPage() {
         }
       `}</style>
     </div>
+  );
+}
+
+export default function LiveFeedPage() {
+  return (
+    <Suspense fallback={<div style={{ padding: 24, textAlign: "center" }}>Memuat Live Feed...</div>}>
+      <LiveFeedContent />
+    </Suspense>
   );
 }

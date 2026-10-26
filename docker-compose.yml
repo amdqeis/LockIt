@@ -23,12 +23,12 @@ services:
       dockerfile: Dockerfile
     container_name: lockit-backend
     ports:
-      - "3001:3001"
+      - "3000:3000"
     env_file:
       - ./backend/.env
     environment:
       - NODE_ENV=production
-      - PORT=3001
+      - PORT=3000
       - DATABASE_URL=postgresql://lockit_user:lockit_password@postgres:5432/lockit_db?schema=public
     depends_on:
       postgres:
@@ -41,10 +41,10 @@ services:
       dockerfile: Dockerfile
     container_name: lockit-frontend
     ports:
-      - "3000:3000"
+      - "3001:3000"
     environment:
       - NODE_ENV=production
-      - NEXT_PUBLIC_API_URL=http://backend:3001
+      - NEXT_PUBLIC_API_URL=http://backend:3000
     depends_on:
       - backend
     restart: "no"
