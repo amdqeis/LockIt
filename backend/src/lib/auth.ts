@@ -15,6 +15,7 @@ export interface TeacherJwtPayload {
   teacherId: string;
   email: string;
   fullName: string;
+  role: "TEACHER" | "ADMIN";  // RBAC — wajib ada di setiap access token
 }
 
 export interface StudentTokenPayload {

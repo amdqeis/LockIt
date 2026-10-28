@@ -16,7 +16,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       include: { _count: { select: { questions: true } } },
     });
 
-    if (!exam || exam.teacherId !== teacher.teacherId) {
+    if (!exam || (teacher.role !== "ADMIN" && exam.teacherId !== teacher.teacherId)) {
       return errorResponse("NOT_FOUND", "Ujian tidak ditemukan", 404);
     }
 

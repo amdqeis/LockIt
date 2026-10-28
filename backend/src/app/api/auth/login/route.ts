@@ -57,17 +57,24 @@ export async function POST(req: NextRequest) {
       return errorResponse("INVALID_CREDENTIALS", "Email atau password salah", 401);
     }
 
+    // Guard: akun dinonaktifkan oleh Admin
+    if (!teacher.isActive) {
+      log.warn("Login rejected: account inactive", { email });
+      return errorResponse("ACCOUNT_INACTIVE", "Akun Anda telah dinonaktifkan. Hubungi administrator institusi.", 403);
+    }
+
     const passwordValid = await verifyPassword(password, teacher.passwordHash);
     if (!passwordValid) {
       log.warn("Login failed: wrong password", { email });
       return errorResponse("INVALID_CREDENTIALS", "Email atau password salah", 401);
     }
 
-    // 1. Generate Access Token (15 min)
+    // 1. Generate Access Token (15 min) — sertakan role untuk RBAC
     const accessToken = generateAccessToken({
       teacherId: teacher.id,
       email: teacher.email,
       fullName: teacher.fullName,
+      role: teacher.role,
     });
 
     // 2. Generate Refresh Token (7 days)
@@ -83,12 +90,20 @@ export async function POST(req: NextRequest) {
       },
     });
 
+    // Update lastLoginAt secara async (non-blocking — tidak perlu await)
+    prisma.teacher.update({
+      where: { id: teacher.id },
+      data: { lastLoginAt: new Date() },
+    }).catch((e) => log.warn("Failed to update lastLoginAt", { err: e?.message }));
+
     const response = successResponse({
       accessToken,
       teacher: {
         id: teacher.id,
         email: teacher.email,
         fullName: teacher.fullName,
+        role: teacher.role,
+        isActive: teacher.isActive,
       },
     });
 

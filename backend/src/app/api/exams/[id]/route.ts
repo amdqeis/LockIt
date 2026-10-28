@@ -44,7 +44,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       },
     });
 
-    if (!exam || exam.teacherId !== teacher.teacherId) {
+    // RBAC: ADMIN bypass ownership; TEACHER hanya bisa akses ujiannya sendiri
+    if (!exam || (teacher.role !== "ADMIN" && exam.teacherId !== teacher.teacherId)) {
       return errorResponse("NOT_FOUND", "Ujian tidak ditemukan", 404);
     }
 
@@ -67,7 +68,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       include: { _count: { select: { students: true } } },
     });
 
-    if (!exam || exam.teacherId !== teacher.teacherId) {
+    // RBAC: ADMIN bypass ownership
+    if (!exam || (teacher.role !== "ADMIN" && exam.teacherId !== teacher.teacherId)) {
       return errorResponse("NOT_FOUND", "Ujian tidak ditemukan", 404);
     }
 
@@ -134,7 +136,8 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       include: { _count: { select: { students: true } } },
     });
 
-    if (!exam || exam.teacherId !== teacher.teacherId) {
+    // RBAC: ADMIN bypass ownership
+    if (!exam || (teacher.role !== "ADMIN" && exam.teacherId !== teacher.teacherId)) {
       return errorResponse("NOT_FOUND", "Ujian tidak ditemukan", 404);
     }
 

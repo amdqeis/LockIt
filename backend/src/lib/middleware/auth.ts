@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { verifyAccessToken, verifyStudentSessionToken, hashStudentToken, TeacherJwtPayload, StudentTokenPayload } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { UnauthorizedError } from "@/lib/errors";
+import { UnauthorizedError, ForbiddenError } from "@/lib/errors";
 
 export async function authenticateTeacher(req: NextRequest): Promise<TeacherJwtPayload> {
   const authHeader = req.headers.get("authorization");
@@ -24,6 +24,20 @@ export async function authenticateTeacher(req: NextRequest): Promise<TeacherJwtP
 
   return payload;
 }
+
+// ─── RBAC GUARD ──────────────────────────────────────────────────────────────
+// Role diambil dari JWT (di-sign server) — tidak bisa ditamper client.
+// Tidak butuh DB lookup tambahan sehingga latency guard ini minimal.
+
+export async function requireAdmin(req: NextRequest): Promise<TeacherJwtPayload> {
+  const payload = await authenticateTeacher(req);
+  if (payload.role !== "ADMIN") {
+    throw new ForbiddenError("Akses hanya untuk Administrator.");
+  }
+  return payload;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 export async function authenticateStudent(req: NextRequest): Promise<{ student: any; payload: StudentTokenPayload }> {
   const cookieToken = req.cookies.get("studentSession")?.value;
@@ -56,4 +70,3 @@ export async function authenticateStudent(req: NextRequest): Promise<{ student: 
 
   return { student, payload };
 }
-

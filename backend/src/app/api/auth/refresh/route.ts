@@ -29,6 +29,14 @@ export async function POST(req: NextRequest) {
       return response;
     }
 
+    // Guard: akun dinonaktifkan oleh Admin
+    if (!storedToken.teacher.isActive) {
+      const response = errorResponse("ACCOUNT_INACTIVE", "Akun telah dinonaktifkan. Hubungi administrator.", 403);
+      response.cookies.delete("refreshToken");
+      response.cookies.delete("hasTeacherSession");
+      return response;
+    }
+
     // 1. Revoke old token
     await prisma.refreshToken.update({
       where: { id: storedToken.id },
@@ -50,8 +58,9 @@ export async function POST(req: NextRequest) {
 
     const newAccessToken = generateAccessToken({
       teacherId: storedToken.teacher.id,
-      email: storedToken.teacher.email,
-      fullName: storedToken.teacher.fullName,
+      email:     storedToken.teacher.email,
+      fullName:  storedToken.teacher.fullName,
+      role:      storedToken.teacher.role,
     });
 
     const response = successResponse({

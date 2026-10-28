@@ -53,6 +53,11 @@ function DashboardShellInner({ children }: Props) {
   const isQuestionBank = pathname.startsWith("/dashboard/question-bank");
   const isExamRoute = (pathname === "/dashboard/exams" || pathname.startsWith("/dashboard/exams/")) && !isMonitor && !isResults;
   const isDashboard = pathname === "/dashboard" && !filterParam && !isResults;
+  const isAdminTeachers = pathname.startsWith("/dashboard/admin/teachers");
+  const isProfile = pathname === "/dashboard/profile";
+
+  // RBAC: tampilkan menu Admin hanya untuk role ADMIN
+  const isAdmin = teacher?.role === "ADMIN";
 
   const activeCount = 1;
 
@@ -408,6 +413,39 @@ function DashboardShellInner({ children }: Props) {
             </span>
             <span style={{ flex: 1 }}>Rekap hasil</span>
           </Link>
+
+          {/* GROUP: Administrasi — hanya tampil untuk ADMIN */}
+          {isAdmin && (
+            <>
+              <div
+                style={{
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  color: T.textSecondary,
+                  padding: "16px 20px 4px",
+                  lineHeight: "18px",
+                }}
+              >
+                Administrasi
+              </div>
+
+              <Link
+                href="/dashboard/admin/teachers"
+                className={`sidebar-nav-link ${isAdminTeachers ? "active" : ""}`}
+                aria-current={isAdminTeachers ? "page" : undefined}
+              >
+                <span style={{ width: "18px", height: "18px", marginRight: "12px", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                    <circle cx="9" cy="7" r="4" />
+                    <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                    <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                  </svg>
+                </span>
+                <span style={{ flex: 1 }}>Manajemen guru</span>
+              </Link>
+            </>
+          )}
         </nav>
 
         {/* User Chip at bottom (Spec §4.1) */}
@@ -518,11 +556,27 @@ function DashboardShellInner({ children }: Props) {
             >
               <div style={{ padding: "8px 12px 6px", borderBottom: `1px solid ${T.border}`, marginBottom: "4px" }}>
                 <div style={{ fontSize: "12px", fontWeight: 600, color: T.textPrimary }}>{teacherName}</div>
-                <div style={{ fontSize: "11px", color: T.textSecondary }}>Dosen Pengampu</div>
+                <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "2px" }}>
+                  <div style={{ fontSize: "11px", color: T.textSecondary }}>
+                    {isAdmin ? "Administrator" : "Guru"}
+                  </div>
+                  {isAdmin && (
+                    <span style={{
+                      fontSize: "10px",
+                      fontWeight: 700,
+                      padding: "1px 5px",
+                      borderRadius: "4px",
+                      background: T.primary,
+                      color: "#fff",
+                      letterSpacing: "0.03em",
+                      lineHeight: "16px",
+                    }}>ADMIN</span>
+                  )}
+                </div>
               </div>
 
-              <button
-                type="button"
+              <Link
+                href="/dashboard/profile"
                 className="user-menu-item"
                 role="menuitem"
                 onClick={() => setUserMenuOpen(false)}
@@ -531,8 +585,8 @@ function DashboardShellInner({ children }: Props) {
                   <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
                   <circle cx="12" cy="7" r="4" />
                 </svg>
-                Profil
-              </button>
+                Profil saya
+              </Link>
 
               <button
                 type="button"

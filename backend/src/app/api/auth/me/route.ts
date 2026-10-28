@@ -14,6 +14,10 @@ export async function GET(req: NextRequest) {
         id: true,
         email: true,
         fullName: true,
+        role: true,
+        isActive: true,
+        phone: true,
+        lastLoginAt: true,
         createdAt: true,
       },
     });

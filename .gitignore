@@ -80,8 +80,7 @@ docker-data/
 *.db-journal
 
 # ─── AI ASSISTANT & TOOLING ─────────────────────────────────
-.agent/
-.agents
+.agents/
 .engram/
 .gemini/
 .cursor/

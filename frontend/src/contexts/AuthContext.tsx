@@ -7,6 +7,10 @@ export interface Teacher {
   id: string;
   email: string;
   fullName: string;
+  role: "TEACHER" | "ADMIN";  // RBAC
+  isActive: boolean;
+  phone?: string | null;
+  lastLoginAt?: string | null;
   createdAt?: string;
 }
 

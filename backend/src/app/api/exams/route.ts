@@ -43,8 +43,16 @@ export async function GET(req: NextRequest) {
     const teacher = await authenticateTeacher(req);
     const searchParams = req.nextUrl.searchParams;
     const status = searchParams.get("status");
+    // RBAC: ADMIN dapat melihat semua ujian; TEACHER hanya ujian miliknya
+    const teacherIdFilter = searchParams.get("teacherId");
 
-    const where: any = { teacherId: teacher.teacherId };
+    const where: any = {};
+    if (teacher.role !== "ADMIN") {
+      where.teacherId = teacher.teacherId;
+    } else if (teacherIdFilter) {
+      // Admin bisa filter by teacherId opsional
+      where.teacherId = teacherIdFilter;
+    }
     if (status) {
       where.status = status;
     }
