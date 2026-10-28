@@ -4,8 +4,8 @@ Monorepo berisi dua workspace:
 
 | Workspace | Path | Port | Deskripsi |
 |-----------|------|------|-----------|
-| `backend` | `./backend` | `3000` | Next.js API Routes + Socket.IO + Prisma (PostgreSQL) |
-| `frontend` | `./frontend` | `3001` | Next.js UI |
+| `frontend` | `./frontend` | `3000` | Next.js UI |
+| `backend`  | `./backend`  | `3001` | Next.js API Routes + Socket.IO + Prisma (PostgreSQL) |
 
 ## Struktur Folder
 

@@ -18,10 +18,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const summaries = await autoGradeExam(id);
 
     // Build CSV content
-    const header = ["Nama", "NIM", "Nilai", "Jumlah Pelanggaran", "Status", "Waktu Selesai"];
+    const header = ["Nama", "NISN", "Nilai", "Jumlah Pelanggaran", "Status", "Waktu Selesai"];
     const rows = summaries.map((s) => [
       `"${s.name.replace(/"/g, '""')}"`,
-      `"${s.nim}"`,
+      `"${s.nisn}"`,
       s.finalScore,
       s.violationCount,
       s.status,

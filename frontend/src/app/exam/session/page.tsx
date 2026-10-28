@@ -1,11 +1,50 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { mockQuestions, mockExamSession } from "@/lib/mockData";
 import LatexRenderer from "@/app/components/LatexRenderer";
+import DOMPurify from "dompurify";
+import {
+  fetchExamSession,
+  saveStudentAnswer,
+  sendStudentHeartbeat,
+  sendProctoringEvent,
+  submitStudentExam,
+} from "@/lib/examSession";
 
 type AutoSaveStatus = "saved" | "saving" | "failed";
-type Question = (typeof mockQuestions)[number];
+type Question = any;
+
+function normalizeQuestion(q: any, idx: number) {
+  let opts: { id: string; text: string }[] = [];
+  if (Array.isArray(q.options)) {
+    opts = q.options.map((opt: any, optIdx: number) => {
+      const letter = String.fromCharCode(97 + optIdx); // 'a', 'b', 'c', ...
+      if (typeof opt === "string") {
+        return { id: letter, text: opt };
+      }
+      return {
+        id: (opt.id || opt.key || letter).toLowerCase(),
+        text: opt.text || opt.label || opt.content || opt.value || "",
+      };
+    });
+  } else if (q.options && typeof q.options === "object") {
+    opts = Object.entries(q.options).map(([key, val]: [string, any], optIdx: number) => ({
+      id: key.toLowerCase(),
+      text: typeof val === "string" ? val : val?.text || "",
+    }));
+  }
+
+  return {
+    id: q.id,
+    number: q.orderIndex || idx + 1,
+    type: (q.type || "single_choice") as "single_choice" | "multi_select" | "latex",
+    text: q.questionText || q.text || "",
+    image: q.imageUrl || q.image || null,
+    options: opts,
+    points: q.points || 10,
+    hint: null,
+  };
+}
 
 function useIsMobile() {
   const [isMobile, setIsMobile] = useState(false);
@@ -45,7 +84,10 @@ function ImageZoomModal({ src, alt, onClose }: { src: string; alt: string; onClo
       } else {
         decoded = decodeURIComponent(src.replace(/^data:image\/svg\+xml;charset=utf-8,/, ""));
       }
-      setSvgContent(decoded);
+      const clean = typeof window !== "undefined"
+        ? DOMPurify.sanitize(decoded, { USE_PROFILES: { svg: true, svgFilters: true } })
+        : decoded;
+      setSvgContent(clean);
     } catch {
       setSvgContent("");
     }
@@ -128,7 +170,10 @@ function QuestionImage({ src, alt, isMobile }: { src: string; alt: string; isMob
       } else {
         decoded = decodeURIComponent(src.replace(/^data:image\/svg\+xml;charset=utf-8,/, ""));
       }
-      setSvgContent(decoded || "");
+      const clean = typeof window !== "undefined"
+        ? DOMPurify.sanitize(decoded, { USE_PROFILES: { svg: true, svgFilters: true } })
+        : decoded;
+      setSvgContent(clean || "");
     } catch {
       setSvgContent("");
     }
@@ -415,20 +460,30 @@ function SidePanelDrawer({
 }
 
 export default function ExamSessionPage() {
+  const [questionsList, setQuestionsList] = useState<any[]>([]);
+  const [examMeta, setExamMeta] = useState<any>({
+    title: "Memuat Ujian...",
+    code: "",
+    duration: 90 * 60,
+    teacher: "Pengawas",
+    class: "Peserta Ujian",
+  });
   const isMobile = useIsMobile();
   const [currentQ, setCurrentQ] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [multiAnswers, setMultiAnswers] = useState<Record<string, Set<string>>>({});
   const [flagged, setFlagged] = useState<Set<number>>(new Set());
-  const [timeLeft, setTimeLeft] = useState(mockExamSession.duration);
+  const [timeLeft, setTimeLeft] = useState(90 * 60);
   const [autoSaveStatus, setAutoSaveStatus] = useState<AutoSaveStatus>("saved");
   const [showFullscreenPrompt, setShowFullscreenPrompt] = useState(true);
   const [submitModal, setSubmitModal] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
+  const [studentProfile, setStudentProfile] = useState<{ name: string; nisn: string } | null>(null);
   const [warningBanner, setWarningBanner] = useState<string | null>(null);
   const [timeExpiredOverlay, setTimeExpiredOverlay] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [activePanel, setActivePanel] = useState<SidePanel>(null);
+  const saveTimeoutRef = useRef<Record<string, NodeJS.Timeout>>({});
   const activityLog = useRef<{ time: string; action: string; detail: string }[]>([
     { time: "08:00", action: "Memulai Ujian", detail: "Layar penuh diaktifkan" },
     { time: "08:02", action: "Jawab Soal 1", detail: "Pilihan B dipilih" },
@@ -437,55 +492,244 @@ export default function ExamSessionPage() {
   ]);
 
   const togglePanel = (panel: SidePanel) =>
-    setActivePanel(prev => prev === panel ? null : panel);
+    setActivePanel((prev) => (prev === panel ? null : panel));
 
-  const totalQ = mockQuestions.length;
-  const question: Question = mockQuestions[currentQ];
+  const totalQ = questionsList.length;
+  const question: Question = questionsList[currentQ] || questionsList[0] || {
+    id: "q-loading",
+    number: 1,
+    type: "multiple_choice",
+    text: "Memuat soal ujian...",
+    options: [],
+    points: 1,
+  };
 
-  const answeredCount = mockQuestions.filter((q) => {
+  const answeredCount = questionsList.filter((q) => {
     if (q.type === "multi_select") return (multiAnswers[q.id]?.size ?? 0) > 0;
     return !!answers[q.id];
   }).length;
 
   const isQuestionAnswered = (q: Question) =>
-    q.type === "multi_select"
-      ? (multiAnswers[q.id]?.size ?? 0) > 0
-      : !!answers[q.id];
+    q.type === "multi_select" ? (multiAnswers[q.id]?.size ?? 0) > 0 : !!answers[q.id];
 
+  // Fase A: Load exam session from backend
+  useEffect(() => {
+    let isSubscribed = true;
+    const loadSession = async () => {
+      try {
+        const res = await fetchExamSession();
+        if (res.success && res.data && isSubscribed) {
+          const { student, exam, questions: beQuestions, answers: beAnswers, serverTime } = res.data;
+          if (Array.isArray(beQuestions) && beQuestions.length > 0) {
+            const mapped = beQuestions.map((q, idx) => normalizeQuestion(q, idx));
+            setQuestionsList(mapped);
+          }
+          if (exam) {
+            setExamMeta((prev: any) => ({
+              ...prev,
+              title: exam.title || prev.title,
+              duration: exam.durationMinutes * 60,
+            }));
+            if (exam.endTime && serverTime) {
+              const diff = Math.max(
+                0,
+                Math.floor((new Date(exam.endTime).getTime() - new Date(serverTime).getTime()) / 1000)
+              );
+              setTimeLeft(diff);
+            }
+          }
+          if (student) {
+            setStudentProfile({ name: student.name, nisn: student.nisn });
+            if (student.isLocked) {
+              setIsLocked(true);
+            }
+          }
+          if (Array.isArray(beAnswers) && beAnswers.length > 0) {
+            const restored: Record<string, string> = {};
+            beAnswers.forEach((ans) => {
+              if (ans.selectedOption) {
+                restored[ans.questionId] = ans.selectedOption.toLowerCase();
+              }
+            });
+            setAnswers((prev) => ({ ...prev, ...restored }));
+          }
+        }
+      } catch {
+        // Fallback to mock session
+      }
+    };
+
+    loadSession();
+    return () => {
+      isSubscribed = false;
+    };
+  }, []);
+
+  // Timer tick & auto-submit on expiry
   useEffect(() => {
     if (showFullscreenPrompt || isLocked || submitted) return;
     if (timeLeft <= 0) {
       setTimeExpiredOverlay(true);
-      setTimeout(() => { window.location.href = "/exam/done"; }, 3000);
+      submitStudentExam().finally(() => {
+        setTimeout(() => {
+          window.location.href = "/exam/done";
+        }, 2500);
+      });
       return;
     }
-    const t = setInterval(() => setTimeLeft(s => s - 1), 1000);
+    const t = setInterval(() => setTimeLeft((s) => s - 1), 1000);
     return () => clearInterval(t);
   }, [timeLeft, showFullscreenPrompt, isLocked, submitted]);
 
-  const triggerAutoSave = useCallback(() => {
-    setAutoSaveStatus("saving");
-    setTimeout(() => setAutoSaveStatus("saved"), 800);
-  }, []);
+  // Periodic heartbeat (15s)
+  useEffect(() => {
+    if (showFullscreenPrompt || submitted) return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await sendStudentHeartbeat();
+        if (res.success && res.data) {
+          if (res.data.isLocked) {
+            setIsLocked(true);
+          }
+          if (!res.data.isExamActive) {
+            setTimeExpiredOverlay(true);
+          }
+        }
+      } catch {
+        // ignore heartbeat error
+      }
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [showFullscreenPrompt, submitted]);
 
+  // Browser-only proctoring event listeners
+  useEffect(() => {
+    if (showFullscreenPrompt || submitted) return;
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        sendProctoringEvent("tab_switch");
+        setWarningBanner("Peringatan: Berpindah tab dicatat oleh sistem!");
+      }
+    };
+
+    const handleBlur = () => {
+      sendProctoringEvent("window_blur");
+    };
+
+    const handleCopy = (e: ClipboardEvent) => {
+      e.preventDefault();
+      sendProctoringEvent("copy_attempt");
+      setWarningBanner("Tindakan menyalin dilarang selama ujian!");
+    };
+
+    const handlePaste = (e: ClipboardEvent) => {
+      e.preventDefault();
+      sendProctoringEvent("paste_attempt");
+      setWarningBanner("Tindakan menempelkan teks dilarang!");
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const isF12 = e.key === "F12";
+      const isDevTools =
+        (e.ctrlKey || e.metaKey) && e.shiftKey && ["I", "i", "J", "j", "C", "c"].includes(e.key);
+      const isViewSource = (e.ctrlKey || e.metaKey) && ["U", "u"].includes(e.key);
+
+      if (isF12 || isDevTools || isViewSource) {
+        e.preventDefault();
+        sendProctoringEvent("devtools", { key: e.key });
+        setWarningBanner("Membuka developer tools dilarang!");
+      }
+    };
+
+    const handleContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+      sendProctoringEvent("right_click");
+    };
+
+    const handleFullscreenChange = () => {
+      if (!document.fullscreenElement) {
+        sendProctoringEvent("fullscreen_exit");
+        setWarningBanner("Anda keluar dari mode layar penuh. Segera kembali ke layar penuh.");
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("blur", handleBlur);
+    document.addEventListener("copy", handleCopy);
+    document.addEventListener("paste", handlePaste);
+    document.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("contextmenu", handleContextMenu);
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("blur", handleBlur);
+      document.removeEventListener("copy", handleCopy);
+      document.removeEventListener("paste", handlePaste);
+      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("contextmenu", handleContextMenu);
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+    };
+  }, [showFullscreenPrompt, submitted]);
+
+  // Handle single choice answer (with debounce auto-save)
   const handleSingleAnswer = (qId: string, optId: string) => {
-    setAnswers(a => ({ ...a, [qId]: optId }));
-    triggerAutoSave();
+    setAnswers((a) => ({ ...a, [qId]: optId }));
+    setAutoSaveStatus("saving");
+
+    if (saveTimeoutRef.current[qId]) {
+      clearTimeout(saveTimeoutRef.current[qId]);
+    }
+
+    saveTimeoutRef.current[qId] = setTimeout(async () => {
+      try {
+        const res = await saveStudentAnswer(qId, optId.toUpperCase());
+        if (res.success) {
+          setAutoSaveStatus("saved");
+        } else {
+          setAutoSaveStatus("failed");
+        }
+      } catch {
+        setAutoSaveStatus("failed");
+      }
+    }, 600);
   };
 
   const handleMultiToggle = (qId: string, optId: string) => {
-    setMultiAnswers(prev => {
+    setMultiAnswers((prev) => {
       const current = new Set(prev[qId] ?? []);
-      if (current.has(optId)) current.delete(optId); else current.add(optId);
+      if (current.has(optId)) current.delete(optId);
+      else current.add(optId);
       return { ...prev, [qId]: current };
     });
-    triggerAutoSave();
+    setAutoSaveStatus("saving");
+    setTimeout(() => setAutoSaveStatus("saved"), 600);
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     setSubmitted(true);
     setSubmitModal(false);
-    setTimeout(() => { window.location.href = "/exam/done"; }, 500);
+    try {
+      if (typeof window !== "undefined") {
+        sessionStorage.setItem(
+          "lockit_submission_summary",
+          JSON.stringify({
+            name: studentProfile?.name || "Peserta Ujian",
+            nisn: studentProfile?.nisn || "0000000000",
+            exam: examMeta?.title || "Ujian Selesai",
+            answered: answeredCount,
+            total: totalQ,
+          })
+        );
+      }
+    } catch {}
+    try {
+      await submitStudentExam();
+    } catch {
+      // Continue to done page
+    }
+    window.location.href = "/exam/done";
   };
 
   const formatTime = (s: number) => {
@@ -697,7 +941,7 @@ export default function ExamSessionPage() {
                 </span>
               </div>
               <QNumberGrid
-                questions={mockQuestions}
+                questions={questionsList}
                 currentQ={currentQ}
                 answers={answers}
                 multiAnswers={multiAnswers}
@@ -742,9 +986,9 @@ export default function ExamSessionPage() {
                 const unanswered = totalQ - answeredCount;
                 const flaggedCount = flagged.size;
                 const byType = {
-                  single: mockQuestions.filter(q => q.type === "single_choice"),
-                  multi:  mockQuestions.filter(q => q.type === "multi_select"),
-                  latex:  mockQuestions.filter(q => q.type === "latex"),
+                  single: questionsList.filter(q => q.type === "single_choice"),
+                  multi:  questionsList.filter(q => q.type === "multi_select"),
+                  latex:  questionsList.filter(q => q.type === "latex"),
                 };
                 const answeredByType = {
                   single: byType.single.filter(q => isQuestionAnswered(q)).length,
@@ -824,17 +1068,16 @@ export default function ExamSessionPage() {
                 {/* Exam identity card */}
                 <div style={{ background: "linear-gradient(135deg, #0369A1, #29ABE2)", borderRadius: "6px", padding: "18px", color: "white" }}>
                   <div style={{ fontSize: "11px", fontWeight: 600, opacity: 0.75, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "6px" }}>Ujian Aktif</div>
-                  <div style={{ fontSize: "15px", fontWeight: 700, lineHeight: 1.4, marginBottom: "8px" }}>{mockExamSession.examTitle}</div>
-                  <div style={{ fontSize: "12px", opacity: 0.8 }}>Kode: <strong>{mockExamSession.code}</strong></div>
+                  <div style={{ fontSize: "15px", fontWeight: 700, lineHeight: 1.4, marginBottom: "8px" }}>{examMeta.title}</div>
+                  <div style={{ fontSize: "12px", opacity: 0.8 }}>Kode: <strong>{examMeta.code || "-"}</strong></div>
                 </div>
 
                 {/* Info rows */}
                 {[
-                  { icon: "👨‍🏫", label: "Pengawas",       value: mockExamSession.teacher },
-                  { icon: "🏫", label: "Kelas",           value: mockExamSession.class },
-                  { icon: "📅", label: "Tanggal",         value: new Date(mockExamSession.startTime).toLocaleDateString("id-ID", { weekday: "long", year: "numeric", month: "long", day: "numeric" }) },
-                  { icon: "🕐", label: "Mulai",           value: new Date(mockExamSession.startTime).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) },
-                  { icon: "⏱️", label: "Durasi",          value: `${mockExamSession.duration / 60} menit` },
+                  { icon: "👨‍🏫", label: "Pengawas",       value: examMeta.teacher || "Pengawas Ujian" },
+                  { icon: "🏫", label: "Kelas",           value: examMeta.class || "Peserta Ujian" },
+                  { icon: "📅", label: "Tanggal",         value: new Date().toLocaleDateString("id-ID", { weekday: "long", year: "numeric", month: "long", day: "numeric" }) },
+                  { icon: "⏱️", label: "Durasi",          value: `${Math.round((examMeta.duration || 5400) / 60)} menit` },
                   { icon: "📝", label: "Jumlah Soal",     value: `${totalQ} soal` },
                 ].map(r => (
                   <div key={r.label} style={{ display: "flex", alignItems: "flex-start", gap: "12px", padding: "10px 12px", background: "#F8FDFF", borderRadius: "6px", border: "1px solid #EDF6FC" }}>
@@ -868,7 +1111,7 @@ export default function ExamSessionPage() {
               <div style={{ fontSize: "11px", color: "#94A3B8", marginBottom: "12px" }}>Catatan aktivitas selama sesi ujian berlangsung.</div>
               <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                 {/* Dynamic: answered questions */}
-                {mockQuestions.map((q, idx) => {
+                {questionsList.map((q, idx) => {
                   const answered = isQuestionAnswered(q);
                   const isFlagged = flagged.has(idx);
                   if (!answered && !isFlagged) return null;
@@ -901,7 +1144,7 @@ export default function ExamSessionPage() {
                     </div>
                   </div>
                 ))}
-                {mockQuestions.every((q, idx) => !isQuestionAnswered(q) && !flagged.has(idx)) && activityLog.current.length === 0 && (
+                {questionsList.every((q, idx) => !isQuestionAnswered(q) && !flagged.has(idx)) && activityLog.current.length === 0 && (
                   <div style={{ textAlign: "center", color: "#CBD5E1", fontSize: "13px", padding: "24px 0" }}>Belum ada aktivitas tercatat.</div>
                 )}
               </div>
@@ -1028,7 +1271,7 @@ export default function ExamSessionPage() {
               <div style={{ width: "28px", height: "28px", background: "linear-gradient(135deg, #0284C7, #29ABE2)", borderRadius: "7px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "13px", flexShrink: 0 }}>🔒</div>
             )}
             <h1 style={{ fontSize: isMobile ? "13px" : "14px", fontWeight: 600, color: "#1C303D", textAlign: "center", letterSpacing: "-0.01em", flex: isMobile ? 1 : undefined, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {mockExamSession.examTitle}
+              {examMeta.title || "Ujian"}
             </h1>
             {/* Mobile: timer in header */}
             {isMobile && (
@@ -1047,7 +1290,7 @@ export default function ExamSessionPage() {
               )}
               {Array.from({ length: endIdx - startIdx + 1 }, (_, i) => {
                 const qIdx = startIdx + i;
-                const q = mockQuestions[qIdx];
+                const q = questionsList[qIdx];
                 const isCurrent = qIdx === currentQ;
                 const isAnswered = isQuestionAnswered(q);
                 const isFlagged = flagged.has(qIdx);
@@ -1153,7 +1396,7 @@ export default function ExamSessionPage() {
 
               {/* ── OPTIONS (stacked below question) ── */}
               <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: hasImage || isMulti || question.hint ? "4px" : "0" }}>
-                {question.options.map((opt) => {
+                {question.options.map((opt: any) => {
                   const isSelected = isMulti
                     ? selectedMulti.has(opt.id)
                     : answers[question.id] === opt.id;
@@ -1278,7 +1521,7 @@ export default function ExamSessionPage() {
 
                   {/* Grid */}
                   <QNumberGrid
-                    questions={mockQuestions}
+                    questions={questionsList}
                     currentQ={currentQ}
                     answers={answers}
                     multiAnswers={multiAnswers}

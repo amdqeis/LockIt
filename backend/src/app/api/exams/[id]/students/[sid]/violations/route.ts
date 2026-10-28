@@ -37,7 +37,7 @@ export async function GET(
       student: {
         id: student.id,
         name: student.name,
-        nim: student.nim,
+        nisn: student.nisn,
         status: student.status,
         isLocked: student.isLocked,
         violationCount: student.violationCount,

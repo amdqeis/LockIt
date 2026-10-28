@@ -101,6 +101,15 @@ export async function POST(req: NextRequest) {
       expires: expiresAt,
     });
 
+    // Session presence indicator for frontend middleware route guard
+    response.cookies.set("hasTeacherSession", "1", {
+      httpOnly: false,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      path: "/",
+      expires: expiresAt,
+    });
+
     // LOW-02: Emit request ID ke response header untuk tracing
     response.headers.set("X-Request-ID", log.requestId);
     log.info("Login success", { teacherId: teacher.id, email: teacher.email });

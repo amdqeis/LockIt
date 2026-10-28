@@ -64,7 +64,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     });
 
     // 3. Table Headers
-    const headers = ["No", "Nama Mahasiswa", "NIM", "Nilai Akhir", "Pelanggaran", "Status", "Waktu Selesai"];
+    const headers = ["No", "Nama Siswa", "NISN", "Nilai Akhir", "Pelanggaran", "Status", "Waktu Selesai"];
     const headerRow = sheet.getRow(7);
     headerRow.values = headers;
     headerRow.height = 24;
@@ -90,7 +90,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       const row = sheet.addRow([
         idx + 1,
         s.name,
-        s.nim,
+        s.nisn,
         s.finalScore,
         s.violationCount,
         s.status === "submitted" ? "Selesai" : "Belum Submit",
@@ -99,7 +99,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
       row.height = 20;
 
-      // Center columns for No, NIM, Nilai, Pelanggaran, Status
+      // Center columns for No, NISN, Nilai, Pelanggaran, Status
       row.getCell(1).alignment = { horizontal: "center" };
       row.getCell(3).alignment = { horizontal: "center" };
       row.getCell(4).alignment = { horizontal: "center" };
@@ -136,7 +136,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     sheet.columns = [
       { width: 6 },  // No
       { width: 30 }, // Nama
-      { width: 18 }, // NIM
+      { width: 18 }, // NISN
       { width: 14 }, // Nilai Akhir
       { width: 14 }, // Pelanggaran
       { width: 16 }, // Status

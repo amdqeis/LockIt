@@ -57,7 +57,7 @@ export async function GET(req: NextRequest) {
 
     const settings = (exam.settings as any) || {};
     if (settings.randomize_questions) {
-      questions = pseudoRandomShuffle(questions, student.nim, exam.id);
+      questions = pseudoRandomShuffle(questions, student.nisn, exam.id);
     }
 
     // Fetch existing answers of this student
@@ -74,7 +74,7 @@ export async function GET(req: NextRequest) {
       student: {
         id: student.id,
         name: student.name,
-        nim: student.nim,
+        nisn: student.nisn,
         isLocked: student.isLocked,
         violationCount: student.violationCount,
       },

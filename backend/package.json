@@ -4,13 +4,17 @@
   "private": true,
   "description": "LockIt — Platform Ujian Online dengan Web-Based Proctoring (Backend)",
   "scripts": {
-    "dev": "tsx watch server.ts",
+    "dev": "PORT=3001 tsx watch --env-file=.env server.ts",
     "build": "next build",
-    "start": "NODE_ENV=production tsx server.ts",
+    "start": "NODE_ENV=production PORT=3001 tsx --env-file=.env server.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
+    "prisma:seed": "tsx --env-file=.env prisma/seed.ts",
     "prisma:studio": "prisma studio",
     "lint": "next lint"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

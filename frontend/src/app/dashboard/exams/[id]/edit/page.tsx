@@ -4,7 +4,8 @@ import { useState, useRef, useCallback, useEffect, useId, Suspense } from "react
 import Link from "next/link";
 import { useRouter, useParams } from "next/navigation";
 import DashboardShell from "@/app/components/DashboardShell";
-import { mockExams, mockQuestionBanks, QuestionBank } from "@/lib/mockData";
+import { defaultQuestionBanks, QuestionBank } from "@/lib/questionBank";
+import { apiFetch } from "@/lib/apiClient";
 
 // ─── Design tokens (spec §10) ─────────────────────────────────────────────────
 const T = {
@@ -282,34 +283,55 @@ function EditExamPage() {
   const params = useParams();
   const uid = useId();
 
-  const exam = mockExams.find(e => e.id === params.id) ?? mockExams[0];
-  const isActive = exam.status === "active";
+  const examId = (params?.id as string) || "";
+  const [isActive, setIsActive] = useState(false);
 
   // Pre-populate from existing exam data
   const initialForm: FormState = {
-    title: exam.title,
-    description: exam.description ?? "",
-    duration: exam.duration,
-    shuffleQuestions: exam.shuffleQuestions,
-    displayMode: exam.questionMode === "all-at-once" ? "all_at_once" : "one_by_one",
+    title: "",
+    description: "",
+    duration: 90,
+    shuffleQuestions: false,
+    displayMode: "all_at_once",
     shuffleChoices: false,
     allowBackNavigation: true,
     startsAt: "",
     endsAt: "",
     audienceIds: [],
     passingScore: "",
-    maxViolations: exam.violationPolicy.maxViolations,
-    actionAtLimit: exam.violationPolicy.action === "warning" ? "warn"
-                  : exam.violationPolicy.action === "auto-lock" ? "lock"
-                  : "auto_end",
-    detectCopyPaste: exam.violationPolicy.detectCopyPaste,
-    detectRightClick: exam.violationPolicy.detectRightClick,
-    detectDevTools: exam.violationPolicy.detectDevTools,
+    maxViolations: 3,
+    actionAtLimit: "lock",
+    detectCopyPaste: true,
+    detectRightClick: true,
+    detectDevTools: true,
     detectTabSwitch: true,
     detectFullscreenExit: true,
   };
 
   const [form, setForm] = useState<FormState>(initialForm);
+
+  useEffect(() => {
+    if (!examId) return;
+    apiFetch<any>(`/api/exams/${examId}`).then((res) => {
+      if (res.success && res.data) {
+        const beExam = res.data.exam || res.data;
+        setIsActive(beExam.status === "active");
+        setForm((prev) => ({
+          ...prev,
+          title: beExam.title || prev.title,
+          description: beExam.description || prev.description,
+          duration: beExam.durationMinutes || prev.duration,
+          shuffleQuestions: beExam.settings?.randomize_questions ?? prev.shuffleQuestions,
+          displayMode: beExam.settings?.display_mode ?? prev.displayMode,
+          maxViolations: beExam.violationPolicy?.max_violations ?? prev.maxViolations,
+          actionAtLimit: beExam.violationPolicy?.action === "lock" ? "lock" : "warn",
+          detectCopyPaste: beExam.violationPolicy?.detect_copy_paste ?? prev.detectCopyPaste,
+          detectRightClick: beExam.violationPolicy?.detect_right_click ?? prev.detectRightClick,
+          detectDevTools: beExam.violationPolicy?.detect_devtools ?? prev.detectDevTools,
+        }));
+      }
+    });
+  }, [examId]);
 
   const set = useCallback(<K extends keyof FormState>(key: K, val: FormState[K]) => {
     setForm(f => ({ ...f, [key]: val }));
@@ -317,9 +339,8 @@ function EditExamPage() {
   }, []);
 
   // Bank soal: pre-select based on questionCount match (best-effort)
-  const matchedBank = mockQuestionBanks
-    .filter(b => b.status === "active")
-    .find(b => b.questionCount === exam.questionCount) ?? null;
+  const matchedBank = defaultQuestionBanks
+    .filter(b => b.status === "active")[0] ?? null;
 
   const [selectedBank, setSelectedBank] = useState<QuestionBank | null>(matchedBank);
   const [bankSearch, setBankSearch] = useState("");
@@ -354,9 +375,9 @@ function EditExamPage() {
   }, [isDirty]);
 
   // ── Derived state ──────────────────────────────────────────────────────────
-  const subjects = ["all", ...Array.from(new Set(mockQuestionBanks.filter(b => b.status === "active").map(b => b.subject)))];
+  const subjects = ["all", ...Array.from(new Set(defaultQuestionBanks.filter(b => b.status === "active").map(b => b.subject)))];
 
-  const filteredBanks = mockQuestionBanks
+  const filteredBanks = defaultQuestionBanks
     .filter(b => b.status === "active")
     .filter(b => bankFilter === "all" || b.subject === bankFilter)
     .filter(b => {
@@ -445,11 +466,45 @@ function EditExamPage() {
     }
     setErrors({});
     setSaving(true);
-    await new Promise(r => setTimeout(r, 1200));
-    setSaving(false);
-    setIsDirty(false);
-    setToast({ type: "success", msg: "Perubahan disimpan." });
-    setTimeout(() => { setToast(null); router.push(`/dashboard/exams/${exam.id}`); }, 2000);
+    try {
+      const payload: any = {
+        title: form.title.trim(),
+        description: form.description?.trim() || null,
+        durationMinutes: Number(form.duration) || 90,
+        violationPolicy: {
+          max_violations: form.maxViolations || 5,
+          action: form.actionAtLimit === "lock" ? "lock" : "warning",
+          detect_copy_paste: form.detectCopyPaste,
+          detect_right_click: form.detectRightClick,
+          detect_devtools: form.detectDevTools,
+        },
+        settings: {
+          randomize_questions: form.shuffleQuestions,
+          display_mode: form.displayMode,
+          auto_save_interval_seconds: 30,
+        },
+      };
+
+      const res = await apiFetch<any>(`/api/exams/${examId}`, {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      });
+
+      if (res.success) {
+        setIsDirty(false);
+        setToast({ type: "success", msg: "Perubahan disimpan." });
+        setTimeout(() => {
+          setToast(null);
+          router.push(`/dashboard/exams/${examId}`);
+        }, 1200);
+      } else {
+        setToast({ type: "error", msg: res.error?.message || "Gagal menyimpan perubahan." });
+      }
+    } catch {
+      setToast({ type: "error", msg: "Terjadi kesalahan jaringan." });
+    } finally {
+      setSaving(false);
+    }
   };
 
   const tryNavigate = (href: string) => {
@@ -518,7 +573,7 @@ function EditExamPage() {
           <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", color: T.textSecondary, marginBottom: "12px" }}>
             <Link href="/dashboard" style={{ color: T.textSecondary, textDecoration: "none" }}>Dashboard</Link>
             <span style={{ color: T.border }}>›</span>
-            <Link href={`/dashboard/exams/${exam.id}`} style={{ color: T.textSecondary, textDecoration: "none" }}>{exam.title}</Link>
+            <Link href={`/dashboard/exams/${examId}`} style={{ color: T.textSecondary, textDecoration: "none" }}>{form.title || "Detail Ujian"}</Link>
             <span style={{ color: T.border }}>›</span>
             <span style={{ color: T.textPrimary }}>Ubah ujian</span>
           </div>
@@ -528,7 +583,7 @@ function EditExamPage() {
             <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
               <button
                 type="button"
-                onClick={() => tryNavigate(`/dashboard/exams/${exam.id}`)}
+                onClick={() => tryNavigate(`/dashboard/exams/${examId}`)}
                 aria-label="Kembali ke detail ujian"
                 style={{
                   display: "flex", alignItems: "center", justifyContent: "center",
@@ -1187,7 +1242,7 @@ function EditExamPage() {
           <button
             type="button"
             className="btn-text"
-            onClick={() => tryNavigate(`/dashboard/exams/${exam.id}`)}
+            onClick={() => tryNavigate(`/dashboard/exams/${examId}`)}
             disabled={saving}
             style={{
               background: "none", border: "none",
@@ -1267,7 +1322,7 @@ function EditExamPage() {
               </button>
               <button
                 type="button"
-                onClick={() => { setIsDirty(false); router.push(leaveTarget || `/dashboard/exams/${exam.id}`); }}
+                onClick={() => { setIsDirty(false); router.push(leaveTarget || `/dashboard/exams/${examId}`); }}
                 style={{
                   height: "40px", padding: "0 16px", borderRadius: T.radiusControl,
                   border: "none", background: T.danger,

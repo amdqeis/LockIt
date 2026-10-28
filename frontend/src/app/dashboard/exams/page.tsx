@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect, useMemo, Suspense } from "react";
+import { useState, useEffect, useMemo, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { mockExams, mockDashboardStats } from "@/lib/mockData";
+import { apiFetch } from "@/lib/apiClient";
 import DashboardShell from "../../components/DashboardShell";
 
 // Spec §7 Unified Design Tokens
@@ -104,26 +104,89 @@ function ExamsContent() {
     }
   };
 
-  const rawExams: ExamItem[] = useMemo(() => {
-    return (mockExams as unknown as ExamItem[]).map((e) => ({
-      ...e,
-      status: e.status,
-    }));
+  const [examsList, setExamsList] = useState<ExamItem[]>([]);
+  const [loadingExams, setLoadingExams] = useState(true);
+
+  const fetchExams = useCallback(async () => {
+    try {
+      const res = await apiFetch<any[]>("/api/exams");
+      if (res.success && Array.isArray(res.data) && res.data.length > 0) {
+        const mapped: ExamItem[] = res.data.map((e: any) => ({
+          id: e.id,
+          title: e.title,
+          description: e.description,
+          status: e.status,
+          duration: e.durationMinutes,
+          questionCount: e._count?.questions ?? 0,
+          accessCode: e.accessCode,
+          createdAt: e.createdAt,
+          startsAt: e.startTime,
+          endsAt: e.endTime,
+          updatedAt: e.updatedAt,
+          totalParticipants: e._count?.students ?? 0,
+        }));
+        setExamsList(mapped);
+      } else {
+        setExamsList([]);
+      }
+    } catch {
+      setExamsList([]);
+    } finally {
+      setLoadingExams(false);
+    }
   }, []);
+
+  useEffect(() => {
+    fetchExams();
+  }, [fetchExams]);
+
+  const handleModalConfirm = async () => {
+    if (!confirmModal) return;
+    const { type, exam } = confirmModal;
+    try {
+      if (type === "delete") {
+        const res = await apiFetch(`/api/exams/${exam.id}`, { method: "DELETE" });
+        if (res.success) {
+          showToast("Ujian berhasil dihapus");
+          fetchExams();
+        } else {
+          showToast(res.error?.message || "Gagal menghapus ujian");
+        }
+      } else if (type === "archive") {
+        const res = await apiFetch(`/api/exams/${exam.id}/status`, {
+          method: "PUT",
+          body: JSON.stringify({ status: "archived" }),
+        });
+        if (res.success) {
+          showToast("Ujian berhasil diarsipkan");
+          fetchExams();
+        } else {
+          showToast(res.error?.message || "Gagal mengarsipkan ujian");
+        }
+      } else {
+        showToast("Aksi berhasil diproses");
+        fetchExams();
+      }
+    } catch {
+      showToast("Terjadi kesalahan jaringan");
+    } finally {
+      setConfirmModal(null);
+    }
+  };
 
   const counts = useMemo(() => {
     return {
-      all: mockDashboardStats.totalExams || rawExams.length,
-      active: mockDashboardStats.activeExams || rawExams.filter((e) => e.status === "active").length,
-      scheduled: mockDashboardStats.scheduledExams || rawExams.filter((e) => e.status === "scheduled").length,
-      draft: mockDashboardStats.draftExams || rawExams.filter((e) => e.status === "draft").length,
-      ended: mockDashboardStats.completedExams || rawExams.filter((e) => e.status === "ended").length,
-      archived: mockDashboardStats.archivedExams || rawExams.filter((e) => e.status === "archived").length,
+      all: examsList.length,
+      active: examsList.filter((e) => e.status === "active").length,
+      scheduled: examsList.filter((e) => e.status === "scheduled").length,
+      draft: examsList.filter((e) => e.status === "draft").length,
+      ended: examsList.filter((e) => e.status === "ended").length,
+      archived: examsList.filter((e) => e.status === "archived").length,
     };
-  }, [rawExams]);
+  }, [examsList]);
 
   const filteredAndSortedExams = useMemo(() => {
-    const list = rawExams.filter((exam) => {
+    const list = examsList.filter((exam) => {
       const matchSearch =
         search.trim() === "" ||
         exam.title.toLowerCase().includes(search.toLowerCase()) ||
@@ -146,7 +209,7 @@ function ExamsContent() {
       }
       return (b.createdAt || "").localeCompare(a.createdAt || "");
     });
-  }, [rawExams, search, selectedTab, sortBy]);
+  }, [examsList, search, selectedTab, sortBy]);
 
   return (
     <DashboardShell>
@@ -757,10 +820,7 @@ function ExamsContent() {
                   type="button"
                   className="lockit-btn-primary"
                   style={{ backgroundColor: confirmModal.type === "delete" ? T.danger : T.primary }}
-                  onClick={() => {
-                    showToast(confirmModal.type === "delete" ? "Ujian berhasil dihapus" : confirmModal.type === "archive" ? "Ujian berhasil diarsipkan" : "Ujian berhasil dipulihkan");
-                    setConfirmModal(null);
-                  }}
+                  onClick={handleModalConfirm}
                 >
                   {confirmModal.type === "delete" ? "Ya, hapus" : confirmModal.type === "archive" ? "Ya, arsipkan" : "Ya, pulihkan"}
                 </button>

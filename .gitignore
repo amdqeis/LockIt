@@ -79,7 +79,35 @@ docker-data/
 *.db
 *.db-journal
 
+# ─── AI ASSISTANT & TOOLING ─────────────────────────────────
+.agent/
+.agents
+.engram/
+.gemini/
+.cursor/
+.claude/
+
+# Python cache & test artifacts (used by agent skills & scripts)
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# ─── CERTIFICATES & KEYS ────────────────────────────────────
+*.pem
+*.key
+*.cert
+*.crt
+
+# ─── BUILD CACHES & TEMPORARY ───────────────────────────────
+.turbo/
+.cache/
+.vercel/
+*.tmp
+*.temp
+
 # ─── MONOREPO ROOT ───────────────────────────────────────────
 # Root node_modules dari npm workspaces
 /node_modules/
 /package-lock.json
+

@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { mockExams } from "@/lib/mockData";
+import { validateExamCode } from "@/lib/examSession";
 
 // Spec §8 & §7 Unified Design Tokens
 const T = {
@@ -135,42 +135,48 @@ function JoinContent() {
       return;
     }
 
-    // Simulate API request (POST /join/resolve)
-    await new Promise((r) => setTimeout(r, 400));
-    setLoading(false);
+    try {
+      const res = await validateExamCode(normalized);
+      const elapsed = Date.now() - startTime;
+      if (elapsed < 300) await new Promise((r) => setTimeout(r, 300 - elapsed));
+      setLoading(false);
 
-    // Find exam by access code in mock data
-    const matchedExam = mockExams.find(
-      (ex) => ex.accessCode && ex.accessCode.toUpperCase() === normalized
-    );
+      if (res.success && res.data?.exam) {
+        if (typeof window !== "undefined") {
+          sessionStorage.setItem("lockit_exam_preview", JSON.stringify(res.data.exam));
+        }
+        router.push(`/join/identity?code=${encodeURIComponent(normalized)}`);
+        return;
+      }
 
-    // Situation 2: Code not found (404)
-    if (!matchedExam) {
-      setAttemptCount((prev) => prev + 1);
+      // Check backend error codes
+      const errCode = res.error?.code;
+      if (errCode === "EXAM_NOT_FOUND") {
+        setAttemptCount((prev) => prev + 1);
+        setResultStatus("error");
+        setMessage("Kode tidak ditemukan. Periksa lagi kode dari pengawas.");
+        inputRef.current?.select();
+      } else if (errCode === "EXAM_NOT_STARTED") {
+        setResultStatus("notice");
+        setMessage("Ujian belum dimulai.");
+      } else if (errCode === "EXAM_ENDED" || errCode === "EXAM_TIME_EXPIRED") {
+        setResultStatus("notice");
+        setMessage("Ujian ini sudah berakhir.");
+      } else if (errCode === "TOO_MANY_REQUESTS") {
+        setResultStatus("rate_limited");
+        setRateLimitTimer((res.error?.details as any)?.retryAfter || 30);
+        setMessage("Terlalu banyak percobaan. Coba lagi dalam beberapa saat.");
+      } else {
+        setAttemptCount((prev) => prev + 1);
+        setResultStatus("error");
+        setMessage(res.error?.message || "Kode tidak ditemukan. Periksa lagi kode dari pengawas.");
+        inputRef.current?.select();
+      }
+    } catch {
+      setLoading(false);
       setResultStatus("error");
-      setMessage("Kode tidak ditemukan. Periksa lagi kode dari pengawas.");
-      // Select input text so student can retype easily per Spec §3.4
-      inputRef.current?.select();
-      return;
+      setMessage("Terjadi kesalahan jaringan. Coba lagi.");
     }
-
-    // Situation 3: Exam has not started yet (409)
-    if (matchedExam.status === "scheduled" || matchedExam.status === "draft") {
-      setResultStatus("notice");
-      const dateText = matchedExam.startsAt ? "Mulai Sen, 2 Nov · 09:00" : "Ujian belum dimulai.";
-      setMessage(`Ujian belum dimulai. ${dateText}`);
-      return;
-    }
-
-    // Situation 4: Exam has ended or archived (410)
-    if (matchedExam.status === "ended" || matchedExam.status === "archived") {
-      setResultStatus("notice");
-      setMessage("Ujian ini sudah berakhir.");
-      return;
-    }
-
-    // Situation 7: Valid active exam (200) -> Handoff to next step
-    router.push(`/join/identity?code=${encodeURIComponent(normalized)}`);
   };
 
   const isError = resultStatus === "error";

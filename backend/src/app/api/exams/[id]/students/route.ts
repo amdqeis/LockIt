@@ -29,7 +29,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         select: {
           id: true,
           name: true,
-          nim: true,
+          nisn: true,
           status: true,
           isLocked: true,
           violationCount: true,

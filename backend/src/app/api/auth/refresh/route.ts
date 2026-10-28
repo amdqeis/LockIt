@@ -25,6 +25,7 @@ export async function POST(req: NextRequest) {
       // Clear cookie if invalid
       const response = errorResponse("INVALID_REFRESH_TOKEN", "Refresh token tidak valid atau telah kedaluwarsa", 401);
       response.cookies.delete("refreshToken");
+      response.cookies.delete("hasTeacherSession");
       return response;
     }
 
@@ -62,6 +63,14 @@ export async function POST(req: NextRequest) {
       secure: process.env.NODE_ENV === "production",
       sameSite: "strict",
       path: "/api/auth",
+      expires: newExpiresAt,
+    });
+
+    response.cookies.set("hasTeacherSession", "1", {
+      httpOnly: false,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      path: "/",
       expires: newExpiresAt,
     });
 

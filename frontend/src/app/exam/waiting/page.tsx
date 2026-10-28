@@ -2,62 +2,73 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { fetchExamSession } from "@/lib/examSession";
 
-// Simulated participant info (will come from session cookie in real app)
-const PARTICIPANT = {
-  name: "Siti Nurhaliza",
-  nim: "1301210001",
-  exam: "UTS Pemrograman Web 2026",
-  accessCode: "WEB2026",
+interface ParticipantInfo {
+  name: string;
+  nisn: string;
+  exam: string;
+  accessCode: string;
+  duration: number;
+  questionCount: number;
+}
+
+const DEFAULT_PARTICIPANT: ParticipantInfo = {
+  name: "Peserta Ujian",
+  nisn: "0000000000",
+  exam: "Memuat ujian...",
+  accessCode: "",
   duration: 90,
-  questionCount: 25,
+  questionCount: 0,
 };
 
 type ConnectionStatus = "connected" | "reconnecting" | "offline";
 
 export default function WaitingPage() {
   const router = useRouter();
+  const [participant, setParticipant] = useState<ParticipantInfo>(DEFAULT_PARTICIPANT);
   const [dots, setDots] = useState(".");
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connected");
   const [secondsWaited, setSecondsWaited] = useState(0);
   const [pulse, setPulse] = useState(false);
 
-  // Animate waiting dots
+  // Poll session to verify status and redirect when teacher starts the exam
   useEffect(() => {
-    const interval = setInterval(() => {
-      setDots(d => d.length >= 3 ? "." : d + ".");
-    }, 600);
-    return () => clearInterval(interval);
-  }, []);
+    let cancelled = false;
 
-  // Seconds counter
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setSecondsWaited(s => s + 1);
-    }, 1000);
-    return () => clearInterval(interval);
-  }, []);
+    const checkSession = async () => {
+      try {
+        const res = await fetchExamSession();
+        if (cancelled) return;
+        if (res.success && res.data) {
+          const session = res.data;
+          setConnectionStatus("connected");
+          setParticipant((prev) => ({
+            ...prev,
+            name: session.student.name,
+            nisn: session.student.nisn,
+            exam: session.exam.title,
+            accessCode: session.exam.accessCode ?? prev.accessCode,
+            duration: session.exam.durationMinutes,
+            questionCount: session.questions.length,
+          }));
+          if (!session.exam.status || session.exam.status === "active") {
+            router.push("/exam/session");
+          }
+        } else {
+          setConnectionStatus("reconnecting");
+        }
+      } catch {
+        if (!cancelled) setConnectionStatus("reconnecting");
+      }
+    };
 
-  // Simulated connection fluctuation for demo
-  useEffect(() => {
-    const t1 = setTimeout(() => setConnectionStatus("reconnecting"), 8000);
-    const t2 = setTimeout(() => setConnectionStatus("connected"), 11500);
-    return () => { clearTimeout(t1); clearTimeout(t2); };
-  }, []);
-
-  // Pulse animation trigger
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setPulse(true);
-      setTimeout(() => setPulse(false), 600);
-    }, 3000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // Demo: auto-redirect after 15 seconds
-  useEffect(() => {
-    const t = setTimeout(() => router.push("/exam/session"), 15000);
-    return () => clearTimeout(t);
+    checkSession();
+    const interval = setInterval(checkSession, 4000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, [router]);
 
   const formatWaited = (s: number) => {
@@ -166,10 +177,10 @@ export default function WaitingPage() {
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                 {[
-                  { label: "Nama", value: PARTICIPANT.name },
-                  { label: "NIM", value: PARTICIPANT.nim, mono: true },
-                  { label: "Ujian", value: PARTICIPANT.exam },
-                  { label: "Kode Akses", value: PARTICIPANT.accessCode, mono: true, badge: true },
+                  { label: "Nama", value: participant.name },
+                  { label: "NISN", value: participant.nisn, mono: true },
+                  { label: "Ujian", value: participant.exam },
+                  { label: "Kode Akses", value: participant.accessCode || "-", mono: true, badge: true },
                 ].map(({ label, value, mono, badge }) => (
                   <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" }}>
                     <span style={{ fontSize: "13px", color: "#6E8EA0", flexShrink: 0 }}>{label}</span>
@@ -195,7 +206,7 @@ export default function WaitingPage() {
                 background: "#F0F9FF", border: "1px solid #C8E6F5",
                 display: "flex", flexDirection: "column", alignItems: "center", gap: "2px",
               }}>
-                <span style={{ fontSize: "18px", fontWeight: 700, color: "#29ABE2" }}>{PARTICIPANT.questionCount}</span>
+                <span style={{ fontSize: "18px", fontWeight: 700, color: "#29ABE2" }}>{participant.questionCount}</span>
                 <span style={{ fontSize: "11px", color: "#6E8EA0" }}>Soal</span>
               </div>
               <div style={{
@@ -203,7 +214,7 @@ export default function WaitingPage() {
                 background: "#F0F9FF", border: "1px solid #C8E6F5",
                 display: "flex", flexDirection: "column", alignItems: "center", gap: "2px",
               }}>
-                <span style={{ fontSize: "18px", fontWeight: 700, color: "#29ABE2" }}>{PARTICIPANT.duration}</span>
+                <span style={{ fontSize: "18px", fontWeight: 700, color: "#29ABE2" }}>{participant.duration}</span>
                 <span style={{ fontSize: "11px", color: "#6E8EA0" }}>Menit</span>
               </div>
               <div style={{

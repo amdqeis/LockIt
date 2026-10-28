@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, Suspense } from "react";
+import { useState, useEffect, useCallback, Suspense } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import { mockExams } from "@/lib/mockData";
+import { useParams, useRouter } from "next/navigation";
+import { apiFetch } from "@/lib/apiClient";
 import DashboardShell from "@/app/components/DashboardShell";
 
 type ExamStatus = "draft" | "active" | "ended" | "archived";
@@ -23,8 +23,11 @@ const STATUS_COLORS: Record<ExamStatus, { bg: string; color: string }> = {
 };
 
 function ExamDetailPage() {
+  const router = useRouter();
   const params = useParams();
-  const exam = mockExams.find(e => e.id === params.id) ?? mockExams[0];
+  const examId = (params?.id as string) || "";
+  const [exam, setExam] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
   const [confirmType, setConfirmType] = useState<string | null>(null);
   const [toast, setToast] = useState<{ type: string; msg: string } | null>(null);
   const [copied, setCopied] = useState(false);
@@ -34,14 +37,124 @@ function ExamDetailPage() {
     setTimeout(() => setToast(null), 3500);
   };
 
+  const fetchExamDetail = useCallback(async () => {
+    if (!examId) return;
+    try {
+      const res = await apiFetch<any>(`/api/exams/${examId}`);
+      if (res.success && res.data) {
+        const beExam = res.data;
+        const mapped = {
+          id: beExam.id,
+          title: beExam.title,
+          description: beExam.description || "",
+          status: beExam.status,
+          duration: beExam.durationMinutes,
+          questionCount: beExam._count?.questions ?? 0,
+          totalParticipants: beExam._count?.students ?? 0,
+          accessCode: beExam.accessCode,
+          createdAt: new Date(beExam.createdAt).toLocaleDateString("id-ID", {
+            day: "numeric",
+            month: "short",
+            year: "numeric",
+          }),
+          violationPolicy: {
+            maxViolations: beExam.violationPolicy?.max_violations || 5,
+            action: beExam.violationPolicy?.action === "lock" ? "auto-lock" : "warning",
+            detectCopyPaste: beExam.violationPolicy?.detect_copy_paste ?? true,
+            detectRightClick: beExam.violationPolicy?.detect_right_click ?? false,
+            detectDevTools: beExam.violationPolicy?.detect_devtools ?? false,
+          },
+        };
+        setExam(mapped);
+      } else {
+        setExam(null);
+      }
+    } catch {
+      setExam(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [examId]);
+
+  useEffect(() => {
+    fetchExamDetail();
+  }, [fetchExamDetail]);
+
   const handleCopy = () => {
+    if (!exam) return;
     navigator.clipboard.writeText(exam.accessCode).catch(() => {});
     setCopied(true);
     showToast("success", "✅ Kode disalin ke clipboard!");
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const sc = STATUS_COLORS[exam.status as ExamStatus];
+  const handleModalConfirm = async () => {
+    if (!confirmType || !exam) return;
+    const type = confirmType;
+    setConfirmType(null);
+
+    try {
+      if (type === "start") {
+        const res = await apiFetch<any>(`/api/exams/${exam.id}/status`, {
+          method: "PUT",
+          body: JSON.stringify({ status: "active" }),
+        });
+        if (res.success) {
+          showToast("success", "Ujian berhasil dimulai!");
+          fetchExamDetail();
+        } else {
+          showToast("error", res.error?.message || "Gagal memulai ujian (pastikan ujian memiliki soal)");
+        }
+      } else if (type === "end") {
+        const res = await apiFetch<any>(`/api/exams/${exam.id}/status`, {
+          method: "PUT",
+          body: JSON.stringify({ status: "ended" }),
+        });
+        if (res.success) {
+          showToast("success", "Ujian telah diakhiri.");
+          fetchExamDetail();
+        } else {
+          showToast("error", res.error?.message || "Gagal mengakhiri ujian");
+        }
+      } else if (type === "delete") {
+        const res = await apiFetch<any>(`/api/exams/${exam.id}`, {
+          method: "DELETE",
+        });
+        if (res.success) {
+          showToast("success", "Ujian berhasil dihapus.");
+          setTimeout(() => {
+            router.push("/dashboard/exams");
+          }, 1000);
+        } else {
+          showToast("error", res.error?.message || "Gagal menghapus ujian");
+        }
+      } else if (type === "regen") {
+        const res = await apiFetch<any>(`/api/exams/${exam.id}/regenerate-code`, {
+          method: "POST",
+        });
+        if (res.success && res.data?.accessCode) {
+          setExam((prev: any) => ({ ...prev, accessCode: res.data.accessCode }));
+          showToast("success", "Kode akses berhasil diperbarui!");
+        } else {
+          showToast("error", res.error?.message || "Gagal memperbarui kode akses");
+        }
+      }
+    } catch {
+      showToast("error", "Terjadi kesalahan jaringan.");
+    }
+  };
+
+  if (!exam) {
+    return (
+      <DashboardShell>
+        <div style={{ padding: "32px", color: "#6B7280" }}>
+          {loading ? "Memuat data ujian..." : "Ujian tidak ditemukan."}
+        </div>
+      </DashboardShell>
+    );
+  }
+
+  const sc = STATUS_COLORS[exam.status as ExamStatus] || STATUS_COLORS.draft;
 
   const actionButtons: Record<ExamStatus, React.ReactNode> = {
     draft: (
@@ -264,14 +377,7 @@ function ExamDetailPage() {
               <button onClick={() => setConfirmType(null)} className="btn btn-secondary btn-md">Batal</button>
               <button
                 className={`btn ${confirmType === "end" || confirmType === "delete" ? "btn-danger" : "btn-primary"} btn-md`}
-                onClick={() => {
-                  showToast("success",
-                    confirmType === "start" ? "Ujian berhasil dimulai!" :
-                    confirmType === "end" ? "Ujian telah diakhiri." :
-                    confirmType === "delete" ? "Ujian berhasil dihapus." : "Kode berhasil di-generate ulang."
-                  );
-                  setConfirmType(null);
-                }}
+                onClick={handleModalConfirm}
               >
                 {confirmType === "start" ? "Mulai Sekarang" : confirmType === "end" ? "Akhiri Ujian" : confirmType === "delete" ? "Hapus Permanen" : "Ya, Generate Ulang"}
               </button>

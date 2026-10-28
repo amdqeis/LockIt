@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 export interface StudentScoreSummary {
   studentId: string;
   name: string;
-  nim: string;
+  nisn: string;
   status: string;
   totalPoints: number;
   earnedPoints: number;
@@ -72,7 +72,7 @@ export async function autoGradeStudent(studentId: string): Promise<StudentScoreS
   return {
     studentId: student.id,
     name: student.name,
-    nim: student.nim,
+    nisn: student.nisn,
     status: student.status,
     totalPoints,
     earnedPoints,
@@ -130,7 +130,7 @@ export async function autoGradeExam(examId: string): Promise<StudentScoreSummary
     results.push({
       studentId: student.id,
       name: student.name,
-      nim: student.nim,
+      nisn: student.nisn,
       status: student.status,
       totalPoints,
       earnedPoints,
@@ -191,7 +191,7 @@ export async function readStudentGradingSummaries(examId: string): Promise<Stude
     results.push({
       studentId: student.id,
       name: student.name,
-      nim: student.nim,
+      nisn: student.nisn,
       status: student.status,
       totalPoints,
       earnedPoints,

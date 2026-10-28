@@ -1,15 +1,11 @@
 "use client";
 
-import { useState, useEffect, useMemo, Suspense } from "react";
+import { useState, useEffect, useMemo, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import {
-  mockTeacher,
-  mockExams,
-  mockDashboardStats,
-  mockLiveSessions,
-  LiveSession,
-} from "@/lib/mockData";
+import { apiFetch } from "@/lib/apiClient";
+import { useTeacherAuth } from "@/contexts/AuthContext";
+import { aggregateFlags, FlagKey } from "@/lib/proctoring";
 import DashboardShell from "../components/DashboardShell";
 
 // Spec §7 Unified Design Tokens
@@ -37,10 +33,10 @@ const T = {
   statusDraft: "#8391A7",
   statusFinished: "#5B6778",
   statusArchived: "#A8B2C0",
-  flagCameraOff: "#EF6F6C",
-  flagOutOfFrame: "#F2DC3D",
-  flagSwitchedTabs: "#F5A24B",
-  flagMultiplePeople: "#D470DD",
+  flagTabSwitch: "#EF6F6C",
+  flagCopyPaste: "#F5A24B",
+  flagDevtools: "#D470DD",
+  flagReconnect: "#F2DC3D",
   radiusCard: "8px",
   radiusControl: "8px",
   radiusPill: "999px",
@@ -71,6 +67,7 @@ interface ExamItem {
 function DashboardContent() {
   const searchParams = useSearchParams();
   const filterParam = searchParams ? searchParams.get("filter") : null;
+  const { teacher } = useTeacherAuth();
 
   const [search, setSearch] = useState("");
   const [selectedTab, setSelectedTab] = useState<ExamStatus>(
@@ -80,7 +77,16 @@ function DashboardContent() {
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [openMenuExamId, setOpenMenuExamId] = useState<string | null>(null);
   const [confirmModal, setConfirmModal] = useState<{ type: "delete" | "archive" | "restore"; exam: ExamItem } | null>(null);
-  const [liveCountdown, setLiveCountdown] = useState<number>(1440); // 24 minutes in seconds
+  const [liveCountdown, setLiveCountdown] = useState<number>(1440);
+  const [examsList, setExamsList] = useState<ExamItem[]>([]);
+  const [loadingExams, setLoadingExams] = useState(true);
+  const [activeSession, setActiveSession] = useState<{
+    examId: string;
+    title: string;
+    online: number;
+    enrolled: number;
+    flags: Record<FlagKey, number>;
+  } | null>(null);
 
   // Sync tab with URL query parameter
   useEffect(() => {
@@ -135,7 +141,7 @@ function DashboardContent() {
 
   // Date formatted dynamically in Indonesian sentence case
   const currentDateFormatted = useMemo(() => {
-    const date = new Date(2026, 9, 26); // Senin, 26 Oktober 2026 (spec anchor date)
+    const date = new Date();
     return date.toLocaleDateString("id-ID", {
       weekday: "long",
       day: "numeric",
@@ -144,25 +150,95 @@ function DashboardContent() {
     });
   }, []);
 
-  // Map and type mock exams
-  const examsList: ExamItem[] = useMemo(() => {
-    return (mockExams as unknown as ExamItem[]).map((e) => ({
-      ...e,
-      status: e.status,
-    }));
+  const fetchExams = useCallback(async () => {
+    try {
+      const res = await apiFetch<any[]>("/api/exams");
+      if (res.success && Array.isArray(res.data) && res.data.length > 0) {
+        const mapped: ExamItem[] = res.data.map((e: any) => ({
+          id: e.id,
+          title: e.title,
+          description: e.description,
+          status: e.status,
+          duration: e.durationMinutes,
+          questionCount: e._count?.questions ?? 0,
+          accessCode: e.accessCode,
+          createdAt: e.createdAt,
+          startsAt: e.startTime,
+          endsAt: e.endTime,
+          updatedAt: e.updatedAt,
+          totalParticipants: e._count?.students ?? 0,
+        }));
+        setExamsList(mapped);
+      } else {
+        setExamsList([]);
+      }
+    } catch {
+      setExamsList([]);
+    } finally {
+      setLoadingExams(false);
+    }
   }, []);
 
-  // Counts for status tabs
-  const counts = useMemo(() => {
-    const map = {
-      all: mockDashboardStats.totalExams || examsList.length,
-      active: mockDashboardStats.activeExams || examsList.filter((e) => e.status === "active").length,
-      scheduled: mockDashboardStats.scheduledExams || examsList.filter((e) => e.status === "scheduled").length,
-      draft: mockDashboardStats.draftExams || examsList.filter((e) => e.status === "draft").length,
-      ended: mockDashboardStats.completedExams || examsList.filter((e) => e.status === "ended").length,
-      archived: mockDashboardStats.archivedExams || examsList.filter((e) => e.status === "archived").length,
+  useEffect(() => {
+    fetchExams();
+  }, [fetchExams]);
+
+  // Live session stats polling if active exam exists
+  useEffect(() => {
+    const activeExam = examsList.find((e) => e.status === "active");
+    if (!activeExam) {
+      setActiveSession(null);
+      return;
+    }
+
+    let isSubscribed = true;
+    const fetchLiveSession = async () => {
+      try {
+        const res = await apiFetch<any>(`/api/exams/${activeExam.id}/dashboard`);
+        if (res.success && res.data && isSubscribed) {
+          const overview = res.data.overview;
+          const flags = aggregateFlags(res.data.recentEvents || []);
+
+          if (res.data.exam?.endTime && res.data.serverTime) {
+            const diff = Math.max(
+              0,
+              Math.floor((new Date(res.data.exam.endTime).getTime() - new Date(res.data.serverTime).getTime()) / 1000)
+            );
+            setLiveCountdown(diff);
+          }
+
+          setActiveSession({
+            examId: activeExam.id,
+            title: activeExam.title,
+            online: overview?.onlineCount ?? 0,
+            enrolled: overview?.totalJoined ?? 0,
+            flags,
+          });
+        }
+      } catch {
+        // Ignore polling error
+      }
     };
-    return map;
+
+    fetchLiveSession();
+    const interval = setInterval(fetchLiveSession, 15000);
+    return () => {
+      isSubscribed = false;
+      clearInterval(interval);
+    };
+  }, [examsList]);
+
+  // Counts for status tabs and total participants
+  const counts = useMemo(() => {
+    return {
+      all: examsList.length,
+      active: examsList.filter((e) => e.status === "active").length,
+      scheduled: examsList.filter((e) => e.status === "scheduled").length,
+      draft: examsList.filter((e) => e.status === "draft").length,
+      ended: examsList.filter((e) => e.status === "ended").length,
+      archived: examsList.filter((e) => e.status === "archived").length,
+      totalParticipants: examsList.reduce((acc, e) => acc + (e.totalParticipants || 0), 0),
+    };
   }, [examsList]);
 
   // Filter exams based on search query and active tab
@@ -182,8 +258,6 @@ function DashboardContent() {
     });
   }, [examsList, search, selectedTab]);
 
-  // Active live session
-  const activeSession: LiveSession | undefined = mockLiveSessions[0];
 
   // Helper for scroll to list
   const scrollToList = () => {
@@ -562,77 +636,77 @@ function DashboardContent() {
                 }}
                 aria-label="Ringkasan pelanggaran live"
               >
-                {/* 1. Camera off */}
+                {/* 1. Tab Switch */}
                 <span
-                  title="Kamera mati: 2"
+                  title={`Pindah tab: ${activeSession.flags.tab_switch}`}
                   style={{ display: "inline-flex", alignItems: "center", gap: "5px", cursor: "help" }}
-                  aria-label="Kamera mati: 2"
+                  aria-label={`Pindah tab: ${activeSession.flags.tab_switch}`}
                 >
                   <span
                     style={{
                       width: "8px",
                       height: "8px",
                       borderRadius: "50%",
-                      backgroundColor: T.flagCameraOff,
+                      backgroundColor: T.flagTabSwitch,
                       display: "inline-block",
                     }}
                   />
-                  <span style={{ fontWeight: 600 }}>{activeSession.flags.camera_off}</span>
+                  <span style={{ fontWeight: 600 }}>{activeSession.flags.tab_switch}</span>
                 </span>
 
-                {/* 2. Out of frame */}
+                {/* 2. Copy Paste */}
                 <span
-                  title="Di luar frame: 1"
+                  title={`Copy/Paste: ${activeSession.flags.copy_paste}`}
                   style={{ display: "inline-flex", alignItems: "center", gap: "5px", cursor: "help" }}
-                  aria-label="Di luar frame: 1"
+                  aria-label={`Copy/Paste: ${activeSession.flags.copy_paste}`}
                 >
                   <span
                     style={{
                       width: "8px",
                       height: "8px",
                       borderRadius: "50%",
-                      backgroundColor: T.flagOutOfFrame,
+                      backgroundColor: T.flagCopyPaste,
+                      display: "inline-block",
+                    }}
+                  />
+                  <span style={{ fontWeight: 600 }}>{activeSession.flags.copy_paste}</span>
+                </span>
+
+                {/* 3. DevTools */}
+                <span
+                  title={`Buka DevTools: ${activeSession.flags.devtools}`}
+                  style={{ display: "inline-flex", alignItems: "center", gap: "5px", cursor: "help" }}
+                  aria-label={`Buka DevTools: ${activeSession.flags.devtools}`}
+                >
+                  <span
+                    style={{
+                      width: "8px",
+                      height: "8px",
+                      borderRadius: "50%",
+                      backgroundColor: T.flagDevtools,
+                      display: "inline-block",
+                    }}
+                  />
+                  <span style={{ fontWeight: 600 }}>{activeSession.flags.devtools}</span>
+                </span>
+
+                {/* 4. Reconnect */}
+                <span
+                  title={`Terputus/Reconnect: ${activeSession.flags.reconnect}`}
+                  style={{ display: "inline-flex", alignItems: "center", gap: "5px", cursor: "help" }}
+                  aria-label={`Terputus/Reconnect: ${activeSession.flags.reconnect}`}
+                >
+                  <span
+                    style={{
+                      width: "8px",
+                      height: "8px",
+                      borderRadius: "50%",
+                      backgroundColor: T.flagReconnect,
                       border: "1px solid #D4BF24",
                       display: "inline-block",
                     }}
                   />
-                  <span style={{ fontWeight: 600 }}>{activeSession.flags.out_of_frame}</span>
-                </span>
-
-                {/* 3. Switched tabs */}
-                <span
-                  title="Pindah tab: 3"
-                  style={{ display: "inline-flex", alignItems: "center", gap: "5px", cursor: "help" }}
-                  aria-label="Pindah tab: 3"
-                >
-                  <span
-                    style={{
-                      width: "8px",
-                      height: "8px",
-                      borderRadius: "50%",
-                      backgroundColor: T.flagSwitchedTabs,
-                      display: "inline-block",
-                    }}
-                  />
-                  <span style={{ fontWeight: 600 }}>{activeSession.flags.switched_tabs}</span>
-                </span>
-
-                {/* 4. Multiple people */}
-                <span
-                  title="Lebih dari satu orang: 0"
-                  style={{ display: "inline-flex", alignItems: "center", gap: "5px", cursor: "help" }}
-                  aria-label="Lebih dari satu orang: 0"
-                >
-                  <span
-                    style={{
-                      width: "8px",
-                      height: "8px",
-                      borderRadius: "50%",
-                      backgroundColor: T.flagMultiplePeople,
-                      display: "inline-block",
-                    }}
-                  />
-                  <span style={{ fontWeight: 600 }}>{activeSession.flags.multiple_people}</span>
+                  <span style={{ fontWeight: 600 }}>{activeSession.flags.reconnect}</span>
                 </span>
               </div>
 
@@ -781,7 +855,7 @@ function DashboardContent() {
                 fontVariantNumeric: "tabular-nums",
               }}
             >
-              {mockDashboardStats.totalParticipants}
+              {counts.totalParticipants}
             </div>
           </div>
 
@@ -1340,14 +1414,39 @@ function DashboardContent() {
                   style={{
                     backgroundColor: confirmModal.type === "delete" ? T.danger : T.primary,
                   }}
-                  onClick={() => {
-                    const actionName =
-                      confirmModal.type === "delete"
-                        ? "Ujian berhasil dihapus"
-                        : confirmModal.type === "archive"
-                        ? "Ujian berhasil diarsipkan"
-                        : "Ujian berhasil dipulihkan";
-                    showToast(actionName);
+                  onClick={async () => {
+                    const { type, exam } = confirmModal;
+                    if (type === "delete") {
+                      const res = await apiFetch(`/api/exams/${exam.id}`, { method: "DELETE" });
+                      if (res.success) {
+                        showToast("Ujian berhasil dihapus");
+                        fetchExams();
+                      } else {
+                        showToast(res.error?.message || "Gagal menghapus ujian");
+                      }
+                    } else if (type === "archive") {
+                      const res = await apiFetch(`/api/exams/${exam.id}/status`, {
+                        method: "PUT",
+                        body: JSON.stringify({ status: "archived" }),
+                      });
+                      if (res.success) {
+                        showToast("Ujian berhasil diarsipkan");
+                        fetchExams();
+                      } else {
+                        showToast(res.error?.message || "Gagal mengarsipkan ujian");
+                      }
+                    } else if (type === "restore") {
+                      const res = await apiFetch(`/api/exams/${exam.id}/status`, {
+                        method: "PUT",
+                        body: JSON.stringify({ status: "draft" }),
+                      });
+                      if (res.success) {
+                        showToast("Ujian berhasil dipulihkan");
+                        fetchExams();
+                      } else {
+                        showToast(res.error?.message || "Gagal memulihkan ujian");
+                      }
+                    }
                     setConfirmModal(null);
                   }}
                 >
@@ -1695,8 +1794,8 @@ function ExamCard({
       >
         {exam.status === "active" ? (
           <span>
-            <strong style={{ color: T.textPrimary }}>{exam.online || 28}</strong> dari {exam.enrolled || 34} online ·{" "}
-            <span style={{ color: T.flagCameraOff }}>●</span> {exam.flagCount || 3} pelanggaran
+            <strong style={{ color: T.textPrimary }}>{exam.online || 0}</strong> dari {exam.totalParticipants || exam.enrolled || 0} online ·{" "}
+            <span style={{ color: T.flagTabSwitch }}>●</span> {exam.flagCount || 0} pelanggaran
           </span>
         ) : (
           getContextLine(exam)

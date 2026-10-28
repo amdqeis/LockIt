@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, Suspense } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { mockExams } from "@/lib/mockData";
+import { apiFetch } from "@/lib/apiClient";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type ViolationKey =
@@ -334,9 +334,55 @@ function StudentListRow({ student, index, isSelected, onClick }: {
 }
 
 // ─── Detail Panel ─────────────────────────────────────────────────────────────
-function DetailPanel({ student, onClose }: { student: StudentFeedItem; onClose: () => void }) {
+function DetailPanel({
+  examId,
+  student,
+  onClose,
+  onActionDone,
+}: {
+  examId: string;
+  student: StudentFeedItem;
+  onClose: () => void;
+  onActionDone?: () => void;
+}) {
   const topFlag = getTopFlag(student.activeFlags);
   const st = STATUS_STYLE[student.status];
+
+  const handleUnlock = async () => {
+    try {
+      const res = await apiFetch<any>(`/api/exams/${examId}/students/${student.studentId}/unlock`, {
+        method: "POST",
+      });
+      if (res.success) {
+        alert("Peserta berhasil di-unlock.");
+        onActionDone?.();
+        onClose();
+      } else {
+        alert(res.error?.message || "Gagal meng-unlock peserta.");
+      }
+    } catch {
+      alert("Terjadi kesalahan jaringan.");
+    }
+  };
+
+  const handleWarn = async () => {
+    const msg = prompt("Pesan peringatan untuk peserta:", "Harap tetap fokus pada halaman ujian.");
+    if (!msg) return;
+    try {
+      const res = await apiFetch<any>(`/api/exams/${examId}/students/${student.studentId}/warn`, {
+        method: "POST",
+        body: JSON.stringify({ message: msg }),
+      });
+      if (res.success) {
+        alert("Peringatan terkirim ke peserta.");
+        onActionDone?.();
+      } else {
+        alert(res.error?.message || "Gagal mengirim peringatan.");
+      }
+    } catch {
+      alert("Terjadi kesalahan jaringan.");
+    }
+  };
 
   const mockHistory = [
     ...(student.activeFlags.map((f, i) => ({ flag: f, time: "10:41", status: "active" as const }))),
@@ -443,23 +489,24 @@ function DetailPanel({ student, onClose }: { student: StudentFeedItem; onClose: 
         {/* Actions */}
         <div style={{ padding: "14px 20px", borderTop: "1px solid #E3E5EA", display: "flex", gap: 10 }}>
           {student.status === "blocked" ? (
-            <button style={{
-              flex: 1, height: 38, borderRadius: 8, border: "1.5px solid #E3E5EA",
-              background: "white", color: "#1F2430", fontSize: 13, fontWeight: 600,
-              cursor: "pointer", fontFamily: "var(--font-family)",
-            }}>🔓 Buka Kunci</button>
+            <button
+              onClick={handleUnlock}
+              style={{
+                flex: 1, height: 38, borderRadius: 8, border: "1.5px solid #E3E5EA",
+                background: "white", color: "#1F2430", fontSize: 13, fontWeight: 600,
+                cursor: "pointer", fontFamily: "var(--font-family)",
+              }}
+            >🔓 Buka Kunci</button>
           ) : (
-            <button style={{
-              flex: 1, height: 38, borderRadius: 8, border: "1.5px solid #E3E5EA",
-              background: "white", color: "#1F2430", fontSize: 13, fontWeight: 600,
-              cursor: "pointer", fontFamily: "var(--font-family)",
-            }}>⚠️ Kirim Peringatan</button>
+            <button
+              onClick={handleWarn}
+              style={{
+                flex: 1, height: 38, borderRadius: 8, border: "1.5px solid #E3E5EA",
+                background: "white", color: "#1F2430", fontSize: 13, fontWeight: 600,
+                cursor: "pointer", fontFamily: "var(--font-family)",
+              }}
+            >⚠️ Kirim Peringatan</button>
           )}
-          <button style={{
-            flex: 1, height: 38, borderRadius: 8, border: "none",
-            background: "#DC2626", color: "white", fontSize: 13, fontWeight: 600,
-            cursor: "pointer", fontFamily: "var(--font-family)",
-          }}>🔒 Blokir Peserta</button>
         </div>
       </div>
     </div>
@@ -467,12 +514,23 @@ function DetailPanel({ student, onClose }: { student: StudentFeedItem; onClose: 
 }
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
-export default function MonitorPage() {
+function MonitorPageContent() {
   const params = useParams();
   const examId = (params?.id as string) ?? "exam-1";
-  const exam = mockExams.find(e => e.id === examId) ?? mockExams[0];
+  const [exam, setExam] = useState({
+    id: examId,
+    title: "Monitoring Ujian",
+    duration: 90,
+    violationPolicy: {
+      maxViolations: 3,
+      action: "auto-lock",
+      detectCopyPaste: true,
+      detectRightClick: true,
+      detectDevTools: true,
+    },
+  });
 
-  const [secondsLeft, setSecondsLeft] = useState(exam.duration * 60);
+  const [secondsLeft, setSecondsLeft] = useState(90 * 60);
   const [filter, setFilter] = useState("all");
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [selectedStudent, setSelectedStudent] = useState<StudentFeedItem | null>(null);
@@ -487,26 +545,91 @@ export default function MonitorPage() {
     return () => clearInterval(t);
   }, [secondsLeft]);
 
-  // Simulate real-time violations
+  const [examMeta, setExamMeta] = useState<any>(exam);
+
+  // Poll real-time dashboard data and student presence
+  const fetchDashboardData = useCallback(async () => {
+    if (!examId) return;
+    try {
+      const [dashRes, stuRes] = await Promise.all([
+        apiFetch<any>(`/api/exams/${examId}/dashboard`),
+        apiFetch<any>(`/api/exams/${examId}/students?pageSize=100`),
+      ]);
+
+      if (dashRes.success && dashRes.data) {
+        const { exam: beExam, serverTime, recentEvents } = dashRes.data;
+        if (beExam) {
+          setExamMeta((prev: any) => ({
+            ...prev,
+            title: beExam.title || prev.title,
+            duration: beExam.durationMinutes || prev.duration,
+          }));
+          setExam((prev) => ({
+            ...prev,
+            id: beExam.id || prev.id,
+            title: beExam.title || prev.title,
+            duration: beExam.durationMinutes || prev.duration,
+            violationPolicy: {
+              maxViolations: beExam.violationPolicy?.max_violations ?? prev.violationPolicy.maxViolations,
+              action: beExam.violationPolicy?.action ?? prev.violationPolicy.action,
+              detectCopyPaste: beExam.violationPolicy?.detect_copy_paste ?? prev.violationPolicy.detectCopyPaste,
+              detectRightClick: beExam.violationPolicy?.detect_right_click ?? prev.violationPolicy.detectRightClick,
+              detectDevTools: beExam.violationPolicy?.detect_devtools ?? prev.violationPolicy.detectDevTools,
+            },
+          }));
+          if (beExam.endTime && serverTime) {
+            const diff = Math.max(
+              0,
+              Math.floor((new Date(beExam.endTime).getTime() - new Date(serverTime).getTime()) / 1000)
+            );
+            setSecondsLeft(diff);
+          }
+        }
+
+        if (stuRes.success && stuRes.data?.students && stuRes.data.students.length > 0) {
+          const eventsByStudent: Record<string, ViolationKey[]> = {};
+          if (Array.isArray(recentEvents)) {
+            recentEvents.forEach((ev: any) => {
+              if (ev.studentId && ev.eventType) {
+                if (!eventsByStudent[ev.studentId]) eventsByStudent[ev.studentId] = [];
+                if (!eventsByStudent[ev.studentId].includes(ev.eventType)) {
+                  eventsByStudent[ev.studentId].push(ev.eventType);
+                }
+              }
+            });
+          }
+
+          const mapped: StudentFeedItem[] = stuRes.data.students.map((s: any) => {
+            const activeFlags = eventsByStudent[s.id] || [];
+            let status: StudentStatus = "offline";
+            if (s.isLocked) status = "blocked";
+            else if (s.status === "active") status = "online";
+            else if (s.status === "submitted") status = "submitted";
+
+            return {
+              studentId: s.id,
+              name: s.name,
+              identifier: s.nisn,
+              identifierLabel: "NISN",
+              status,
+              activeFlags,
+              violationCount: s.violationCount || 0,
+              lastEventAt: s.joinedAt,
+            };
+          });
+          setStudents(mapped);
+        }
+      }
+    } catch {
+      // Keep existing data on polling error
+    }
+  }, [examId]);
+
   useEffect(() => {
-    const interval = setInterval(() => {
-      setStudents(prev => {
-        const onlineStudents = prev.filter(s => s.status === "online");
-        if (!onlineStudents.length) return prev;
-        const target = onlineStudents[Math.floor(Math.random() * onlineStudents.length)];
-        const shouldClear = Math.random() > 0.6 && target.activeFlags.length > 0;
-        const newFlags = shouldClear
-          ? target.activeFlags.slice(0, -1)
-          : [...target.activeFlags, ALL_VIOLATIONS[Math.floor(Math.random() * ALL_VIOLATIONS.length)]].filter((v, i, arr) => arr.indexOf(v) === i).slice(0, 3);
-        return prev.map(s =>
-          s.studentId === target.studentId
-            ? { ...s, activeFlags: newFlags, violationCount: shouldClear ? s.violationCount : s.violationCount + 1, lastEventAt: new Date().toISOString() }
-            : s
-        );
-      });
-    }, 4000);
+    fetchDashboardData();
+    const interval = setInterval(fetchDashboardData, 10000);
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchDashboardData]);
 
   // Close dropdown outside
   useEffect(() => {
@@ -786,7 +909,12 @@ export default function MonitorPage() {
 
       {/* Detail Panel */}
       {selectedStudent && (
-        <DetailPanel student={selectedStudent} onClose={() => setSelectedStudent(null)} />
+        <DetailPanel
+          examId={examId}
+          student={selectedStudent}
+          onClose={() => setSelectedStudent(null)}
+          onActionDone={fetchDashboardData}
+        />
       )}
 
       <div aria-live="polite" aria-atomic="true" style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0,0,0,0)", whiteSpace: "nowrap" }} />
@@ -804,5 +932,13 @@ export default function MonitorPage() {
         button:focus-visible { outline: 2px solid #29ABE2; outline-offset: 2px; }
       `}</style>
     </div>
+  );
+}
+
+export default function MonitorPage() {
+  return (
+    <Suspense fallback={<div style={{ padding: 24, textAlign: "center" }}>Memuat Monitor Ujian...</div>}>
+      <MonitorPageContent />
+    </Suspense>
   );
 }

@@ -18,6 +18,7 @@ export async function POST(req: NextRequest) {
 
     const response = successResponse({ message: "Berhasil keluar dari akun" });
     response.cookies.delete("refreshToken");
+    response.cookies.delete("hasTeacherSession");
 
     return response;
   } catch (err: any) {

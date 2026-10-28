@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, Suspense } from "react";
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
-import { mockTeacher, mockDashboardStats } from "@/lib/mockData";
+import { usePathname, useSearchParams, useRouter } from "next/navigation";
+import { useTeacherAuth } from "@/contexts/AuthContext";
 
 interface Props {
   children: React.ReactNode;
@@ -28,20 +28,33 @@ const T = {
   sidebarWidth: 248,
 };
 
-export default function DashboardShell({ children }: Props) {
+function DashboardShellInner({ children }: Props) {
+  const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const { teacher, logout } = useTeacherAuth();
   const filterParam = searchParams ? searchParams.get("filter") : null;
   const [userMenuOpen, setUserMenuOpen] = useState(false);
 
+  const teacherName = teacher?.fullName || "Guru / Pengawas";
+  const teacherEmail = teacher?.email || "guru@lockit.id";
+  const teacherInitials = teacher?.fullName
+    ? teacher.fullName
+        .split(" ")
+        .map((n) => n[0])
+        .join("")
+        .slice(0, 2)
+        .toUpperCase()
+    : "GP";
+
   // Exact route matching: each route owns exactly ONE nav item (Spec §2 #6, §4.1)
-  const isResults = pathname.includes("/results") || (pathname === "/dashboard" && filterParam === "ended");
-  const isMonitor = pathname.includes("/monitor") || pathname.includes("/live-feed");
+  const isResults = pathname === "/dashboard/results" || pathname.includes("/results");
+  const isMonitor = pathname === "/dashboard/monitor" || pathname.includes("/monitor") || pathname.includes("/live-feed");
   const isQuestionBank = pathname.startsWith("/dashboard/question-bank");
   const isExamRoute = (pathname === "/dashboard/exams" || pathname.startsWith("/dashboard/exams/")) && !isMonitor && !isResults;
   const isDashboard = pathname === "/dashboard" && !filterParam && !isResults;
 
-  const activeCount = mockDashboardStats.activeExams;
+  const activeCount = 1;
 
   return (
     <div
@@ -331,7 +344,7 @@ export default function DashboardShell({ children }: Props) {
 
           {/* 4. Monitoring live */}
           <Link
-            href="/dashboard/exams/exam-1/monitor"
+            href="/dashboard/monitor"
             className={`sidebar-nav-link ${isMonitor ? "active" : ""}`}
             aria-current={isMonitor ? "page" : undefined}
           >
@@ -382,7 +395,7 @@ export default function DashboardShell({ children }: Props) {
 
           {/* 5. Rekap hasil */}
           <Link
-            href="/dashboard?filter=ended"
+            href="/dashboard/results"
             className={`sidebar-nav-link ${isResults ? "active" : ""}`}
             aria-current={isResults ? "page" : undefined}
           >
@@ -413,7 +426,7 @@ export default function DashboardShell({ children }: Props) {
             onClick={() => setUserMenuOpen((s) => !s)}
             aria-expanded={userMenuOpen}
             aria-haspopup="true"
-            aria-label={`Menu pengguna ${mockTeacher.name}`}
+            aria-label={`Menu pengguna ${teacherName}`}
           >
             {/* 32px avatar */}
             <div
@@ -431,13 +444,13 @@ export default function DashboardShell({ children }: Props) {
                 flexShrink: 0,
               }}
             >
-              {mockTeacher.initials}
+              {teacherInitials}
             </div>
 
             {/* Name & email with ellipsis + title attribute */}
             <div style={{ flex: 1, minWidth: 0 }}>
               <div
-                title={mockTeacher.name}
+                title={teacherName}
                 style={{
                   fontSize: "13px",
                   fontWeight: 600,
@@ -448,10 +461,10 @@ export default function DashboardShell({ children }: Props) {
                   lineHeight: "18px",
                 }}
               >
-                {mockTeacher.name}
+                {teacherName}
               </div>
               <div
-                title={mockTeacher.email}
+                title={teacherEmail}
                 style={{
                   fontSize: "12px",
                   color: T.textSecondary,
@@ -461,7 +474,7 @@ export default function DashboardShell({ children }: Props) {
                   lineHeight: "16px",
                 }}
               >
-                {mockTeacher.email}
+                {teacherEmail}
               </div>
             </div>
 
@@ -504,7 +517,7 @@ export default function DashboardShell({ children }: Props) {
               }}
             >
               <div style={{ padding: "8px 12px 6px", borderBottom: `1px solid ${T.border}`, marginBottom: "4px" }}>
-                <div style={{ fontSize: "12px", fontWeight: 600, color: T.textPrimary }}>{mockTeacher.name}</div>
+                <div style={{ fontSize: "12px", fontWeight: 600, color: T.textPrimary }}>{teacherName}</div>
                 <div style={{ fontSize: "11px", color: T.textSecondary }}>Dosen Pengampu</div>
               </div>
 
@@ -534,11 +547,15 @@ export default function DashboardShell({ children }: Props) {
                 Pengaturan
               </button>
 
-              <Link
-                href="/login"
+              <button
+                type="button"
                 className="user-menu-item danger"
                 role="menuitem"
-                onClick={() => setUserMenuOpen(false)}
+                onClick={async () => {
+                  setUserMenuOpen(false);
+                  await logout();
+                  router.push("/login");
+                }}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
@@ -546,7 +563,7 @@ export default function DashboardShell({ children }: Props) {
                   <line x1="21" y1="12" x2="9" y2="12" />
                 </svg>
                 Keluar
-              </Link>
+              </button>
             </div>
           )}
         </div>
@@ -565,5 +582,13 @@ export default function DashboardShell({ children }: Props) {
         {children}
       </main>
     </div>
+  );
+}
+
+export default function DashboardShell({ children }: Props) {
+  return (
+    <Suspense fallback={<div style={{ minHeight: "100vh", background: T.bgPage }}>{children}</div>}>
+      <DashboardShellInner>{children}</DashboardShellInner>
+    </Suspense>
   );
 }

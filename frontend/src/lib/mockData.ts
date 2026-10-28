@@ -7,7 +7,7 @@ export const mockTeacher = {
   initials: "AF",
 };
 
-export type FlagKey = "camera_off" | "out_of_frame" | "switched_tabs" | "multiple_people";
+export type FlagKey = "tab_switch" | "copy_paste" | "devtools" | "reconnect";
 
 export interface LiveSession {
   examId: string;
@@ -26,10 +26,10 @@ export const mockLiveSessions: LiveSession[] = [
     enrolled: 34,
     endsAt: "2026-10-26T10:30:00+07:00",
     flags: {
-      camera_off: 2,
-      out_of_frame: 1,
-      switched_tabs: 3,
-      multiple_people: 0,
+      tab_switch: 3,
+      copy_paste: 1,
+      devtools: 0,
+      reconnect: 2,
     },
   },
 ];

@@ -1,3 +1,6 @@
+import { loadEnvConfig } from "@next/env";
+loadEnvConfig(process.cwd());
+
 import { createServer } from "http";
 import { parse } from "url";
 import next from "next";
@@ -8,7 +11,7 @@ import { rescheduleActiveExamsOnBoot, cleanupExpiredTokens } from "./src/lib/sch
 
 const dev = process.env.NODE_ENV !== "production";
 const hostname = "localhost";
-const port = parseInt(process.env.PORT || "3000", 10);
+const port = parseInt(process.env.PORT || "3001", 10);
 
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
@@ -31,7 +34,7 @@ app.prepare().then(async () => {
   // CRIT-02: Batasi origin Socket.IO — jangan pernah gunakan "*"
   const allowedOrigins = process.env.ALLOWED_ORIGINS
     ? process.env.ALLOWED_ORIGINS.split(",").map((o) => o.trim())
-    : ["http://localhost:3001"];
+    : ["http://localhost:3000"];
 
   const io = new SocketIOServer(httpServer, {
     cors: {
@@ -142,7 +145,7 @@ app.prepare().then(async () => {
 
   studentNs.on("connection", (socket) => {
     const student = socket.data.student;
-    console.log(`[Socket] Student connected: ${student.name} (${student.nim})`);
+    console.log(`[Socket] Student connected: ${student.name} (${student.nisn})`);
 
     studentLastHeartbeat.set(student.id, Date.now());
 
@@ -154,7 +157,7 @@ app.prepare().then(async () => {
     teacherNs.to(`exam:${student.examId}`).emit("student_presence", {
       studentId: student.id,
       name: student.name,
-      nim: student.nim,
+      nisn: student.nisn,
       status: "active",
       lastSeen: new Date().toISOString(),
     });
@@ -178,7 +181,7 @@ app.prepare().then(async () => {
         teacherNs.to(`exam:${student.examId}`).emit("student_presence", {
           studentId: student.id,
           name: student.name,
-          nim: student.nim,
+          nisn: student.nisn,
           status: "active",
           lastSeen: new Date(now).toISOString(),
         });
@@ -220,7 +223,7 @@ app.prepare().then(async () => {
             teacherNs.to(`exam:${student.examId}`).emit("student_presence", {
               studentId,
               name: student.name,
-              nim: student.nim,
+              nisn: student.nisn,
               status: "disconnected",
               lastSeen: new Date(lastSeen).toISOString(),
             });

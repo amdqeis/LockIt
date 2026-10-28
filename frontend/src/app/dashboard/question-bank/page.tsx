@@ -4,11 +4,11 @@ import { useState, useMemo } from "react";
 import Link from "next/link";
 import DashboardShell from "@/app/components/DashboardShell";
 import {
-  mockQuestionBanks,
+  defaultQuestionBanks,
   QuestionBank,
   QuestionBankStatus,
   DifficultyLevel,
-} from "@/lib/mockData";
+} from "@/lib/questionBank";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -260,7 +260,7 @@ function DetailDrawer({ bank, onClose, onEdit, onDelete }: {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function QuestionBankPage() {
-  const [banks, setBanks] = useState<QuestionBank[]>(mockQuestionBanks);
+  const [banks, setBanks] = useState<QuestionBank[]>(defaultQuestionBanks);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState<"all" | QuestionBankStatus>("all");
   const [filterDiff, setFilterDiff] = useState<"all" | DifficultyLevel>("all");

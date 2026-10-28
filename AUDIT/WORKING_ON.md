@@ -3,6 +3,7 @@
 > **Tanggal Mulai:** 26 Oktober 2026  
 > **Status:** Active / In Progress  
 > **Dasar Perbaikan:** [`01-GAP-ANALYSIS.md`](./01-GAP-ANALYSIS.md), [`02-FRONTEND-AUDIT.md`](./02-FRONTEND-AUDIT.md), [`03-BACKEND-AUDIT.md`](./03-BACKEND-AUDIT.md), [`04-DOCS-AUDIT.md`](./04-DOCS-AUDIT.md)
+> **Plan Integrasi:** [`05-FE-BE-INTEGRATION-PLAN.md`](./05-FE-BE-INTEGRATION-PLAN.md) ← **BACA INI SEBELUM EKSEKUSI**
 
 ---
 
@@ -40,30 +41,57 @@ Fokus saat ini adalah memastikan fondasi proyek stabil, build frontend tidak gag
 
 ---
 
-## 🎯 2. Antrean Berikutnya (Up Next) — Sprint 2: Integrasi Alur Kritis Siswa (P0 Flow)
+## 🎯 2. Antrean Berikutnya (Up Next) — Sprint I: Integrasi FE ↔ BE (6 Sprint)
 
-Setelah build dan security dasar bersih, perbaikan langsung masuk ke integrasi fungsional paling penting (Student Exam Flow).
+> 📋 **Dokumen planning lengkap ada di [`05-FE-BE-INTEGRATION-PLAN.md`](./05-FE-BE-INTEGRATION-PLAN.md)**
+> Versi 1.1 — Keputusan D-01~D-06 sudah resolved.
 
-- [ ] **Integrasi Halaman Join Siswa (`US-M01`, `US-M02`, `FE-CRIT-02`)**
-  - Ganti hardcoded check `"BD2026X"` di `frontend/src/app/join/page.tsx` dan `frontend/src/app/join/identity/page.tsx` dengan pemanggilan riil ke `POST /api/join`.
-  - Simpan cookie token sesi siswa dari backend response (`student_session`).
+### ✅ Keputusan Sudah Dibuat
+- **D-01** ✅ Tambah `GET /api/join/validate` di backend (endpoint baru)
+- **D-02** ✅ FlagKey: `tab_switch`, `copy_paste`, `devtools`, `reconnect` (NO kamera/wajah)
+- **D-03** ✅ **NIM → NISN** (10 digit angka, Prisma migration wajib)
+- **D-04** ✅ Token in-memory React context
+- **D-05** ✅ Next.js proxy rewrites
+- **D-06** ✅ Proctoring berbasis perilaku browser only
 
-- [ ] **Fondasi Token & Auth Client Management (`FE-CRIT-05`, `US-G01`)**
-  - Buat API client / fetch wrapper di frontend (`lib/api.ts` atau `lib/auth.ts`) yang menangani:
-    - Penyimpanan `accessToken`
-    - Silent refresh otomatis via `POST /api/auth/refresh` saat token 15 menit kedaluwarsa
-    - Redirect otomatis ke `/login` saat menerima status HTTP 401 Unauthorized.
+### Pre-condition (Wajib Selesai Dulu)
+- [ ] Fix 5 halaman Suspense (`FE-MED-01`) — blocker build
+- [ ] Setup proxy di `frontend/next.config.ts` + buat `frontend/.env.local`
 
-- [ ] **Integrasi Pengerjaan Ujian Siswa (`US-M03`, `US-M04`, `US-M05`, `US-M08`, `FE-CRIT-03`)**
-  - Ganti pemanggilan `mockQuestions` dan `mockExamSession` di `frontend/src/app/exam/session/page.tsx` (1431 baris) dengan:
-    - `GET /api/exam-session` untuk fetch soal acak per NIM
-    - Sinkronisasi timer dengan `serverTime` dari respons backend
-    - Auto-save jawaban ke `POST /api/exam-session/answer`
-    - Heartbeat periodik ke `POST /api/exam-session/heartbeat` (mencegah timeout 30s)
-    - Submit final ke `POST /api/exam-session/submit`.
+### Sprint I-1: Backend — NISN Migration + Validate Endpoint (1 hari)
+- [ ] Prisma migration: rename `nim` → `nisn` di Student model
+- [ ] Update `join/route.ts` — schema nisn (10 digit regex), semua query & response
+- [ ] Update `auth.ts` — `StudentTokenPayload.nim` → `nisn`
+- [ ] Update `exam-session/route.ts` — shuffle seed ganti ke `student.nisn`
+- [ ] **Buat `src/app/api/join/validate/route.ts`** — GET endpoint validasi kode
+- [ ] Verifikasi: `npx prisma migrate status` clean; validate endpoint berfungsi
 
-- [ ] **Sanitasi SVG pada Renderer Soal (`FE-CRIT-04`)**
-  - Sanitasi konten SVG di `exam/session/page.tsx` menggunakan `DOMPurify` sebelum dirender via `dangerouslySetInnerHTML` guna mencegah celah XSS.
+### Sprint I-2: Auth Guru Frontend (1-2 hari)
+- [ ] Buat `frontend/src/lib/apiClient.ts` (HTTP client + silent refresh)
+- [ ] Buat `AuthContext` + `useTeacherAuth` hook
+- [ ] Update `login/page.tsx` → POST /api/auth/login real
+- [ ] Buat `frontend/src/middleware.ts` route guard /dashboard
+
+### Sprint I-3: Dashboard Data Real (1-2 hari)
+- [ ] `dashboard/page.tsx` → GET /api/exams + live stats polling
+- [ ] FlagKey mapping: `eventTypeToFlagKey()` dari recentEvents
+- [ ] `dashboard/exams/page.tsx` data real; `DashboardShell` user chip real
+
+### Sprint I-4: Alur Siswa P0 (2-3 hari — terbesar)
+- [ ] `page.tsx` (halaman /) → GET /api/join/validate
+- [ ] `join/identity/page.tsx` → form NISN (10 digit) + POST /api/join
+- [ ] Buat `examSession.ts` + `proctoring.ts` (event listeners + mapping)
+- [ ] `exam/session/page.tsx` Fase A→E: load → autosave → heartbeat → proctoring → submit
+
+### Sprint I-5: CRUD Ujian Guru (1-2 hari)
+- [ ] Detail, edit, new exam pages → real API
+- [ ] Status change actions (mulai, akhiri, arsipkan)
+
+### Sprint I-6: Monitoring Live (1 hari)
+- [ ] `monitor/page.tsx` polling GET /api/exams/[id]/dashboard
+- [ ] WebSocket setup (opsional)
+
+
 
 ---
 

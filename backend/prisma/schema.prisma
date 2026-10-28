@@ -108,7 +108,7 @@ model Student {
   id                String        @id @default(uuid())
   examId            String        @map("exam_id")
   name              String
-  nim               String
+  nisn              String
   // LOW-04: Simpan hash SHA-256 dari session token — konsisten dengan teacher refresh token.
   // JWT asli tidak pernah disimpan di DB; hanya hash-nya untuk verifikasi.
   sessionTokenHash  String        @map("session_token_hash")
@@ -125,7 +125,7 @@ model Student {
   proctoringEvents ProctoringEvent[]
   warnings         Warning[]
 
-  @@unique([examId, nim])
+  @@unique([examId, nisn])
   @@index([sessionTokenHash])
   @@index([examId, status])
   @@map("students")

@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { useTeacherAuth } from "@/contexts/AuthContext";
 
 // Spec §8 & §7 Unified Design Tokens
 const T = {
@@ -30,6 +31,7 @@ const T = {
 function LoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { login, isAuthenticated } = useTeacherAuth();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -47,14 +49,10 @@ function LoginContent() {
 
   // If already signed in, redirect to /dashboard per Spec §4.5
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      const hasCookie = document.cookie.includes("lockit_teacher_session=active");
-      const hasLocal = localStorage.getItem("lockit_teacher_session") === "active";
-      if (hasCookie || hasLocal) {
-        router.replace("/dashboard");
-      }
+    if (isAuthenticated) {
+      router.replace("/dashboard");
     }
-  }, [router]);
+  }, [isAuthenticated, router]);
 
   // Validate email format
   const validateEmailFormat = (val: string): boolean => {
@@ -131,29 +129,21 @@ function LoginContent() {
     // Minimum visible time 300 ms per Spec §4.3
     const startTime = Date.now();
 
-    // Simulate API request: POST /auth/login
-    await new Promise((r) => setTimeout(r, 450));
+    // Call real backend authentication via useTeacherAuth
+    const res = await login(cleanEmail, password);
     const elapsed = Date.now() - startTime;
     if (elapsed < 300) {
       await new Promise((r) => setTimeout(r, 300 - elapsed));
     }
 
-    // Mock validation: accept valid email format with test credentials, or trigger simulated 401 error
-    // For demo purposes: any email matching demo credentials or valid test succeeds.
-    // If password is "salah" or "wrong", trigger 401.
-    if (password.toLowerCase() === "salah" || password.toLowerCase() === "wrong") {
-      setLoading(false);
-      setAlertError("Email atau password salah.");
+    setLoading(false);
+
+    if (!res.success) {
+      setAlertError(res.error || "Email atau password salah.");
       // Email stays filled, password is cleared, focus goes to password field per Spec §4.4
       setPassword("");
       passwordRef.current?.focus();
       return;
-    }
-
-    // Success (200): Set session cookie and storage
-    if (typeof window !== "undefined") {
-      document.cookie = `lockit_teacher_session=active; path=/; max-age=${rememberMe ? 2592000 : 86400}; SameSite=Lax`;
-      localStorage.setItem("lockit_teacher_session", "active");
     }
 
     // Redirect to 'next' query param if same-origin relative path per Spec §4.5

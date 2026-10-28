@@ -9,7 +9,7 @@ import { createRequestLogger } from "@/lib/logger";
 const joinSchema = z.object({
   accessCode: z.string().min(4, "Kode akses tidak valid").max(10).trim(),
   name: z.string().min(2, "Nama minimal 2 karakter").max(100).trim(),
-  nim: z.string().min(3, "NIM minimal 3 karakter").max(30).trim(),
+  nisn: z.string().regex(/^\d{10}$/, "NISN harus 10 digit angka").trim(),
 });
 
 export async function POST(req: NextRequest) {
@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
       return errorResponse("VALIDATION_ERROR", "Data join tidak valid", 400, parsed.error.flatten().fieldErrors);
     }
 
-    const { accessCode, name, nim } = parsed.data;
+    const { accessCode, name, nisn } = parsed.data;
 
     // Find Exam by access code (case-insensitive)
     const exam = await prisma.exam.findFirst({
@@ -72,12 +72,12 @@ export async function POST(req: NextRequest) {
       return errorResponse("EXAM_TIME_EXPIRED", "Waktu pengerjaan ujian telah berakhir", 400);
     }
 
-    // Check if student with same NIM already exists in this exam
+    // Check if student with same NISN already exists in this exam
     let student = await prisma.student.findUnique({
       where: {
-        examId_nim: {
+        examId_nisn: {
           examId: exam.id,
-          nim,
+          nisn,
         },
       },
     });
@@ -88,7 +88,7 @@ export async function POST(req: NextRequest) {
 
     if (student) {
       if (student.status === "submitted") {
-        return errorResponse("ALREADY_SUBMITTED", "NIM ini telah menyelesaikan dan mengumpulkan ujian", 403);
+        return errorResponse("ALREADY_SUBMITTED", "NISN ini telah menyelesaikan dan mengumpulkan ujian", 403);
       }
 
       // HIGH-04: Pastikan ujian masih aktif sebelum mengizinkan reconnect
@@ -98,16 +98,17 @@ export async function POST(req: NextRequest) {
 
       // Reconnect scenario
       const previousIp = student.ipAddress;
-      log.info("Student reconnect", { studentId: student.id, nim: student.nim, examId: exam.id });
+      log.info("Student reconnect", { studentId: student.id, nisn: student.nisn, examId: exam.id });
       freshToken = generateStudentSessionToken({
         studentId: student.id,
         examId: exam.id,
-        nim: student.nim,
+        nisn: student.nisn,
       });
 
       student = await prisma.student.update({
         where: { id: student.id },
         data: {
+          name,           // Selalu update nama saat reconnect (D-07)
           // LOW-04: Simpan hash token, bukan token asli
           sessionTokenHash: hashStudentToken(freshToken),
           status: "active",
@@ -116,7 +117,7 @@ export async function POST(req: NextRequest) {
         },
       });
 
-      // HIGH-07: Catat IP change untuk deteksi potensi impersonasi oleh guru
+      // HIGH-07: Catat reconnect event SELALU (bukan hanya saat IP berubah)
       const ipChanged = !!previousIp && previousIp !== clientIp;
       await prisma.proctoringEvent.create({
         data: {
@@ -134,11 +135,11 @@ export async function POST(req: NextRequest) {
     } else {
       // New student joining
       const dummyId = crypto.randomUUID();
-      log.info("New student joining", { nim, examId: exam.id });
+      log.info("New student joining", { nisn, examId: exam.id });
       freshToken = generateStudentSessionToken({
         studentId: dummyId,
         examId: exam.id,
-        nim,
+        nisn,
       });
 
       // LOW-04: Simpan hash token, bukan token asli
@@ -149,7 +150,7 @@ export async function POST(req: NextRequest) {
           id: dummyId,
           examId: exam.id,
           name,
-          nim,
+          nisn,
           sessionTokenHash: freshTokenHash,
           status: "active",
           ipAddress: clientIp,
@@ -162,7 +163,7 @@ export async function POST(req: NextRequest) {
       student: {
         id: student.id,
         name: student.name,
-        nim: student.nim,
+        nisn: student.nisn,
         examId: student.examId,
         status: student.status,
       },
@@ -187,7 +188,7 @@ export async function POST(req: NextRequest) {
       maxAge: exam.durationMinutes * 60 + 3600, // Duration + 1 hr buffer
     });
 
-    log.info("Join success", { studentId: student.id, nim: student.nim, examId: exam.id });
+    log.info("Join success", { studentId: student.id, nisn: student.nisn, examId: exam.id });
     return response;
   } catch (err: any) {
     log.error("Join error", { err: safeErrorMessage(err, "unknown") });

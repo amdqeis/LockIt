@@ -21,17 +21,17 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         student: {
           select: {
             name: true,
-            nim: true,
+            nisn: true,
           },
         },
       },
     });
 
-    const header = ["Timestamp (UTC)", "Nama Mahasiswa", "NIM", "Jenis Pelanggaran", "Durasi (ms)", "Metadata"];
+    const header = ["Timestamp (UTC)", "Nama Mahasiswa", "NISN", "Jenis Pelanggaran", "Durasi (ms)", "Metadata"];
     const rows = events.map((ev) => [
       `"${ev.timestamp.toISOString()}"`,
       `"${ev.student.name.replace(/"/g, '""')}"`,
-      `"${ev.student.nim}"`,
+      `"${ev.student.nisn}"`,
       `"${ev.eventType}"`,
       ev.durationMs !== null ? ev.durationMs : "-",
       ev.metadata ? `"${JSON.stringify(ev.metadata).replace(/"/g, '""')}"` : '""',

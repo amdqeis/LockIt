@@ -20,7 +20,7 @@ export interface TeacherJwtPayload {
 export interface StudentTokenPayload {
   studentId: string;
   examId: string;
-  nim: string;
+  nisn: string;
   timestamp: number;
 }
 
@@ -69,7 +69,7 @@ export function hashStudentToken(token: string): string {
 
 // ─── STUDENT SESSION TOKEN ───────────────────────────────────────────
 
-export function generateStudentSessionToken(data: { studentId: string; examId: string; nim: string }): string {
+export function generateStudentSessionToken(data: { studentId: string; examId: string; nisn: string }): string {
   const payload: StudentTokenPayload = {
     ...data,
     timestamp: Date.now(),

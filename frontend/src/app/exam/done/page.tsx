@@ -2,18 +2,28 @@
 
 import { useEffect, useState } from "react";
 
-// Simulated summary (will come from session/API in real app)
-const SUMMARY = {
-  name: "Siti Nurhaliza",
-  nim: "1301210001",
-  exam: "UTS Pemrograman Web 2026",
-  answered: 23,
-  total: 25,
+interface SubmissionSummary {
+  name: string;
+  nisn: string;
+  exam: string;
+  answered: number;
+  total: number;
+  violations: number;
+  duration: number;
+}
+
+const DEFAULT_SUMMARY: SubmissionSummary = {
+  name: "Peserta Ujian",
+  nisn: "0000000000",
+  exam: "Ujian Selesai",
+  answered: 0,
+  total: 0,
   violations: 0,
   duration: 90,
 };
 
 export default function ExamDonePage() {
+  const [summary, setSummary] = useState<SubmissionSummary>(DEFAULT_SUMMARY);
   const [show, setShow] = useState(false);
   const [submitTime, setSubmitTime] = useState("");
   const [checkmark, setCheckmark] = useState(false);
@@ -21,6 +31,14 @@ export default function ExamDonePage() {
   const [confettiRotations, setConfettiRotations] = useState<number[]>([]);
 
   useEffect(() => {
+    try {
+      const stored = sessionStorage.getItem("lockit_submission_summary");
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        setSummary((prev) => ({ ...prev, ...parsed }));
+      }
+    } catch {}
+
     // Generate random rotation values for each confetti piece (client-only)
     setConfettiRotations(
       Array.from({ length: 24 }, () => (Math.random() > 0.5 ? 1 : -1) * Math.floor(Math.random() * 360 + 180))
@@ -39,7 +57,7 @@ export default function ExamDonePage() {
     return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); clearTimeout(t4); };
   }, []);
 
-  const completionRate = Math.round((SUMMARY.answered / SUMMARY.total) * 100);
+  const completionRate = summary.total > 0 ? Math.round((summary.answered / summary.total) * 100) : 100;
 
   return (
     <div style={{
@@ -161,32 +179,32 @@ export default function ExamDonePage() {
                 border: "1.5px solid #A7F3D0",
                 display: "flex", flexDirection: "column", alignItems: "center", gap: "2px",
               }}>
-                <span style={{ fontSize: "22px", fontWeight: 800, color: "#059669" }}>{SUMMARY.answered}</span>
+                <span style={{ fontSize: "22px", fontWeight: 800, color: "#059669" }}>{summary.answered}</span>
                 <span style={{ fontSize: "10px", color: "#6B7280", fontWeight: 500 }}>Terjawab</span>
               </div>
               <div style={{
                 flex: 1, padding: "14px 10px", borderRadius: "14px",
-                background: SUMMARY.total - SUMMARY.answered > 0
+                background: summary.total - summary.answered > 0
                   ? "linear-gradient(135deg, #FEF3C7, #FDE68A)"
                   : "linear-gradient(135deg, #ECFDF5, #D1FAE5)",
-                border: `1.5px solid ${SUMMARY.total - SUMMARY.answered > 0 ? "#FCD34D" : "#A7F3D0"}`,
+                border: `1.5px solid ${summary.total - summary.answered > 0 ? "#FCD34D" : "#A7F3D0"}`,
                 display: "flex", flexDirection: "column", alignItems: "center", gap: "2px",
               }}>
-                <span style={{ fontSize: "22px", fontWeight: 800, color: SUMMARY.total - SUMMARY.answered > 0 ? "#D97706" : "#059669" }}>
-                  {SUMMARY.total - SUMMARY.answered}
+                <span style={{ fontSize: "22px", fontWeight: 800, color: summary.total - summary.answered > 0 ? "#D97706" : "#059669" }}>
+                  {summary.total - summary.answered}
                 </span>
                 <span style={{ fontSize: "10px", color: "#6B7280", fontWeight: 500 }}>Kosong</span>
               </div>
               <div style={{
                 flex: 1, padding: "14px 10px", borderRadius: "14px",
-                background: SUMMARY.violations > 0
+                background: summary.violations > 0
                   ? "linear-gradient(135deg, #FEF2F2, #FECACA)"
                   : "linear-gradient(135deg, #ECFDF5, #D1FAE5)",
-                border: `1.5px solid ${SUMMARY.violations > 0 ? "#FCA5A5" : "#A7F3D0"}`,
+                border: `1.5px solid ${summary.violations > 0 ? "#FCA5A5" : "#A7F3D0"}`,
                 display: "flex", flexDirection: "column", alignItems: "center", gap: "2px",
               }}>
-                <span style={{ fontSize: "22px", fontWeight: 800, color: SUMMARY.violations > 0 ? "#DC2626" : "#059669" }}>
-                  {SUMMARY.violations}
+                <span style={{ fontSize: "22px", fontWeight: 800, color: summary.violations > 0 ? "#DC2626" : "#059669" }}>
+                  {summary.violations}
                 </span>
                 <span style={{ fontSize: "10px", color: "#6B7280", fontWeight: 500 }}>Pelanggaran</span>
               </div>
@@ -218,9 +236,9 @@ export default function ExamDonePage() {
               marginBottom: "20px",
             }}>
               {[
-                { label: "Nama", value: SUMMARY.name },
-                { label: "NIM", value: SUMMARY.nim, mono: true },
-                { label: "Ujian", value: SUMMARY.exam },
+                { label: "Nama", value: summary.name },
+                { label: "NISN", value: summary.nisn, mono: true },
+                { label: "Ujian", value: summary.exam },
                 { label: "Submitted pada", value: submitTime, green: true },
               ].map(({ label, value, mono, green }, i, arr) => (
                 <div key={label} style={{

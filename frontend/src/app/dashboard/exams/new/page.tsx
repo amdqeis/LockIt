@@ -4,7 +4,8 @@ import { useState, useRef, useCallback, useEffect, useId } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import DashboardShell from "@/app/components/DashboardShell";
-import { mockQuestionBanks, QuestionBank } from "@/lib/mockData";
+import { defaultQuestionBanks, QuestionBank } from "@/lib/questionBank";
+import { apiFetch } from "@/lib/apiClient";
 
 // ─── Design tokens (spec §10) ─────────────────────────────────────────────────
 const T = {
@@ -351,9 +352,9 @@ export default function NewExamPage() {
   }, [isDirty]);
 
   // ── Derived state ──────────────────────────────────────────────────────────
-  const subjects = ["all", ...Array.from(new Set(mockQuestionBanks.filter(b => b.status === "active").map(b => b.subject)))];
+  const subjects = ["all", ...Array.from(new Set(defaultQuestionBanks.filter(b => b.status === "active").map(b => b.subject)))];
 
-  const filteredBanks = mockQuestionBanks
+  const filteredBanks = defaultQuestionBanks
     .filter(b => b.status === "active")
     .filter(b => bankFilter === "all" || b.subject === bankFilter)
     .filter(b => {
@@ -446,11 +447,43 @@ export default function NewExamPage() {
     }
     setErrors({});
     setSaving(true);
-    await new Promise(r => setTimeout(r, 1200));
-    setSaving(false);
-    setIsDirty(false);
-    setToast({ type: "success", msg: "Ujian disimpan." });
-    setTimeout(() => { setToast(null); router.push("/dashboard"); }, 2000);
+    try {
+      const res = await apiFetch<any>("/api/exams", {
+        method: "POST",
+        body: JSON.stringify({
+          title: form.title.trim(),
+          description: form.description?.trim() || undefined,
+          durationMinutes: Number(form.duration) || 90,
+          violationPolicy: {
+            max_violations: form.maxViolations || 5,
+            action: form.actionAtLimit === "lock" ? "lock" : "warning",
+            detect_copy_paste: form.detectCopyPaste,
+            detect_right_click: form.detectRightClick,
+            detect_devtools: form.detectDevTools,
+          },
+          settings: {
+            randomize_questions: form.shuffleQuestions,
+            display_mode: form.displayMode,
+            auto_save_interval_seconds: 30,
+          },
+        }),
+      });
+
+      if (res.success && res.data) {
+        setIsDirty(false);
+        setToast({ type: "success", msg: "Ujian berhasil dibuat." });
+        setTimeout(() => {
+          setToast(null);
+          router.push(`/dashboard/exams/${res.data.id}`);
+        }, 1200);
+      } else {
+        setToast({ type: "error", msg: res.error?.message || "Gagal membuat ujian." });
+      }
+    } catch {
+      setToast({ type: "error", msg: "Terjadi kesalahan jaringan." });
+    } finally {
+      setSaving(false);
+    }
   };
 
   const tryNavigate = (href: string) => {

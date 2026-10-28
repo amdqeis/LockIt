@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
           io.of("/teacher-dashboard").to(`exam:${exam.id}`).emit("student_presence", {
             studentId: student.id,
             name: student.name,
-            nim: student.nim,
+            nisn: student.nisn,
             status: "active",
             lastSeen: now.toISOString(),
           });
