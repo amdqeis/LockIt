@@ -18,19 +18,34 @@ async function main() {
   await prisma.exam.deleteMany({});
   await prisma.teacher.deleteMany({});
 
-  // 2. Buat Guru / Dosen Default
-  console.log("👤 Membuat akun guru...");
+  // 2. Buat Akun Admin (Administrator Institusi) + Guru Default
+  console.log("👤 Membuat akun admin dan guru...");
   const salt = await bcrypt.genSalt(10);
-  const passwordHash = await bcrypt.hash("password123", salt);
+  const adminPasswordHash = await bcrypt.hash("admin123", salt);
+  const teacherPasswordHash = await bcrypt.hash("password123", salt);
+
+  // Admin pertama — dibuat via seed (tidak ada endpoint publik untuk buat Admin)
+  const admin = await prisma.teacher.create({
+    data: {
+      email: "admin@lockit.id",
+      fullName: "Administrator LockIt",
+      passwordHash: adminPasswordHash,
+      role: "ADMIN",
+      isActive: true,
+    },
+  });
+  console.log(`✅ Admin dibuat: ${admin.fullName} (${admin.email}) — password: admin123`);
 
   const teacher = await prisma.teacher.create({
     data: {
       email: "guru@lockit.id",
       fullName: "Dr. Ahmad Fauzi, S.T., M.Kom.",
-      passwordHash,
+      passwordHash: teacherPasswordHash,
+      role: "TEACHER",
+      isActive: true,
     },
   });
-  console.log(`✅ Guru dibuat: ${teacher.fullName} (${teacher.email})`);
+  console.log(`✅ Guru dibuat: ${teacher.fullName} (${teacher.email}) — password: password123`);
 
   // 3. Buat Ujian 1: AKTIF (Sedang Berlangsung)
   console.log("📝 Membuat Ujian Aktif (UTS Pemrograman Web)...");
