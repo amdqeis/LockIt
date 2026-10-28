@@ -1,15 +1,17 @@
 import { NextRequest } from "next/server";
 import { authenticateStudent } from "@/lib/middleware/auth";
 import { prisma } from "@/lib/prisma";
-import { successResponse, errorResponse } from "@/lib/response";
+import { successResponse, errorResponse, safeErrorMessage } from "@/lib/response";
 import { AppError } from "@/lib/errors";
 
-// Simple deterministic shuffle using NIM as seed
-function pseudoRandomShuffle<T>(array: T[], seedStr: string): T[] {
+// MED-02: Seed dikombinasikan dari NIM + examId untuk mencegah prediksi urutan
+// berdasarkan NIM saja (NIM SMA seringkali berurutan dan mudah ditebak)
+function pseudoRandomShuffle<T>(array: T[], seedStr: string, salt: string): T[] {
   const result = [...array];
+  const combined = seedStr + "|" + salt;
   let seed = 0;
-  for (let i = 0; i < seedStr.length; i++) {
-    seed = (seed * 31 + seedStr.charCodeAt(i)) & 0xffffffff;
+  for (let i = 0; i < combined.length; i++) {
+    seed = (seed * 31 + combined.charCodeAt(i)) & 0xffffffff;
   }
 
   for (let i = result.length - 1; i > 0; i--) {
@@ -55,7 +57,7 @@ export async function GET(req: NextRequest) {
 
     const settings = (exam.settings as any) || {};
     if (settings.randomize_questions) {
-      questions = pseudoRandomShuffle(questions, student.nim);
+      questions = pseudoRandomShuffle(questions, student.nim, exam.id);
     }
 
     // Fetch existing answers of this student
@@ -94,6 +96,6 @@ export async function GET(req: NextRequest) {
     if (err instanceof AppError) {
       return errorResponse(err.code, err.message, err.statusCode, err.details);
     }
-    return errorResponse("INTERNAL_SERVER_ERROR", err.message || "Gagal memuat sesi ujian", 500);
+    return errorResponse("INTERNAL_SERVER_ERROR", safeErrorMessage(err, "Gagal memuat sesi ujian"), 500);
   }
 }

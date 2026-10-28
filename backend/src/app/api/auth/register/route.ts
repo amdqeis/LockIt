@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { hashPassword } from "@/lib/auth";
-import { successResponse, errorResponse } from "@/lib/response";
+import { successResponse, errorResponse, safeErrorMessage } from "@/lib/response";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 
 const registerSchema = z.object({
@@ -67,6 +67,6 @@ export async function POST(req: NextRequest) {
 
     return successResponse(teacher, 201);
   } catch (err: any) {
-    return errorResponse("INTERNAL_SERVER_ERROR", err.message || "Gagal melakukan registrasi", 500);
+    return errorResponse("INTERNAL_SERVER_ERROR", safeErrorMessage(err, "Gagal melakukan registrasi"), 500);
   }
 }

@@ -24,6 +24,11 @@ export async function generateUniqueAccessCode(length: number = 6): Promise<stri
     }
     attempts++;
   }
-  // If collisions after 10 attempts, try length + 1
-  return generateRandomCode(length + 1);
+  // LOW-01: Jangan diam-diam hasilkan kode yang mungkin tidak unik.
+  // Lempar error agar masalah collision terdeteksi dan diinvestigasi.
+  throw new Error(
+    `[CodeGenerator] Gagal menghasilkan kode unik setelah 10 percobaan (length=${length}). ` +
+    "Kemungkinan terlalu banyak ujian aktif atau ada issue DB."
+  );
 }
+

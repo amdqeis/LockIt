@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { authenticateStudent } from "@/lib/middleware/auth";
 import { prisma } from "@/lib/prisma";
 import { autoGradeStudent } from "@/services/grading";
-import { successResponse, errorResponse } from "@/lib/response";
+import { successResponse, errorResponse, safeErrorMessage } from "@/lib/response";
 import { AppError } from "@/lib/errors";
 
 export async function POST(req: NextRequest) {
@@ -63,6 +63,6 @@ export async function POST(req: NextRequest) {
     if (err instanceof AppError) {
       return errorResponse(err.code, err.message, err.statusCode, err.details);
     }
-    return errorResponse("INTERNAL_SERVER_ERROR", err.message || "Gagal mengumpulkan ujian", 500);
+    return errorResponse("INTERNAL_SERVER_ERROR", safeErrorMessage(err, "Gagal mengumpulkan ujian"), 500);
   }
 }

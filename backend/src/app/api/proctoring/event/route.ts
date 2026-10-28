@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { authenticateStudent } from "@/lib/middleware/auth";
 import { prisma } from "@/lib/prisma";
-import { successResponse, errorResponse } from "@/lib/response";
+import { successResponse, errorResponse, safeErrorMessage } from "@/lib/response";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { AppError } from "@/lib/errors";
 
@@ -70,21 +70,30 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    // 2. Increment student violation count & evaluate policy
+    // 2. Atomic increment violation count — cegah race condition
     const policy = (exam.violationPolicy as any) || {};
     const maxViolations = policy.max_violations || 5;
     const policyAction = policy.action || "warning";
 
-    const newViolationCount = student.violationCount + 1;
-    const shouldLock = newViolationCount >= maxViolations && policyAction === "lock";
-
+    // CRIT-03: Gunakan atomic increment Prisma, bukan read-then-write
     const updatedStudent = await prisma.student.update({
       where: { id: student.id },
       data: {
-        violationCount: newViolationCount,
-        ...(shouldLock ? { isLocked: true } : {}),
+        violationCount: { increment: 1 },
       },
     });
+
+    // Evaluasi lock SETELAH increment menggunakan nilai aktual dari DB
+    const shouldLock =
+      updatedStudent.violationCount >= maxViolations && policyAction === "lock" && !updatedStudent.isLocked;
+
+    if (shouldLock) {
+      await prisma.student.update({
+        where: { id: student.id },
+        data: { isLocked: true },
+      });
+      updatedStudent.isLocked = true;
+    }
 
     // 3. Emit real-time violation event to Teacher Dashboard via Socket.IO
     const io = (globalThis as any).io;
@@ -94,7 +103,7 @@ export async function POST(req: NextRequest) {
           studentId: student.id,
           name: student.name,
           nim: student.nim,
-          violationCount: newViolationCount,
+          violationCount: updatedStudent.violationCount,
           isLocked: updatedStudent.isLocked,
           event: {
             id: event.id,
@@ -111,13 +120,18 @@ export async function POST(req: NextRequest) {
 
     return successResponse({
       eventId: event.id,
-      violationCount: newViolationCount,
+      violationCount: updatedStudent.violationCount,
       isLocked: updatedStudent.isLocked,
     });
   } catch (err: any) {
     if (err instanceof AppError) {
       return errorResponse(err.code, err.message, err.statusCode, err.details);
     }
-    return errorResponse("INTERNAL_SERVER_ERROR", err.message || "Gagal mencatat event proctoring", 500);
+    // HIGH-03: Sembunyikan detail error internal di production
+    const message =
+      process.env.NODE_ENV === "production"
+        ? "Gagal mencatat event proctoring"
+        : safeErrorMessage(err, "Gagal mencatat event proctoring");
+    return errorResponse("INTERNAL_SERVER_ERROR", message, 500);
   }
 }

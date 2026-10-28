@@ -7,8 +7,9 @@ import {
   generateRefreshTokenString,
   hashRefreshToken,
 } from "@/lib/auth";
-import { successResponse, errorResponse } from "@/lib/response";
+import { successResponse, errorResponse, safeErrorMessage } from "@/lib/response";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
+import { createRequestLogger } from "@/lib/logger";
 
 const loginSchema = z.object({
   email: z.string().email("Format email tidak valid"),
@@ -16,8 +17,10 @@ const loginSchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
+  const log = createRequestLogger(req.headers.get("x-request-id") ?? undefined);
   try {
     const clientIp = getClientIp(req.headers);
+    log.info("Login attempt", { ip: clientIp });
     const rateLimit = checkRateLimit(clientIp, {
       windowMs: 15 * 60 * 1000,
       max: 5,
@@ -50,11 +53,13 @@ export async function POST(req: NextRequest) {
     });
 
     if (!teacher) {
+      log.warn("Login failed: email not found", { email });
       return errorResponse("INVALID_CREDENTIALS", "Email atau password salah", 401);
     }
 
     const passwordValid = await verifyPassword(password, teacher.passwordHash);
     if (!passwordValid) {
+      log.warn("Login failed: wrong password", { email });
       return errorResponse("INVALID_CREDENTIALS", "Email atau password salah", 401);
     }
 
@@ -96,8 +101,12 @@ export async function POST(req: NextRequest) {
       expires: expiresAt,
     });
 
+    // LOW-02: Emit request ID ke response header untuk tracing
+    response.headers.set("X-Request-ID", log.requestId);
+    log.info("Login success", { teacherId: teacher.id, email: teacher.email });
     return response;
   } catch (err: any) {
-    return errorResponse("INTERNAL_SERVER_ERROR", err.message || "Gagal melakukan login", 500);
+    log.error("Login error", { err: safeErrorMessage(err, "unknown") });
+    return errorResponse("INTERNAL_SERVER_ERROR", safeErrorMessage(err, "Gagal melakukan login"), 500);
   }
 }

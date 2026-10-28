@@ -105,18 +105,20 @@ enum StudentStatus {
 }
 
 model Student {
-  id             String        @id @default(uuid())
-  examId         String        @map("exam_id")
-  name           String
-  nim            String
-  sessionToken   String        @map("session_token")
-  status         StudentStatus @default(waiting)
-  isLocked       Boolean       @default(false) @map("is_locked")
-  violationCount Int           @default(0) @map("violation_count")
-  ipAddress      String?       @map("ip_address")
-  userAgent      String?       @map("user_agent")
-  joinedAt       DateTime      @default(now()) @map("joined_at") @db.Timestamptz
-  submittedAt    DateTime?     @map("submitted_at") @db.Timestamptz
+  id                String        @id @default(uuid())
+  examId            String        @map("exam_id")
+  name              String
+  nim               String
+  // LOW-04: Simpan hash SHA-256 dari session token — konsisten dengan teacher refresh token.
+  // JWT asli tidak pernah disimpan di DB; hanya hash-nya untuk verifikasi.
+  sessionTokenHash  String        @map("session_token_hash")
+  status            StudentStatus @default(waiting)
+  isLocked          Boolean       @default(false) @map("is_locked")
+  violationCount    Int           @default(0) @map("violation_count")
+  ipAddress         String?       @map("ip_address")
+  userAgent         String?       @map("user_agent")
+  joinedAt          DateTime      @default(now()) @map("joined_at") @db.Timestamptz
+  submittedAt       DateTime?     @map("submitted_at") @db.Timestamptz
 
   exam             Exam              @relation(fields: [examId], references: [id], onDelete: Restrict)
   answers          Answer[]
@@ -124,7 +126,7 @@ model Student {
   warnings         Warning[]
 
   @@unique([examId, nim])
-  @@index([sessionToken])
+  @@index([sessionTokenHash])
   @@index([examId, status])
   @@map("students")
 }

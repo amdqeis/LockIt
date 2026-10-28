@@ -1,8 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hashRefreshToken } from "@/lib/auth";
-import { successResponse, errorResponse } from "@/lib/response";
-
+import { successResponse, errorResponse, safeErrorMessage } from "@/lib/response";
 export async function POST(req: NextRequest) {
   try {
     const rawRefreshToken = req.cookies.get("refreshToken")?.value;
@@ -22,6 +21,6 @@ export async function POST(req: NextRequest) {
 
     return response;
   } catch (err: any) {
-    return errorResponse("INTERNAL_SERVER_ERROR", err.message || "Gagal melakukan logout", 500);
+    return errorResponse("INTERNAL_SERVER_ERROR", safeErrorMessage(err, "Gagal melakukan logout"), 500);
   }
 }

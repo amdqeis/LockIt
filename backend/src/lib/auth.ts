@@ -2,9 +2,14 @@ import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 
-const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || "lockit_access_default_secret_key";
-const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || "lockit_refresh_default_secret_key";
-const STUDENT_SESSION_SECRET = process.env.STUDENT_SESSION_SECRET || "lockit_student_default_secret_key";
+// ─── FAIL FAST: Secret wajib ada — jangan pernah gunakan fallback hardcoded ──
+if (!process.env.JWT_ACCESS_SECRET) throw new Error("[FATAL] JWT_ACCESS_SECRET env wajib diset");
+if (!process.env.JWT_REFRESH_SECRET) throw new Error("[FATAL] JWT_REFRESH_SECRET env wajib diset");
+if (!process.env.STUDENT_SESSION_SECRET) throw new Error("[FATAL] STUDENT_SESSION_SECRET env wajib diset");
+
+const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET;
+const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
+const STUDENT_SESSION_SECRET = process.env.STUDENT_SESSION_SECRET;
 
 export interface TeacherJwtPayload {
   teacherId: string;
@@ -53,6 +58,14 @@ export function generateRefreshTokenString(): string {
 export function hashRefreshToken(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex");
 }
+
+// LOW-04: Hash student session token sebelum disimpan ke DB.
+// JWT asli tidak pernah disimpan plain — hanya SHA-256 hash-nya untuk lookup & verifikasi.
+// Konsisten dengan cara teacher refresh token disimpan.
+export function hashStudentToken(token: string): string {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
+
 
 // ─── STUDENT SESSION TOKEN ───────────────────────────────────────────
 

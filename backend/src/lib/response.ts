@@ -51,3 +51,16 @@ export function errorResponse(
     }
   );
 }
+
+/**
+ * HIGH-03: Sanitasi pesan error untuk response 500.
+ * Di production, kembalikan pesan generik untuk mencegah kebocoran detail internal DB/stack trace.
+ * Di development, tampilkan pesan asli untuk kemudahan debugging.
+ */
+export function safeErrorMessage(err: any, fallback: string): string {
+  if (process.env.NODE_ENV === "production") {
+    return fallback;
+  }
+  return (err instanceof Error ? err.message : String(err)) || fallback;
+}
+

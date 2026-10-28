@@ -2,13 +2,17 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { authenticateStudent } from "@/lib/middleware/auth";
 import { prisma } from "@/lib/prisma";
-import { successResponse, errorResponse } from "@/lib/response";
+import { successResponse, errorResponse, safeErrorMessage } from "@/lib/response";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { AppError } from "@/lib/errors";
 
 const answerSchema = z.object({
   questionId: z.string().uuid("ID soal tidak valid"),
-  selectedOption: z.string().max(2).nullable(),
+  // MED-04: Hanya terima opsi jawaban yang valid (A-F) atau null untuk clear jawaban
+  selectedOption: z
+    .string()
+    .regex(/^[A-Fa-f]$/, "Opsi jawaban harus berupa satu huruf antara A hingga F")
+    .nullable(),
 });
 
 export async function POST(req: NextRequest) {
@@ -95,6 +99,6 @@ export async function POST(req: NextRequest) {
     if (err instanceof AppError) {
       return errorResponse(err.code, err.message, err.statusCode, err.details);
     }
-    return errorResponse("INTERNAL_SERVER_ERROR", err.message || "Gagal menyimpan jawaban", 500);
+    return errorResponse("INTERNAL_SERVER_ERROR", safeErrorMessage(err, "Gagal menyimpan jawaban"), 500);
   }
 }

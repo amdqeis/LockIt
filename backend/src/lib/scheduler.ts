@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { autoGradeExam } from "@/services/grading";
+import { logger } from "@/lib/logger";
 
 // In-memory registry of scheduled auto-end timers
 const activeTimers = new Map<string, NodeJS.Timeout>();
@@ -15,24 +16,24 @@ export function scheduleExamAutoEnd(examId: string, endTime: Date, ioInstance?: 
 
   const timer = setTimeout(async () => {
     try {
-      console.log(`[Scheduler] Auto-ending exam ${examId}...`);
+      logger.info(`Auto-ending exam`, { examId });
       await executeExamEnd(examId, ioInstance);
     } catch (err) {
-      console.error(`[Scheduler] Error auto-ending exam ${examId}:`, err);
+      logger.error(`Error auto-ending exam`, { examId, err: String(err) });
     } finally {
       activeTimers.delete(examId);
     }
   }, delayMs);
 
   activeTimers.set(examId, timer);
-  console.log(`[Scheduler] Scheduled auto-end for exam ${examId} in ${Math.round(delayMs / 1000)} seconds.`);
+  logger.info(`Scheduled auto-end for exam`, { examId, delaySeconds: Math.round(delayMs / 1000) });
 }
 
 export function cancelExamAutoEnd(examId: string) {
   if (activeTimers.has(examId)) {
     clearTimeout(activeTimers.get(examId)!);
     activeTimers.delete(examId);
-    console.log(`[Scheduler] Cancelled auto-end timer for exam ${examId}.`);
+    logger.info(`Cancelled auto-end timer`, { examId });
   }
 }
 
@@ -70,7 +71,7 @@ export async function executeExamEnd(examId: string, ioInstance?: any) {
   try {
     await autoGradeExam(examId);
   } catch (gradeErr) {
-    console.error(`[Scheduler] Auto-grading failed for exam ${examId}:`, gradeErr);
+    logger.error(`Auto-grading failed`, { examId, err: String(gradeErr) });
   }
 
   // 4. Broadcast to Socket.IO if available
@@ -85,7 +86,7 @@ export async function executeExamEnd(examId: string, ioInstance?: any) {
         message: "Waktu ujian telah berakhir. Jawaban Anda otomatis dikumpulkan.",
       });
     } catch (socketErr) {
-      console.error(`[Scheduler] Socket broadcast error:`, socketErr);
+      logger.error(`Socket broadcast error on exam end`, { examId, err: String(socketErr) });
     }
   }
 }
@@ -102,7 +103,7 @@ export async function rescheduleActiveExamsOnBoot(ioInstance?: any) {
       if (exam.endTime) {
         if (exam.endTime.getTime() <= now) {
           // Time already passed while server was down -> execute end immediately
-          console.log(`[Scheduler] Exam ${exam.id} end time passed during downtime. Ending now.`);
+          logger.warn(`Exam end time passed during downtime, ending now`, { examId: exam.id });
           await executeExamEnd(exam.id, ioInstance);
         } else {
           // Reschedule
@@ -111,6 +112,32 @@ export async function rescheduleActiveExamsOnBoot(ioInstance?: any) {
       }
     }
   } catch (err) {
-    console.error(`[Scheduler] Error rescheduling exams on boot:`, err);
+    logger.error(`Error rescheduling exams on boot`, { err: String(err) });
   }
 }
+
+// ─── MED-05: Cleanup expired/revoked refresh tokens ────────────────────────────
+export async function cleanupExpiredTokens(): Promise<void> {
+  try {
+    const result = await prisma.refreshToken.deleteMany({
+      where: {
+        OR: [
+          { expiresAt: { lt: new Date() } },
+          { isRevoked: true },
+        ],
+      },
+    });
+    if (result.count > 0) {
+      logger.info(`Cleaned up expired/revoked refresh tokens`, { count: result.count });
+    }
+  } catch (err) {
+    logger.error(`Error cleaning up refresh tokens`, { err: String(err) });
+  }
+}
+
+// Jalankan cleanup setiap 6 jam
+const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
+if (typeof setInterval !== "undefined") {
+  setInterval(cleanupExpiredTokens, SIX_HOURS_MS);
+}
+

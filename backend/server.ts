@@ -2,9 +2,9 @@ import { createServer } from "http";
 import { parse } from "url";
 import next from "next";
 import { Server as SocketIOServer } from "socket.io";
-import { verifyAccessToken, verifyStudentSessionToken } from "./src/lib/auth";
+import { verifyAccessToken, verifyStudentSessionToken, hashStudentToken } from "./src/lib/auth";
 import { prisma } from "./src/lib/prisma";
-import { rescheduleActiveExamsOnBoot } from "./src/lib/scheduler";
+import { rescheduleActiveExamsOnBoot, cleanupExpiredTokens } from "./src/lib/scheduler";
 
 const dev = process.env.NODE_ENV !== "production";
 const hostname = "localhost";
@@ -28,9 +28,14 @@ app.prepare().then(async () => {
     }
   });
 
+  // CRIT-02: Batasi origin Socket.IO — jangan pernah gunakan "*"
+  const allowedOrigins = process.env.ALLOWED_ORIGINS
+    ? process.env.ALLOWED_ORIGINS.split(",").map((o) => o.trim())
+    : ["http://localhost:3001"];
+
   const io = new SocketIOServer(httpServer, {
     cors: {
-      origin: "*",
+      origin: allowedOrigins,
       methods: ["GET", "POST"],
       credentials: true,
     },
@@ -84,7 +89,10 @@ app.prepare().then(async () => {
         console.log(`[Socket] Teacher ${teacher.email} joined dashboard for exam ${examId}`);
         socket.emit("joined_exam_dashboard", { examId, message: "Berhasil terhubung ke dashboard ujian" });
       } catch (err: any) {
-        socket.emit("error", { message: err.message });
+        // HIGH-03: Jangan bocorkan detail error internal ke client
+        const msg =
+          process.env.NODE_ENV === "production" ? "Gagal bergabung ke dashboard" : err.message;
+        socket.emit("error", { message: msg });
       }
     });
 
@@ -112,11 +120,16 @@ app.prepare().then(async () => {
         return next(new Error("Sesi ujian tidak valid atau telah kedaluwarsa"));
       }
 
-      const student = await prisma.student.findUnique({
-        where: { id: payload.studentId },
+      // LOW-04: Lookup dengan hash — JWT asli tidak digunakan untuk query DB
+      const tokenHash = hashStudentToken(token);
+      const student = await prisma.student.findFirst({
+        where: {
+          id: payload.studentId,
+          sessionTokenHash: tokenHash,
+        },
       });
 
-      if (!student || student.sessionToken !== token) {
+      if (!student) {
         return next(new Error("Sesi peserta tidak ditemukan"));
       }
 
@@ -221,6 +234,9 @@ app.prepare().then(async () => {
 
   // ─── RE-SCHEDULE ACTIVE EXAMS ON BOOT ────────────────────────────────────────
   await rescheduleActiveExamsOnBoot(io);
+
+  // MED-05: Jalankan cleanup token expired saat pertama kali boot
+  await cleanupExpiredTokens();
 
   httpServer.listen(port, () => {
     console.log(`> Ready on http://${hostname}:${port}`);

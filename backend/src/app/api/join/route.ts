@@ -1,9 +1,10 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { generateStudentSessionToken } from "@/lib/auth";
-import { successResponse, errorResponse } from "@/lib/response";
+import { generateStudentSessionToken, hashStudentToken } from "@/lib/auth";
+import { successResponse, errorResponse, safeErrorMessage } from "@/lib/response";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
+import { createRequestLogger } from "@/lib/logger";
 
 const joinSchema = z.object({
   accessCode: z.string().min(4, "Kode akses tidak valid").max(10).trim(),
@@ -12,9 +13,12 @@ const joinSchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
+  // LOW-02: middleware.ts sudah inject x-request-id ke setiap request — pakai yang sama
+  const log = createRequestLogger(req.headers.get("x-request-id") ?? undefined);
   try {
     const clientIp = getClientIp(req.headers);
     const userAgent = req.headers.get("user-agent") || null;
+    log.info("Student join attempt", { ip: clientIp });
 
     // Rate limiting: 5 attempts per 5 minutes per IP
     const rateLimit = checkRateLimit(clientIp, {
@@ -78,13 +82,24 @@ export async function POST(req: NextRequest) {
       },
     });
 
+    // Bug fix: deklarasi di scope luar agar tersedia di kedua path (reconnect & new student)
+    // dan bisa dipakai saat cookies.set. DB hanya menyimpan hash-nya (sessionTokenHash).
+    let freshToken: string;
+
     if (student) {
       if (student.status === "submitted") {
         return errorResponse("ALREADY_SUBMITTED", "NIM ini telah menyelesaikan dan mengumpulkan ujian", 403);
       }
 
+      // HIGH-04: Pastikan ujian masih aktif sebelum mengizinkan reconnect
+      if (exam.status !== "active") {
+        return errorResponse("EXAM_NOT_ACTIVE", "Ujian sudah berakhir, sesi tidak dapat dilanjutkan", 403);
+      }
+
       // Reconnect scenario
-      const freshToken = generateStudentSessionToken({
+      const previousIp = student.ipAddress;
+      log.info("Student reconnect", { studentId: student.id, nim: student.nim, examId: exam.id });
+      freshToken = generateStudentSessionToken({
         studentId: student.id,
         examId: exam.id,
         nim: student.nim,
@@ -93,30 +108,41 @@ export async function POST(req: NextRequest) {
       student = await prisma.student.update({
         where: { id: student.id },
         data: {
-          sessionToken: freshToken,
+          // LOW-04: Simpan hash token, bukan token asli
+          sessionTokenHash: hashStudentToken(freshToken),
           status: "active",
           ipAddress: clientIp,
           userAgent,
         },
       });
 
-      // Log reconnect event
+      // HIGH-07: Catat IP change untuk deteksi potensi impersonasi oleh guru
+      const ipChanged = !!previousIp && previousIp !== clientIp;
       await prisma.proctoringEvent.create({
         data: {
           studentId: student.id,
           examId: exam.id,
           eventType: "reconnect",
-          metadata: { ip: clientIp, reason: "rejoined_with_code" },
+          metadata: {
+            newIp: clientIp,
+            oldIp: previousIp ?? null,
+            ipChanged,
+            reason: "rejoined_with_code",
+          },
         },
       });
     } else {
       // New student joining
       const dummyId = crypto.randomUUID();
-      const freshToken = generateStudentSessionToken({
+      log.info("New student joining", { nim, examId: exam.id });
+      freshToken = generateStudentSessionToken({
         studentId: dummyId,
         examId: exam.id,
         nim,
       });
+
+      // LOW-04: Simpan hash token, bukan token asli
+      const freshTokenHash = hashStudentToken(freshToken);
 
       student = await prisma.student.create({
         data: {
@@ -124,7 +150,7 @@ export async function POST(req: NextRequest) {
           examId: exam.id,
           name,
           nim,
-          sessionToken: freshToken,
+          sessionTokenHash: freshTokenHash,
           status: "active",
           ipAddress: clientIp,
           userAgent,
@@ -151,8 +177,9 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    // Set secure httpOnly cookie for student session
-    response.cookies.set("studentSession", student.sessionToken, {
+    // Bug fix: gunakan freshToken (JWT asli), BUKAN student.sessionTokenHash.
+    // Hash hanya disimpan di DB untuk verifikasi; browser butuh JWT asli untuk autentikasi.
+    response.cookies.set("studentSession", freshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "strict",
@@ -160,8 +187,10 @@ export async function POST(req: NextRequest) {
       maxAge: exam.durationMinutes * 60 + 3600, // Duration + 1 hr buffer
     });
 
+    log.info("Join success", { studentId: student.id, nim: student.nim, examId: exam.id });
     return response;
   } catch (err: any) {
-    return errorResponse("INTERNAL_SERVER_ERROR", err.message || "Gagal bergabung ke ujian", 500);
+    log.error("Join error", { err: safeErrorMessage(err, "unknown") });
+    return errorResponse("INTERNAL_SERVER_ERROR", safeErrorMessage(err, "Gagal bergabung ke ujian"), 500);
   }
 }

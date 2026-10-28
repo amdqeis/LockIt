@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { authenticateTeacher } from "@/lib/middleware/auth";
 import { prisma } from "@/lib/prisma";
-import { successResponse, errorResponse } from "@/lib/response";
+import { successResponse, errorResponse, safeErrorMessage } from "@/lib/response";
 import { AppError } from "@/lib/errors";
 
 const warnSchema = z.object({
@@ -75,6 +75,6 @@ export async function POST(
     if (err instanceof AppError) {
       return errorResponse(err.code, err.message, err.statusCode, err.details);
     }
-    return errorResponse("INTERNAL_SERVER_ERROR", err.message || "Gagal mengirim peringatan", 500);
+    return errorResponse("INTERNAL_SERVER_ERROR", safeErrorMessage(err, "Gagal mengirim peringatan"), 500);
   }
 }

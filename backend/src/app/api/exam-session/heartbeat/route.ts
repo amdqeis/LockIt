@@ -1,13 +1,33 @@
 import { NextRequest } from "next/server";
 import { authenticateStudent } from "@/lib/middleware/auth";
 import { prisma } from "@/lib/prisma";
-import { successResponse, errorResponse } from "@/lib/response";
+import { successResponse, errorResponse, safeErrorMessage } from "@/lib/response";
 import { AppError } from "@/lib/errors";
+import { checkRateLimit } from "@/lib/rate-limit";
 
 export async function POST(req: NextRequest) {
   try {
     const { student } = await authenticateStudent(req);
     const exam = student.exam;
+
+    // HIGH-06: Rate limit heartbeat — normal setiap 10-30 detik, max 10/menit
+    const rateLimit = checkRateLimit(student.id, {
+      windowMs: 60 * 1000,
+      max: 10,
+      keyPrefix: "heartbeat",
+    });
+
+    if (!rateLimit.success) {
+      // Kembalikan data heartbeat standar tanpa error agar siswa tidak bingung,
+      // tapi abaikan proses DB untuk mencegah abuse
+      return successResponse({
+        studentId: student.id,
+        status: student.status,
+        isLocked: student.isLocked,
+        isExamActive: exam.status === "active",
+        serverTime: new Date().toISOString(),
+      });
+    }
 
     const now = new Date();
     const isExamActive = exam.status === "active" && (!exam.endTime || now <= exam.endTime);
@@ -46,6 +66,6 @@ export async function POST(req: NextRequest) {
     if (err instanceof AppError) {
       return errorResponse(err.code, err.message, err.statusCode, err.details);
     }
-    return errorResponse("INTERNAL_SERVER_ERROR", err.message || "Gagal memperbarui sinyal kehadiran", 500);
+    return errorResponse("INTERNAL_SERVER_ERROR", safeErrorMessage(err, "Gagal memperbarui sinyal kehadiran"), 500);
   }
 }

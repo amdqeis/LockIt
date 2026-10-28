@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { authenticateStudent } from "@/lib/middleware/auth";
 import { prisma } from "@/lib/prisma";
-import { successResponse, errorResponse } from "@/lib/response";
+import { successResponse, errorResponse, safeErrorMessage } from "@/lib/response";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { AppError } from "@/lib/errors";
 
@@ -73,21 +73,28 @@ export async function POST(req: NextRequest) {
       })),
     });
 
-    // Update student violation count
+    // CRIT-03 (batch): Atomic increment — sama seperti single event endpoint
     const policy = (exam.violationPolicy as any) || {};
     const maxViolations = policy.max_violations || 5;
     const policyAction = policy.action || "warning";
 
-    const newViolationCount = student.violationCount + events.length;
-    const shouldLock = newViolationCount >= maxViolations && policyAction === "lock";
-
     const updatedStudent = await prisma.student.update({
       where: { id: student.id },
       data: {
-        violationCount: newViolationCount,
-        ...(shouldLock ? { isLocked: true } : {}),
+        violationCount: { increment: events.length },
       },
     });
+
+    const shouldLock =
+      updatedStudent.violationCount >= maxViolations && policyAction === "lock" && !updatedStudent.isLocked;
+
+    if (shouldLock) {
+      await prisma.student.update({
+        where: { id: student.id },
+        data: { isLocked: true },
+      });
+      updatedStudent.isLocked = true;
+    }
 
     // Emit batch alert to Teacher dashboard
     const io = (globalThis as any).io;
@@ -97,7 +104,7 @@ export async function POST(req: NextRequest) {
           studentId: student.id,
           name: student.name,
           nim: student.nim,
-          violationCount: newViolationCount,
+          violationCount: updatedStudent.violationCount,
           isLocked: updatedStudent.isLocked,
           eventsCount: events.length,
         });
@@ -108,13 +115,13 @@ export async function POST(req: NextRequest) {
 
     return successResponse({
       insertedCount: events.length,
-      violationCount: newViolationCount,
+      violationCount: updatedStudent.violationCount,
       isLocked: updatedStudent.isLocked,
     });
   } catch (err: any) {
     if (err instanceof AppError) {
       return errorResponse(err.code, err.message, err.statusCode, err.details);
     }
-    return errorResponse("INTERNAL_SERVER_ERROR", err.message || "Gagal mencatat batch proctoring event", 500);
+    return errorResponse("INTERNAL_SERVER_ERROR", safeErrorMessage(err, "Gagal mencatat batch proctoring event"), 500);
   }
 }

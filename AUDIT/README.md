@@ -13,6 +13,7 @@
 | [`02-FRONTEND-AUDIT.md`](./02-FRONTEND-AUDIT.md) | Audit kode frontend (Next.js UI) |
 | [`03-BACKEND-AUDIT.md`](./03-BACKEND-AUDIT.md) | Audit kode backend (API, DB, Socket.IO) |
 | [`04-DOCS-AUDIT.md`](./04-DOCS-AUDIT.md) | Audit kelengkapan & akurasi dokumentasi |
+| [`WORKING_ON.md`](./WORKING_ON.md) *(Working on)* | Pelacakan status & roadmap perbaikan temuan audit |
 
 ---
 

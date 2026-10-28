@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
-import { verifyAccessToken, verifyStudentSessionToken, TeacherJwtPayload, StudentTokenPayload } from "@/lib/auth";
+import { verifyAccessToken, verifyStudentSessionToken, hashStudentToken, TeacherJwtPayload, StudentTokenPayload } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { UnauthorizedError, ForbiddenError } from "@/lib/errors";
+import { UnauthorizedError } from "@/lib/errors";
 
 export async function authenticateTeacher(req: NextRequest): Promise<TeacherJwtPayload> {
   const authHeader = req.headers.get("authorization");
@@ -39,18 +39,21 @@ export async function authenticateStudent(req: NextRequest): Promise<{ student: 
     throw new UnauthorizedError("Sesi ujian tidak valid atau kedaluwarsa.");
   }
 
-  const student = await prisma.student.findUnique({
-    where: { id: payload.studentId },
+  // LOW-04: Lookup menggunakan hash — JWT asli tidak pernah digunakan untuk query DB
+  const tokenHash = hashStudentToken(token);
+  const student = await prisma.student.findFirst({
+    where: {
+      id: payload.studentId,
+      sessionTokenHash: tokenHash,
+    },
     include: { exam: true },
   });
 
   if (!student) {
-    throw new UnauthorizedError("Data peserta tidak ditemukan.");
-  }
-
-  if (student.sessionToken !== token) {
-    throw new UnauthorizedError("Sesi telah digantikan oleh sesi baru.");
+    // Bisa berarti: student tidak ada, atau token sudah digantikan oleh login baru
+    throw new UnauthorizedError("Sesi tidak valid atau telah digantikan oleh sesi baru.");
   }
 
   return { student, payload };
 }
+
