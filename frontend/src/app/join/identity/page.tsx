@@ -47,7 +47,9 @@ function IdentityFormInner() {
       setCode(codeParam.toUpperCase().trim());
     }
     if (typeof window !== "undefined") {
-      const saved = sessionStorage.getItem("lockit_exam_preview");
+      const saved =
+        sessionStorage.getItem("eduquas_exam_preview") ||
+        sessionStorage.getItem("lockit_exam_preview");
       if (saved) {
         try {
           const parsed = JSON.parse(saved);
@@ -100,6 +102,7 @@ function IdentityFormInner() {
 
       if (res.success && res.data) {
         if (typeof window !== "undefined") {
+          sessionStorage.setItem("eduquas_student_session", JSON.stringify(res.data));
           sessionStorage.setItem("lockit_student_session", JSON.stringify(res.data));
         }
         router.push("/exam/session");
@@ -122,13 +125,12 @@ function IdentityFormInner() {
     } catch {
       // Fallback for demo/offline test
       if (typeof window !== "undefined") {
-        sessionStorage.setItem(
-          "lockit_student_session",
-          JSON.stringify({
-            student: { name: form.name.trim(), nisn: form.nisn.trim(), id: "demo-student" },
-            exam: { title: examPreview.title, durationMinutes: examPreview.durationMinutes },
-          })
-        );
+        const fallbackData = JSON.stringify({
+          student: { name: form.name.trim(), nisn: form.nisn.trim(), id: "demo-student" },
+          exam: { title: examPreview.title, durationMinutes: examPreview.durationMinutes },
+        });
+        sessionStorage.setItem("eduquas_student_session", fallbackData);
+        sessionStorage.setItem("lockit_student_session", fallbackData);
       }
       router.push("/exam/session");
     } finally {
@@ -156,7 +158,7 @@ function IdentityFormInner() {
               <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
               <path d="M7 11V7a5 5 0 0 1 10 0v4" />
             </svg>
-            <span style={{ fontSize: "22px", fontWeight: 700, color: T.textPrimary }}>LockIt</span>
+            <span style={{ fontSize: "22px", fontWeight: 700, color: T.textPrimary }}>EduQuas</span>
           </div>
         </div>
 

@@ -91,7 +91,7 @@ export default function RegisterPage() {
                 letterSpacing: "-0.01em",
               }}
             >
-              LockIt
+              EduQuas
             </span>
           </Link>
         </div>
@@ -143,7 +143,7 @@ export default function RegisterPage() {
             margin: "0 0 24px",
           }}
         >
-          Akun guru di LockIt hanya dapat dibuat oleh{" "}
+          Akun guru di EduQuas hanya dapat dibuat oleh{" "}
           <strong>Administrator</strong>.
           <br />
           Pendaftaran mandiri tidak diizinkan.

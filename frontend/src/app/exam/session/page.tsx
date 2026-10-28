@@ -712,16 +712,15 @@ export default function ExamSessionPage() {
     setSubmitModal(false);
     try {
       if (typeof window !== "undefined") {
-        sessionStorage.setItem(
-          "lockit_submission_summary",
-          JSON.stringify({
-            name: studentProfile?.name || "Peserta Ujian",
-            nisn: studentProfile?.nisn || "0000000000",
-            exam: examMeta?.title || "Ujian Selesai",
-            answered: answeredCount,
-            total: totalQ,
-          })
-        );
+        const summaryPayload = JSON.stringify({
+          name: studentProfile?.name || "Peserta Ujian",
+          nisn: studentProfile?.nisn || "0000000000",
+          exam: examMeta?.title || "Ujian Selesai",
+          answered: answeredCount,
+          total: totalQ,
+        });
+        sessionStorage.setItem("eduquas_submission_summary", summaryPayload);
+        sessionStorage.setItem("lockit_submission_summary", summaryPayload);
       }
     } catch {}
     try {

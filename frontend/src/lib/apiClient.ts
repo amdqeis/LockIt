@@ -1,5 +1,5 @@
 /**
- * LockIt API Client — Fetch wrapper with silent token refresh & in-memory token store
+ * EduQuas API Client — Fetch wrapper with silent token refresh & in-memory token store
  */
 
 type TokenGetter = () => string | null;

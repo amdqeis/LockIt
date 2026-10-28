@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# LockIt Platform — Dev Server Launcher (Frontend: 3000 | Backend: 3001)
+# EduQuas Platform — Dev Server Launcher (Frontend: 3000 | Backend: 3001)
 # ==============================================================================
 
 set -eo pipefail
@@ -19,13 +19,13 @@ NC='\033[0m' # No Color
 
 echo -e "${CYAN}${BOLD}"
 echo "=========================================================="
-echo "   🔒 LockIt — Online Exam & Browser Proctoring Platform   "
+echo "   🔒 EduQuas — Online Exam & Browser Proctoring Platform   "
 echo "=========================================================="
 echo -e "${NC}"
 
 # Fungsi pembersihan saat script dihentikan (Ctrl+C / SIGTERM / EXIT)
 cleanup() {
-  echo -e "\n${YELLOW}Menghentikan semua service LockIt...${NC}"
+  echo -e "\n${YELLOW}Menghentikan semua service EduQuas...${NC}"
   if [ -n "$BE_PID" ] && kill -0 "$BE_PID" 2>/dev/null; then
     kill "$BE_PID" 2>/dev/null || true
   fi
@@ -90,7 +90,7 @@ FE_PID=$!
 
 echo -e "${GREEN}${BOLD}"
 echo "=========================================================="
-echo "   ✅ LockIt Services Berjalan:"
+echo "   ✅ EduQuas Services Berjalan:"
 echo "   🌐 Frontend Web: http://localhost:3000"
 echo "   🔌 Backend API : http://localhost:3001"
 echo "   Tekan [Ctrl+C] untuk menghentikan kedua server."

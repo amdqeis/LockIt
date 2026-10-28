@@ -45,8 +45,13 @@ function JoinContent() {
   // Check if teacher is signed in (cookie or localStorage)
   useEffect(() => {
     if (typeof window !== "undefined") {
-      const hasCookie = document.cookie.includes("lockit_teacher_session=active");
-      const hasLocal = localStorage.getItem("lockit_teacher_session") === "active";
+      const hasCookie =
+        document.cookie.includes("hasTeacherSession=1") ||
+        document.cookie.includes("eduquas_teacher_session=active") ||
+        document.cookie.includes("lockit_teacher_session=active");
+      const hasLocal =
+        localStorage.getItem("eduquas_teacher_session") === "active" ||
+        localStorage.getItem("lockit_teacher_session") === "active";
       if (hasCookie || hasLocal) {
         setIsTeacherSignedIn(true);
       }
@@ -143,6 +148,7 @@ function JoinContent() {
 
       if (res.success && res.data?.exam) {
         if (typeof window !== "undefined") {
+          sessionStorage.setItem("eduquas_exam_preview", JSON.stringify(res.data.exam));
           sessionStorage.setItem("lockit_exam_preview", JSON.stringify(res.data.exam));
         }
         router.push(`/join/identity?code=${encodeURIComponent(normalized)}`);
@@ -194,7 +200,7 @@ function JoinContent() {
       }}
     >
       <style>{`
-        .lockit-code-input {
+        .eduquas-code-input, .lockit-code-input {
           width: 100%;
           height: 56px;
           padding: 0 16px;
@@ -213,16 +219,16 @@ function JoinContent() {
           transition: border-color 150ms ease, box-shadow 150ms ease;
           box-sizing: border-box;
         }
-        .lockit-code-input::placeholder {
+        .eduquas-code-input::placeholder, .lockit-code-input::placeholder {
           color: ${T.textPlaceholder};
           font-weight: 500;
           letter-spacing: 0.12em;
         }
-        .lockit-code-input:focus {
+        .eduquas-code-input:focus, .lockit-code-input:focus {
           border-color: ${isError ? T.danger : T.primary};
           box-shadow: 0 0 0 3px ${isError ? "rgba(199, 62, 62, 0.20)" : T.primaryRing};
         }
-        .lockit-code-input:read-only {
+        .eduquas-code-input:read-only, .lockit-code-input:read-only {
           background: ${T.bgSubtle};
           cursor: not-allowed;
         }
@@ -306,7 +312,7 @@ function JoinContent() {
             textDecoration: "none",
             outline: "none",
           }}
-          aria-label="LockIt Beranda"
+          aria-label="EduQuas Beranda"
         >
           {/* 32px rounded square in --primary with white line-style lock (SVG, not emoji) */}
           <div
@@ -344,7 +350,7 @@ function JoinContent() {
               letterSpacing: "-0.01em",
             }}
           >
-            LockIt
+            EduQuas
           </span>
         </Link>
       </header>
@@ -417,7 +423,7 @@ function JoinContent() {
                 value={code}
                 onChange={handleInputChange}
                 readOnly={loading}
-                className="lockit-code-input"
+                className="eduquas-code-input"
               />
             </div>
 

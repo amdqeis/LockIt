@@ -37,7 +37,7 @@ export default function JoinPage() {
         <div style={{ textAlign: "center", marginBottom: "40px" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "10px", marginBottom: "8px" }}>
             <div className="logo-icon">🔒</div>
-            <span style={{ fontSize: "24px", fontWeight: 800 }}>LockIt</span>
+            <span style={{ fontSize: "24px", fontWeight: 800 }}>EduQuas</span>
           </div>
         </div>
 

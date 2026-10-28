@@ -24,7 +24,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
     // Create Excel Workbook
     const workbook = new ExcelJS.Workbook();
-    workbook.creator = "LockIt Proctoring System";
+    workbook.creator = "EduQuas Proctoring System";
     workbook.created = new Date();
 
     const sheet = workbook.addWorksheet("Rekap Nilai", {

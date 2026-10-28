@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * seed-admin.mjs — Buat Admin pertama di LockIt
+ * seed-admin.mjs — Buat Admin pertama di EduQuas
  *
  * Penggunaan:
  *   DATABASE_URL="postgresql://..." node backend/prisma/seed-admin.mjs
@@ -11,7 +11,7 @@
  *
  * Env yang diperlukan:
  *   DATABASE_URL — koneksi PostgreSQL
- *   ADMIN_EMAIL  — (opsional) default: admin@lockit.local
+ *   ADMIN_EMAIL  — (opsional) default: admin@eduquas.local
  *   ADMIN_NAME   — (opsional) default: Administrator
  *   ADMIN_PASS   — (opsional) default: Admin@2026! (GANTI DI PRODUCTION!)
  */
@@ -21,12 +21,12 @@ import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
 
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL ?? "admin@lockit.local";
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL ?? "admin@eduquas.local";
 const ADMIN_NAME  = process.env.ADMIN_NAME  ?? "Administrator";
 const ADMIN_PASS  = process.env.ADMIN_PASS  ?? "Admin@2026!";
 
 async function main() {
-  console.log("🔑  LockIt — Seed Admin Script");
+  console.log("🔑  EduQuas — Seed Admin Script");
   console.log(`📧  Email  : ${ADMIN_EMAIL}`);
   console.log(`👤  Nama   : ${ADMIN_NAME}`);
   console.log(`🔒  Pass   : ${"*".repeat(ADMIN_PASS.length)}`);

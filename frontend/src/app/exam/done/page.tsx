@@ -32,7 +32,9 @@ export default function ExamDonePage() {
 
   useEffect(() => {
     try {
-      const stored = sessionStorage.getItem("lockit_submission_summary");
+      const stored =
+        sessionStorage.getItem("eduquas_submission_summary") ||
+        sessionStorage.getItem("lockit_submission_summary");
       if (stored) {
         const parsed = JSON.parse(stored);
         setSummary((prev) => ({ ...prev, ...parsed }));
@@ -110,7 +112,7 @@ export default function ExamDonePage() {
             fontSize: "18px",
             boxShadow: "0 4px 14px rgba(41,171,226,0.35)",
           }}>🔒</div>
-          <span style={{ fontSize: "22px", fontWeight: 800, color: "#1C303D", letterSpacing: "-0.02em" }}>LockIt</span>
+          <span style={{ fontSize: "22px", fontWeight: 800, color: "#1C303D", letterSpacing: "-0.02em" }}>EduQuas</span>
         </div>
 
         {/* Main card */}

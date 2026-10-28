@@ -104,7 +104,7 @@ export default function WaitingPage() {
             fontSize: "18px",
             boxShadow: "0 4px 14px rgba(41,171,226,0.35)",
           }}>🔒</div>
-          <span style={{ fontSize: "22px", fontWeight: 800, color: "#1C303D", letterSpacing: "-0.02em" }}>LockIt</span>
+          <span style={{ fontSize: "22px", fontWeight: 800, color: "#1C303D", letterSpacing: "-0.02em" }}>EduQuas</span>
         </div>
 
         {/* Main card */}

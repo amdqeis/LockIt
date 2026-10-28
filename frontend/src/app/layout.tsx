@@ -3,7 +3,7 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "LockIt — Platform Ujian Online dengan Proctoring",
+  title: "EduQuas — Platform Ujian Online dengan Proctoring",
   description: "Platform ujian online dengan sistem proctoring real-time untuk memastikan integritas akademik.",
 };
 

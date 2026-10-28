@@ -1,4 +1,4 @@
-# LockIt — Platform Ujian Online dengan Proctoring
+# EduQuas — Platform Ujian Online dengan Proctoring
 
 Monorepo berisi dua workspace:
 
@@ -10,7 +10,7 @@ Monorepo berisi dua workspace:
 ## Struktur Folder
 
 ```
-LockIt/
+EduQuas/
 ├── backend/            ← Express/Next.js custom server + Prisma
 │   ├── src/app/api/    ← REST API endpoints
 │   ├── src/lib/        ← auth, prisma client, middleware

@@ -1,5 +1,5 @@
 /**
- * LockIt Student Exam Session Client Helpers
+ * EduQuas Student Exam Session Client Helpers
  * Handles student authentication via cookie, session retrieval, auto-save debounce,
  * periodic heartbeat, browser-only proctoring events, and final submission.
  */

@@ -1,5 +1,5 @@
 /**
- * LockIt Proctoring — Browser-only violation definitions & flag mapping
+ * EduQuas Proctoring — Browser-only violation definitions & flag mapping
  * (NO camera, face detection, or physical device detection)
  */
 

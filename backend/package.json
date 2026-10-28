@@ -1,8 +1,8 @@
 {
-  "name": "lockit-backend",
+  "name": "eduquas-backend",
   "version": "1.0.0",
   "private": true,
-  "description": "LockIt — Platform Ujian Online dengan Web-Based Proctoring (Backend)",
+  "description": "EduQuas — Platform Ujian Online dengan Web-Based Proctoring (Backend)",
   "scripts": {
     "dev": "PORT=3001 tsx watch --env-file=.env server.ts",
     "build": "next build",

@@ -2,10 +2,13 @@ import { PrismaClient, ExamStatus, StudentStatus, EventType } from "@prisma/clie
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 
-const prisma = new PrismaClient();
+const dbUrl = process.env.DATABASE_URL || process.env.DATABASE_zURL;
+const prisma = new PrismaClient(
+  dbUrl ? { datasources: { db: { url: dbUrl } } } : undefined
+);
 
 async function main() {
-  console.log("🌱 Memulai seeding database LockIt...");
+  console.log("🌱 Memulai seeding database EduQuas...");
 
   // 1. Bersihkan data lama jika ada (berurutan sesuai foreign key constraints)
   console.log("🧹 Membersihkan tabel...");
@@ -27,8 +30,8 @@ async function main() {
   // Admin pertama — dibuat via seed (tidak ada endpoint publik untuk buat Admin)
   const admin = await prisma.teacher.create({
     data: {
-      email: "admin@lockit.id",
-      fullName: "Administrator LockIt",
+      email: "admin@eduquas.id",
+      fullName: "Administrator EduQuas",
       passwordHash: adminPasswordHash,
       role: "ADMIN",
       isActive: true,
@@ -38,7 +41,7 @@ async function main() {
 
   const teacher = await prisma.teacher.create({
     data: {
-      email: "guru@lockit.id",
+      email: "guru@eduquas.id",
       fullName: "Dr. Ahmad Fauzi, S.T., M.Kom.",
       passwordHash: teacherPasswordHash,
       role: "TEACHER",

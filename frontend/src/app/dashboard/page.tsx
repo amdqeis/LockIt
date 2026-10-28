@@ -96,7 +96,9 @@ function DashboardContent() {
 
   // Load saved view mode from localStorage
   useEffect(() => {
-    const saved = localStorage.getItem("lockit_dashboard_view");
+    const saved =
+      localStorage.getItem("eduquas_dashboard_view") ||
+      localStorage.getItem("lockit_dashboard_view");
     if (saved === "grid" || saved === "list") {
       setViewMode(saved);
     }
@@ -104,6 +106,7 @@ function DashboardContent() {
 
   const changeViewMode = (mode: "grid" | "list") => {
     setViewMode(mode);
+    localStorage.setItem("eduquas_dashboard_view", mode);
     localStorage.setItem("lockit_dashboard_view", mode);
   };
 
@@ -270,7 +273,7 @@ function DashboardContent() {
   return (
     <DashboardShell>
       <style>{`
-        .lockit-btn-primary {
+        .eduquas-btn-primary, .lockit-btn-primary {
           display: inline-flex;
           align-items: center;
           justify-content: center;
@@ -288,13 +291,13 @@ function DashboardContent() {
           transition: background-color 150ms ease;
           outline: none;
         }
-        .lockit-btn-primary:hover {
+        .eduquas-btn-primary:hover, .lockit-btn-primary:hover {
           background-color: ${T.primaryHover};
         }
-        .lockit-btn-primary:active {
+        .eduquas-btn-primary:active, .lockit-btn-primary:active {
           background-color: ${T.primaryActive};
         }
-        .lockit-btn-primary:focus-visible {
+        .eduquas-btn-primary:focus-visible, .lockit-btn-primary:focus-visible {
           outline: 2px solid ${T.primary};
           outline-offset: 2px;
         }

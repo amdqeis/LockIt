@@ -297,7 +297,7 @@ function LoginContent() {
             textDecoration: "none",
             outline: "none",
           }}
-          aria-label="LockIt Beranda"
+          aria-label="EduQuas Beranda"
         >
           <div
             style={{
@@ -334,7 +334,7 @@ function LoginContent() {
               letterSpacing: "-0.01em",
             }}
           >
-            LockIt
+            EduQuas
           </span>
         </Link>
       </header>

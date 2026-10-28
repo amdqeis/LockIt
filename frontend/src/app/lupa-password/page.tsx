@@ -64,7 +64,7 @@ export default function LupaPasswordPage() {
             textDecoration: "none",
             outline: "none",
           }}
-          aria-label="LockIt Beranda"
+          aria-label="EduQuas Beranda"
         >
           <div
             style={{
@@ -101,7 +101,7 @@ export default function LupaPasswordPage() {
               letterSpacing: "-0.01em",
             }}
           >
-            LockIt
+            EduQuas
           </span>
         </Link>
       </header>

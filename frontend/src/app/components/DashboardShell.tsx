@@ -37,7 +37,7 @@ function DashboardShellInner({ children }: Props) {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
 
   const teacherName = teacher?.fullName || "Guru / Pengawas";
-  const teacherEmail = teacher?.email || "guru@lockit.id";
+  const teacherEmail = teacher?.email || "guru@eduquas.id";
   const teacherInitials = teacher?.fullName
     ? teacher.fullName
         .split(" ")
@@ -189,7 +189,7 @@ function DashboardShellInner({ children }: Props) {
               textDecoration: "none",
               outline: "none",
             }}
-            aria-label="LockIt Dashboard"
+            aria-label="EduQuas Dashboard"
           >
             {/* 32px rounded square in --primary with white line lock mark (SVG, not emoji) */}
             <div
@@ -229,7 +229,7 @@ function DashboardShellInner({ children }: Props) {
                   lineHeight: "20px",
                 }}
               >
-                LockIt
+                EduQuas
               </div>
               <div
                 style={{
