@@ -19,7 +19,7 @@ services:
       retries: 3
       start_period: 40s
     networks:
-      - eduquas_net
+      - caddy_net
 
   frontend:
     build:
@@ -41,12 +41,8 @@ services:
     ports:
       - "3000:3000"
     networks:
-      - eduquas_net
+      - caddy_net
 
 networks:
-  eduquas_net:
-    driver: bridge
-    # Catatan: Jika di production menggunakan Caddy reverse proxy eksternal,
-    # ganti konfigurasi network di atas dengan:
-    # caddy_net:
-    #   external: true
+  caddy_net:
+    external: true
