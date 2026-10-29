@@ -47,9 +47,7 @@ function IdentityFormInner() {
       setCode(codeParam.toUpperCase().trim());
     }
     if (typeof window !== "undefined") {
-      const saved =
-        sessionStorage.getItem("eduquas_exam_preview") ||
-        sessionStorage.getItem("lockit_exam_preview");
+      const saved = sessionStorage.getItem("eduquas_exam_preview");
       if (saved) {
         try {
           const parsed = JSON.parse(saved);
@@ -103,7 +101,6 @@ function IdentityFormInner() {
       if (res.success && res.data) {
         if (typeof window !== "undefined") {
           sessionStorage.setItem("eduquas_student_session", JSON.stringify(res.data));
-          sessionStorage.setItem("lockit_student_session", JSON.stringify(res.data));
         }
         router.push("/exam/session");
         return;
@@ -130,7 +127,6 @@ function IdentityFormInner() {
           exam: { title: examPreview.title, durationMinutes: examPreview.durationMinutes },
         });
         sessionStorage.setItem("eduquas_student_session", fallbackData);
-        sessionStorage.setItem("lockit_student_session", fallbackData);
       }
       router.push("/exam/session");
     } finally {

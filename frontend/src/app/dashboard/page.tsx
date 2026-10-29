@@ -96,9 +96,7 @@ function DashboardContent() {
 
   // Load saved view mode from localStorage
   useEffect(() => {
-    const saved =
-      localStorage.getItem("eduquas_dashboard_view") ||
-      localStorage.getItem("lockit_dashboard_view");
+    const saved = localStorage.getItem("eduquas_dashboard_view");
     if (saved === "grid" || saved === "list") {
       setViewMode(saved);
     }
@@ -107,7 +105,6 @@ function DashboardContent() {
   const changeViewMode = (mode: "grid" | "list") => {
     setViewMode(mode);
     localStorage.setItem("eduquas_dashboard_view", mode);
-    localStorage.setItem("lockit_dashboard_view", mode);
   };
 
   // Live timer tick for live strip
@@ -273,7 +270,7 @@ function DashboardContent() {
   return (
     <DashboardShell>
       <style>{`
-        .eduquas-btn-primary, .lockit-btn-primary {
+        .eduquas-btn-primary {
           display: inline-flex;
           align-items: center;
           justify-content: center;
@@ -291,13 +288,13 @@ function DashboardContent() {
           transition: background-color 150ms ease;
           outline: none;
         }
-        .eduquas-btn-primary:hover, .lockit-btn-primary:hover {
+        .eduquas-btn-primary:hover {
           background-color: ${T.primaryHover};
         }
-        .eduquas-btn-primary:active, .lockit-btn-primary:active {
+        .eduquas-btn-primary:active {
           background-color: ${T.primaryActive};
         }
-        .eduquas-btn-primary:focus-visible, .lockit-btn-primary:focus-visible {
+        .eduquas-btn-primary:focus-visible {
           outline: 2px solid ${T.primary};
           outline-offset: 2px;
         }
@@ -534,7 +531,7 @@ function DashboardContent() {
 
           <div>
             {/* Spec §4.2: Solid primary button, height 44px, radius 8px, no gradient, no glow */}
-            <Link href="/dashboard/exams/new" className="lockit-btn-primary">
+            <Link href="/dashboard/exams/new" className="eduquas-btn-primary">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <line x1="12" y1="5" x2="12" y2="19" />
                 <line x1="5" y1="12" x2="19" y2="12" />
@@ -1154,7 +1151,7 @@ function DashboardContent() {
                   <div style={{ fontSize: "13px", color: T.textSecondary, marginBottom: "20px" }}>
                     Buat ujian pertamamu untuk mulai.
                   </div>
-                  <Link href="/dashboard/exams/new" className="lockit-btn-primary">
+                  <Link href="/dashboard/exams/new" className="eduquas-btn-primary">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                       <line x1="12" y1="5" x2="12" y2="19" />
                       <line x1="5" y1="12" x2="19" y2="12" />
@@ -1413,7 +1410,7 @@ function DashboardContent() {
                 </button>
                 <button
                   type="button"
-                  className={confirmModal.type === "delete" ? "lockit-btn-primary" : "lockit-btn-primary"}
+                  className={confirmModal.type === "delete" ? "eduquas-btn-primary" : "eduquas-btn-primary"}
                   style={{
                     backgroundColor: confirmModal.type === "delete" ? T.danger : T.primary,
                   }}

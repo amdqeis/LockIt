@@ -162,7 +162,7 @@ export default function ImportXmlModal({
 
   // Download sample template
   const handleDownloadSample = () => {
-    downloadXmlFile(getSampleXmlTemplate(), "Template-Bank-Soal-LockIt.xml");
+    downloadXmlFile(getSampleXmlTemplate(), "Template-Bank-Soal-EduQuas.xml");
   };
 
   // Extract all questions from parseResult (flattened)

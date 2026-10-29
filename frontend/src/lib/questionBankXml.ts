@@ -139,7 +139,7 @@ export function exportBankToXml(bank: QuestionBank, questions: BankQuestion[]): 
   const questionsXml = bankQuestions.map(q => formatQuestionXml(q, "        ")).join("\n");
 
   return `<?xml version="1.0" encoding="UTF-8"?>
-<questionBankExport version="1.0" exportedAt="${now}" source="LockIt">
+<questionBankExport version="1.0" exportedAt="${now}" source="EduQuas">
   <banks>
     <bank id="${escapeXmlAttr(bank.id)}">
       <title>${wrapCData(bank.title)}</title>
@@ -188,7 +188,7 @@ ${questionsXml}
     .join("\n");
 
   return `<?xml version="1.0" encoding="UTF-8"?>
-<questionBankExport version="1.0" exportedAt="${now}" source="LockIt">
+<questionBankExport version="1.0" exportedAt="${now}" source="EduQuas">
   <banks>
 ${banksXml}
   </banks>
@@ -203,7 +203,7 @@ export function exportQuestionsToXml(questions: BankQuestion[], title = "Kumpula
   const questionsXml = questions.map(q => formatQuestionXml(q, "    ")).join("\n");
 
   return `<?xml version="1.0" encoding="UTF-8"?>
-<questionBankExport version="1.0" exportedAt="${now}" source="LockIt">
+<questionBankExport version="1.0" exportedAt="${now}" source="EduQuas">
   <title>${wrapCData(title)}</title>
   <questions>
 ${questionsXml}
@@ -236,7 +236,7 @@ export function getSampleXmlTemplate(): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!-- 
   =======================================================================
-  TEMPLATE BANK SOAL XML - LockIt Exam Platform
+  TEMPLATE BANK SOAL XML - EduQuas Exam Platform
   =======================================================================
   Panduan Pengisian:
   - Tipe soal (<type>): 'single_choice' (Pilihan Ganda), 'multi_select' (Multi-Pilih), atau 'latex' (Matematika KaTeX).
@@ -245,7 +245,7 @@ export function getSampleXmlTemplate(): string {
   - Untuk soal multi_select, cantumkan semua kunci jawaban dalam tag <correctAnswers><answer>a</answer>...</correctAnswers>.
   =======================================================================
 -->
-<questionBankExport version="1.0" source="LockIt">
+<questionBankExport version="1.0" source="EduQuas">
   <banks>
     <bank>
       <title><![CDATA[Contoh Bank Soal Matematika & Teknologi]]></title>

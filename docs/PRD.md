@@ -1,11 +1,11 @@
 # 📋 Product Requirements Document (PRD)
-# LockIt — Platform Ujian Online dengan Web-Based Proctoring
+# EduQuas — Platform Ujian Online dengan Web-Based Proctoring
 
 ---
 
 | Field | Detail |
 |---|---|
-| **Nama Produk** | LockIt |
+| **Nama Produk** | EduQuas |
 | **Versi PRD** | 2.0 |
 | **Tanggal** | 25 September 2026 |
 | **Status** | Reviewed — Siap Development |

@@ -32,9 +32,7 @@ export default function ExamDonePage() {
 
   useEffect(() => {
     try {
-      const stored =
-        sessionStorage.getItem("eduquas_submission_summary") ||
-        sessionStorage.getItem("lockit_submission_summary");
+      const stored = sessionStorage.getItem("eduquas_submission_summary");
       if (stored) {
         const parsed = JSON.parse(stored);
         setSummary((prev) => ({ ...prev, ...parsed }));

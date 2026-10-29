@@ -1,9 +1,9 @@
-services:
+  services:
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: lockit-backend
+    container_name: eduquas-backend
     ports:
       - "3001:3000"
     env_file:
@@ -23,7 +23,7 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    container_name: lockit-frontend
+    container_name: eduquas-frontend
     ports:
       - "3000:3000"
     environment:

@@ -75,9 +75,7 @@ function ExamsContent() {
   }, [filterParam]);
 
   useEffect(() => {
-    const saved =
-      localStorage.getItem("eduquas_exams_view") ||
-      localStorage.getItem("lockit_exams_view");
+    const saved = localStorage.getItem("eduquas_exams_view");
     if (saved === "grid" || saved === "list") {
       setViewMode(saved);
     }
@@ -86,7 +84,6 @@ function ExamsContent() {
   const changeViewMode = (mode: "grid" | "list") => {
     setViewMode(mode);
     localStorage.setItem("eduquas_exams_view", mode);
-    localStorage.setItem("lockit_exams_view", mode);
   };
 
   const showToast = (msg: string) => {
@@ -217,7 +214,7 @@ function ExamsContent() {
   return (
     <DashboardShell>
       <style>{`
-        .eduquas-btn-primary, .lockit-btn-primary {
+        .eduquas-btn-primary {
           display: inline-flex;
           align-items: center;
           justify-content: center;
@@ -235,13 +232,13 @@ function ExamsContent() {
           transition: background-color 150ms ease;
           outline: none;
         }
-        .eduquas-btn-primary:hover, .lockit-btn-primary:hover {
+        .eduquas-btn-primary:hover {
           background-color: ${T.primaryHover};
         }
-        .eduquas-btn-primary:active, .lockit-btn-primary:active {
+        .eduquas-btn-primary:active {
           background-color: ${T.primaryActive};
         }
-        .eduquas-btn-primary:focus-visible, .lockit-btn-primary:focus-visible {
+        .eduquas-btn-primary:focus-visible {
           outline: 2px solid ${T.primary};
           outline-offset: 2px;
         }
@@ -430,7 +427,7 @@ function ExamsContent() {
           </div>
 
           <div>
-            <Link href="/dashboard/exams/new" className="lockit-btn-primary">
+            <Link href="/dashboard/exams/new" className="eduquas-btn-primary">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                 <line x1="12" y1="5" x2="12" y2="19" />
                 <line x1="5" y1="12" x2="19" y2="12" />
@@ -821,7 +818,7 @@ function ExamsContent() {
                 </button>
                 <button
                   type="button"
-                  className="lockit-btn-primary"
+                  className="eduquas-btn-primary"
                   style={{ backgroundColor: confirmModal.type === "delete" ? T.danger : T.primary }}
                   onClick={handleModalConfirm}
                 >

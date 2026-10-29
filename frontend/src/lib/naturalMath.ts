@@ -1,7 +1,7 @@
 /**
  * naturalMath.ts
  *
- * Engine pemroses format matematika alami (Natural Math Formatter) untuk Eduquas / LockIt.
+ * Engine pemroses format matematika alami (Natural Math Formatter) untuk EduQuas.
  * Dirancang khusus agar guru-guru senior/lansia dapat menulis rumus matematika
  * sehari-hari tanpa harus menghafal sintaks LaTeX yang rumit.
  *

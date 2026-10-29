@@ -47,11 +47,9 @@ function JoinContent() {
     if (typeof window !== "undefined") {
       const hasCookie =
         document.cookie.includes("hasTeacherSession=1") ||
-        document.cookie.includes("eduquas_teacher_session=active") ||
-        document.cookie.includes("lockit_teacher_session=active");
+        document.cookie.includes("eduquas_teacher_session=active");
       const hasLocal =
-        localStorage.getItem("eduquas_teacher_session") === "active" ||
-        localStorage.getItem("lockit_teacher_session") === "active";
+        localStorage.getItem("eduquas_teacher_session") === "active";
       if (hasCookie || hasLocal) {
         setIsTeacherSignedIn(true);
       }
@@ -149,7 +147,6 @@ function JoinContent() {
       if (res.success && res.data?.exam) {
         if (typeof window !== "undefined") {
           sessionStorage.setItem("eduquas_exam_preview", JSON.stringify(res.data.exam));
-          sessionStorage.setItem("lockit_exam_preview", JSON.stringify(res.data.exam));
         }
         router.push(`/join/identity?code=${encodeURIComponent(normalized)}`);
         return;
@@ -200,7 +197,7 @@ function JoinContent() {
       }}
     >
       <style>{`
-        .eduquas-code-input, .lockit-code-input {
+        .eduquas-code-input {
           width: 100%;
           height: 56px;
           padding: 0 16px;
@@ -219,16 +216,16 @@ function JoinContent() {
           transition: border-color 150ms ease, box-shadow 150ms ease;
           box-sizing: border-box;
         }
-        .eduquas-code-input::placeholder, .lockit-code-input::placeholder {
+        .eduquas-code-input::placeholder {
           color: ${T.textPlaceholder};
           font-weight: 500;
           letter-spacing: 0.12em;
         }
-        .eduquas-code-input:focus, .lockit-code-input:focus {
+        .eduquas-code-input:focus {
           border-color: ${isError ? T.danger : T.primary};
           box-shadow: 0 0 0 3px ${isError ? "rgba(199, 62, 62, 0.20)" : T.primaryRing};
         }
-        .eduquas-code-input:read-only, .lockit-code-input:read-only {
+        .eduquas-code-input:read-only {
           background: ${T.bgSubtle};
           cursor: not-allowed;
         }

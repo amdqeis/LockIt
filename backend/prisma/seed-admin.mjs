@@ -6,7 +6,7 @@
  *   DATABASE_URL="postgresql://..." node backend/prisma/seed-admin.mjs
  *
  * Atau dengan env otomatis (jika DATABASE_URL ada di backend/.env):
- *   cd backend && DATABASE_URL="postgresql://key:Ra_sy6a7e2@localhost/lockit?schema=public" \
+ *   cd backend && DATABASE_URL="postgresql://key:Ra_sy6a7e2@localhost/eduquas?schema=public" \
  *     node prisma/seed-admin.mjs
  *
  * Env yang diperlukan:

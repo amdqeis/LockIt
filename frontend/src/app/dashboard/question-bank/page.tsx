@@ -1255,7 +1255,7 @@ export default function QuestionBankPage() {
       }
       const xmlStr = exportAllBanksToXml(banks, questions);
       const dateStr = new Date().toISOString().slice(0, 10);
-      downloadXmlFile(xmlStr, `Semua-Bank-Soal-LockIt-${dateStr}.xml`);
+      downloadXmlFile(xmlStr, `Semua-Bank-Soal-EduQuas-${dateStr}.xml`);
       showToast(`Berhasil mengekspor seluruh ${banks.length} bank soal ke berkas XML!`);
     } catch (err: any) {
       showToast(`Gagal mengekspor: ${err?.message || "Kesalahan sistem"}`, "error");

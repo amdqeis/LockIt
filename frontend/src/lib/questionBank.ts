@@ -574,13 +574,13 @@ export const defaultBankQuestions: BankQuestion[] = [
 
 // ─── LocalStorage Helpers & Syncing ──────────────────────────────────────────
 
-const STORAGE_BANKS_KEY = "lockit_question_banks_v2";
-const STORAGE_QUESTIONS_KEY = "lockit_bank_questions_v2";
+const STORAGE_BANKS_KEY = "eduquas_question_banks_v2";
+const STORAGE_QUESTIONS_KEY = "eduquas_bank_questions_v2";
 
 export function getStoredQuestionBanks(): QuestionBank[] {
   if (typeof window === "undefined") return defaultQuestionBanks;
   try {
-    const raw = localStorage.getItem(STORAGE_BANKS_KEY);
+    const raw = localStorage.getItem(STORAGE_BANKS_KEY) || localStorage.getItem("lockit_question_banks_v2");
     if (!raw) {
       localStorage.setItem(STORAGE_BANKS_KEY, JSON.stringify(defaultQuestionBanks));
       return defaultQuestionBanks;
@@ -610,7 +610,7 @@ export function getStoredQuestions(bankId?: string): BankQuestion[] {
     return bankId ? defaultBankQuestions.filter(q => q.bankId === bankId) : defaultBankQuestions;
   }
   try {
-    const raw = localStorage.getItem(STORAGE_QUESTIONS_KEY);
+    const raw = localStorage.getItem(STORAGE_QUESTIONS_KEY) || localStorage.getItem("lockit_bank_questions_v2");
     let allQuestions: BankQuestion[];
     if (!raw) {
       allQuestions = defaultBankQuestions;

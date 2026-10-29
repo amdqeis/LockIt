@@ -721,7 +721,6 @@ export default function ExamSessionPage() {
           total: totalQ,
         });
         sessionStorage.setItem("eduquas_submission_summary", summaryPayload);
-        sessionStorage.setItem("lockit_submission_summary", summaryPayload);
       }
     } catch {}
     try {
