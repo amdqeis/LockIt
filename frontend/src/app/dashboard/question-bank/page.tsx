@@ -5,6 +5,8 @@ import Link from "next/link";
 import DashboardShell from "@/app/components/DashboardShell";
 import LatexRenderer from "@/app/components/LatexRenderer";
 import ImportXmlModal from "@/app/components/ImportXmlModal";
+import MathQuickBar from "@/app/components/MathQuickBar";
+import { formatNaturalMath, hasNaturalOrLatexMath } from "@/lib/naturalMath";
 import {
   exportBankToXml,
   exportAllBanksToXml,
@@ -379,6 +381,8 @@ function QuestionModal({ initial, defaultBankId, banks, onClose, onSave }: Quest
   );
 
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [showMathBar, setShowMathBar] = useState(false);
+  const [showImageSection, setShowImageSection] = useState(Boolean(initial?.imageUrl));
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -504,8 +508,32 @@ function QuestionModal({ initial, defaultBankId, banks, onClose, onSave }: Quest
     reader.readAsDataURL(file);
   };
 
-  const insertLatexSnippet = (snippet: string) => {
-    setQuestionText(prev => prev + snippet);
+  const questionTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const selectedBank = banks.find(b => b.id === bankId) || banks[0];
+
+  const insertAtQuestionCursor = (snippet: string) => {
+    if (!questionTextareaRef.current) {
+      setQuestionText(prev => prev + snippet);
+      return;
+    }
+    const el = questionTextareaRef.current;
+    const start = el.selectionStart ?? el.value.length;
+    const end = el.selectionEnd ?? el.value.length;
+    const next = el.value.substring(0, start) + snippet + el.value.substring(end);
+    setQuestionText(next);
+    setTimeout(() => {
+      el.focus();
+      el.selectionStart = el.selectionEnd = start + snippet.length;
+    }, 0);
+  };
+
+  const insertOptionSnippet = (idx: number, snippet: string) => {
+    setOptions(prev => {
+      const copy = [...prev];
+      const cur = copy[idx]?.text || "";
+      copy[idx] = { ...copy[idx], text: cur ? `${cur} ${snippet}` : snippet };
+      return copy;
+    });
   };
 
   const validate = () => {
@@ -564,401 +592,565 @@ function QuestionModal({ initial, defaultBankId, banks, onClose, onSave }: Quest
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal modal-lg" onClick={e => e.stopPropagation()} style={{ maxWidth: "760px", maxHeight: "90vh", display: "flex", flexDirection: "column" }}>
+      <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: "1120px", width: "95vw", height: "88vh", maxHeight: "88vh", display: "flex", flexDirection: "column", overflow: "hidden", background: "#FFFFFF", borderRadius: "12px", boxShadow: "0 20px 45px rgba(0,0,0,0.2)" }}>
         
         {/* Header */}
-        <div className="modal-header">
+        <div className="modal-header" style={{ padding: "14px 20px", borderBottom: "1px solid #E2E8F0", flexShrink: 0, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
             <div style={{ fontSize: "16px", fontWeight: 700, color: "#0F172A" }}>
               {initial ? "✏️ Edit Butir Soal" : "➕ Buat Butir Soal Baru"}
             </div>
             <div style={{ fontSize: "12px", color: "#64748B", marginTop: "2px" }}>
-              Lengkapi teks soal, pilihan jawaban, dan tentukan kunci jawaban benar.
+              Ketik soal di sebelah kiri. Tampilan nyata lembar siswa langsung muncul di sebelah kanan.
             </div>
           </div>
-          <button className="modal-close" onClick={onClose}>✕</button>
+          <button className="modal-close" onClick={onClose} aria-label="Tutup">✕</button>
         </div>
 
-        {/* Body (Scrollable) */}
-        <div className="modal-body" style={{ overflowY: "auto", display: "flex", flexDirection: "column", gap: "20px", padding: "20px 24px" }}>
-          
-          {/* Target Folder Selector */}
-          <div className="form-group">
-            <label className="form-label" style={{ fontWeight: 600 }}>
-              Folder Bank Soal Tujuan <span className="required">*</span>
-            </label>
-            <select
-              className={`form-select${errors.bankId ? " error" : ""}`}
-              value={bankId}
-              onChange={e => setBankId(e.target.value)}
-              style={{ width: "100%" }}
-            >
-              {banks.map(b => (
-                <option key={b.id} value={b.id}>
-                  📚 {b.title} — ({b.subject})
-                </option>
-              ))}
-            </select>
-            {errors.bankId && <span className="form-error">⚠️ {errors.bankId}</span>}
-          </div>
+        {/* Body (Two-Window Split View - Smooth Scrollable) */}
+        <div className="modal-body" style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", WebkitOverflowScrolling: "touch", padding: "18px 20px" }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(440px, 1fr))",
+              gap: "20px",
+              alignItems: "start",
+            }}
+          >
+            {/* ─── WINDOW 1: EDITOR SOAL (PANEL KIRI) ───────────────────────── */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "14px", background: "#FFFFFF", border: "1px solid #E2E8F0", borderRadius: "10px", padding: "16px" }}>
+              
+              {/* Pengaturan Soal (Folder, Bobot, Format, & Petunjuk) */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px", paddingBottom: "12px", borderBottom: "1px solid #F1F5F9" }}>
+                {/* Baris 1: Folder Bank Soal & Bobot Poin */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 130px", gap: "10px" }}>
+                  <div>
+                    <label className="form-label" style={{ fontWeight: 700, fontSize: "12px", marginBottom: "4px", color: "#1E293B" }}>
+                      Folder Bank Soal <span className="required">*</span>
+                    </label>
+                    <select
+                      className={`form-select${errors.bankId ? " error" : ""}`}
+                      value={bankId}
+                      onChange={e => setBankId(e.target.value)}
+                      style={{ height: "34px", fontSize: "12px", width: "100%" }}
+                    >
+                      {banks.map(b => (
+                        <option key={b.id} value={b.id}>
+                          {b.title} ({b.subject})
+                        </option>
+                      ))}
+                    </select>
+                    {errors.bankId && <span className="form-error">⚠️ {errors.bankId}</span>}
+                  </div>
 
-          {/* Question Type Selection */}
-          <div className="form-group">
-            <label className="form-label" style={{ fontWeight: 600 }}>
-              Pilih Tipe Soal <span className="required">*</span>
-            </label>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "10px" }}>
-              {[
-                {
-                  id: "single_choice" as QuestionType,
-                  title: "Pilihan Ganda",
-                  desc: "1 jawaban benar (opsi A-F)",
-                  icon: "🔘",
-                  color: "#0284C7",
-                  bg: "#E0F4FD",
-                },
-                {
-                  id: "multi_select" as QuestionType,
-                  title: "Multi-Pilih",
-                  desc: "≥1 jawaban benar (checkbox)",
-                  icon: "☑️",
-                  color: "#D97706",
-                  bg: "#FEF3C7",
-                },
-                {
-                  id: "latex" as QuestionType,
-                  title: "Matematika (LaTeX)",
-                  desc: "Rumus KaTeX $x^2$ live preview",
-                  icon: "🧮",
-                  color: "#7C3AED",
-                  bg: "#EDE9FE",
-                },
-              ].map(item => {
-                const isSelected = type === item.id;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => setType(item.id)}
-                    style={{
-                      display: "flex", flexDirection: "column", alignItems: "flex-start",
-                      padding: "12px 14px", borderRadius: "8px",
-                      border: `2px solid ${isSelected ? item.color : "#E2E8F0"}`,
-                      background: isSelected ? item.bg : "#FFFFFF",
-                      cursor: "pointer", textAlign: "left", transition: "all 0.15s",
-                    }}
-                  >
-                    <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "4px" }}>
-                      <span style={{ fontSize: "16px" }}>{item.icon}</span>
-                      <span style={{ fontSize: "13px", fontWeight: 700, color: isSelected ? item.color : "#1E293B" }}>
-                        {item.title}
-                      </span>
+                  <div>
+                    <label className="form-label" style={{ fontWeight: 700, fontSize: "12px", marginBottom: "4px", color: "#1E293B" }}>
+                      Bobot (Poin) <span className="required">*</span>
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      className={`form-input${errors.points ? " error" : ""}`}
+                      value={points}
+                      onChange={e => setPoints(parseInt(e.target.value, 10) || 1)}
+                      style={{ height: "34px", fontSize: "12px", width: "100%" }}
+                    />
+                    {errors.points && <span className="form-error">⚠️ {errors.points}</span>}
+                  </div>
+                </div>
+
+                {/* Baris 2: Format Pilihan & Petunjuk Singkat */}
+                <div style={{ display: "flex", gap: "12px", alignItems: "flex-end", flexWrap: "wrap" }}>
+                  <div style={{ flex: "0 0 auto" }}>
+                    <label style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", display: "block", marginBottom: "4px" }}>
+                      Format Pilihan
+                    </label>
+                    <div style={{ display: "flex", gap: "6px" }}>
+                      {[
+                        { id: "single_choice" as QuestionType, label: "🔘 Pilihan Ganda" },
+                        { id: "multi_select" as QuestionType, label: "☑️ Multi-Pilih" },
+                      ].map(t => (
+                        <button
+                          key={t.id}
+                          type="button"
+                          onClick={() => setType(t.id)}
+                          style={{
+                            padding: "4px 9px",
+                            borderRadius: "5px",
+                            border: `1.5px solid ${type === t.id ? THEME.primary : "#CBD5E1"}`,
+                            background: type === t.id ? THEME.primaryTint : "#FFFFFF",
+                            color: type === t.id ? THEME.primary : "#475569",
+                            fontSize: "11px",
+                            fontWeight: type === t.id ? 700 : 500,
+                            cursor: "pointer",
+                          }}
+                        >
+                          {t.label}
+                        </button>
+                      ))}
                     </div>
-                    <span style={{ fontSize: "11px", color: "#64748B", lineHeight: 1.4 }}>{item.desc}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+                  </div>
 
-          {/* Question Text & KaTeX Live Preview */}
-          <div className="form-group">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
-              <label className="form-label" style={{ fontWeight: 600, margin: 0 }}>
-                Teks Soal <span className="required">*</span>
-              </label>
-              <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-                <button
-                  type="button"
-                  onClick={() => setPreviewTab(!previewTab)}
-                  style={{
-                    fontSize: "11px", fontWeight: 600, padding: "3px 8px", borderRadius: "4px",
-                    background: previewTab ? THEME.primaryTint : "#F1F5F9",
-                    color: previewTab ? THEME.primary : "#475569",
-                    border: "1px solid #CBD5E1", cursor: "pointer",
-                  }}
-                >
-                  {previewTab ? "✏️ Edit Mode" : "👁️ Live Preview"}
-                </button>
+                  <div style={{ flex: "1 1 180px" }}>
+                    <label style={{ fontSize: "11px", fontWeight: 700, color: "#64748B", display: "block", marginBottom: "4px" }}>
+                      Petunjuk / Pembahasan (Opsional)
+                    </label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="Catatan pembahasan jawaban..."
+                      value={hint}
+                      onChange={e => setHint(e.target.value)}
+                      style={{ height: "32px", fontSize: "12px", width: "100%" }}
+                    />
+                  </div>
+                </div>
               </div>
-            </div>
 
-            {/* Quick LaTeX Snippets */}
-            {(type === "latex" || questionText.includes("$")) && (
-              <div style={{ display: "flex", gap: "4px", flexWrap: "wrap", marginBottom: "8px" }}>
-                <span style={{ fontSize: "11px", color: "#64748B", alignSelf: "center", marginRight: "4px" }}>
-                  Sisipkan Rumus:
-                </span>
-                {[
-                  { label: "x²", code: "$x^2$" },
-                  { label: "a/b", code: "$\\frac{a}{b}$" },
-                  { label: "√x", code: "$\\sqrt{x}$" },
-                  { label: "∫ dx", code: "$$\\int_{a}^{b} f(x)\\,dx$$" },
-                  { label: "lim", code: "$$\\lim_{x \\to 0}$$" },
-                  { label: "±", code: "$\\pm$" },
-                  { label: "∑", code: "$\\sum_{i=1}^{n}$" },
-                  { label: "∩", code: "$A \\cap B$" },
-                ].map(s => (
-                  <button
-                    key={s.label}
-                    type="button"
-                    onClick={() => insertLatexSnippet(` ${s.code} `)}
-                    style={{
-                      fontSize: "11px", fontFamily: "monospace", padding: "2px 8px",
-                      borderRadius: "4px", border: "1px solid #CBD5E1", background: "#F8FAFC",
-                      cursor: "pointer", color: "#334155",
-                    }}
-                  >
-                    {s.label}
-                  </button>
-                ))}
-              </div>
-            )}
+              {/* Pertanyaan Soal */}
+              <div className="form-group" style={{ margin: 0 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                  <label className="form-label" style={{ fontWeight: 700, fontSize: "13px", margin: 0, color: "#1E293B" }}>
+                    Pertanyaan Soal <span className="required">*</span>
+                  </label>
+                  <div style={{ display: "flex", gap: "6px" }}>
+                    <button
+                      type="button"
+                      onClick={() => setShowMathBar(!showMathBar)}
+                      style={{
+                        fontSize: "11px",
+                        fontWeight: 600,
+                        padding: "3px 8px",
+                        borderRadius: "5px",
+                        border: `1px solid ${showMathBar ? "#1B76BF" : "#CBD5E1"}`,
+                        background: showMathBar ? "#EFF6FF" : "#FFFFFF",
+                        color: showMathBar ? "#1B76BF" : "#475569",
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "4px",
+                      }}
+                      title="Buka atau tutup tombol simbol rumus matematika"
+                    >
+                      <span>📐</span>
+                      <span>{showMathBar ? "Tutup Rumus" : "Simbol Rumus"}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowImageSection(!showImageSection)}
+                      style={{
+                        fontSize: "11px",
+                        fontWeight: 600,
+                        padding: "3px 8px",
+                        borderRadius: "5px",
+                        border: `1px solid ${showImageSection ? "#D97706" : "#CBD5E1"}`,
+                        background: showImageSection ? "#FEF3C7" : "#FFFFFF",
+                        color: showImageSection ? "#B45309" : "#475569",
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "4px",
+                      }}
+                      title="Lampirkan gambar untuk butir soal ini"
+                    >
+                      <span>🖼️</span>
+                      <span>{showImageSection ? "Tutup Gambar" : imageUrl ? "Ubah Gambar" : "Gambar"}</span>
+                    </button>
+                  </div>
+                </div>
 
-            {!previewTab ? (
-              <textarea
-                className={`form-textarea${errors.questionText ? " error" : ""}`}
-                placeholder={type === "latex" ? "Tuliskan soal dengan rumus KaTeX, contoh: Tentukan nilai $f'(x)$ dari fungsi $f(x) = 3x^2 - 4$..." : "Tuliskan pertanyaan soal di sini..."}
-                value={questionText}
-                onChange={e => setQuestionText(e.target.value)}
-                rows={4}
-                style={{ width: "100%", lineHeight: 1.6 }}
-              />
-            ) : (
-              <div style={{ padding: "14px 16px", borderRadius: "8px", border: "1.5px solid #CBD5E1", background: "#F8FAFC", minHeight: "100px" }}>
-                {questionText ? (
-                  <LatexRenderer text={questionText} block />
-                ) : (
-                  <span style={{ fontSize: "13px", color: "#94A3B8", fontStyle: "italic" }}>
-                    Belum ada teks soal untuk dipratinjau.
-                  </span>
+                <textarea
+                  ref={questionTextareaRef}
+                  className={`form-textarea${errors.questionText ? " error" : ""}`}
+                  placeholder="Ketik pertanyaan soal di sini... (contoh: Berapakah hasil dari 1/2 + 3/4?)"
+                  value={questionText}
+                  onChange={e => setQuestionText(e.target.value)}
+                  rows={4}
+                  style={{ width: "100%", fontSize: "14px", lineHeight: 1.6, padding: "10px 12px", borderRadius: "8px" }}
+                />
+                {errors.questionText && <span className="form-error">⚠️ {errors.questionText}</span>}
+
+                {/* Toolbar Simbol Rumus */}
+                {showMathBar && (
+                  <div style={{ marginTop: "8px" }}>
+                    <MathQuickBar onInsert={insertAtQuestionCursor} onClose={() => setShowMathBar(false)} />
+                  </div>
                 )}
               </div>
-            )}
-            {errors.questionText && <span className="form-error">⚠️ {errors.questionText}</span>}
-          </div>
 
-          {/* Image Attachment (URL or File Upload) */}
-          <div style={{ background: "#F8FAFC", padding: "16px", borderRadius: "8px", border: "1px solid #E2E8F0" }}>
-            <div style={{ fontSize: "13px", fontWeight: 700, color: "#1E293B", marginBottom: "8px", display: "flex", alignItems: "center", gap: "6px" }}>
-              <span>🖼️ Lampiran Gambar Soal (Opsional)</span>
-            </div>
-            <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center", marginBottom: "10px" }}>
-              <input
-                type="text"
-                className="form-input"
-                placeholder="Masukkan URL Gambar (https://...) atau unggah berkas"
-                value={imageUrl}
-                onChange={e => setImageUrl(e.target.value)}
-                style={{ flex: 1, minWidth: "220px" }}
-              />
-              <label
-                style={{
-                  display: "inline-flex", alignItems: "center", gap: "6px",
-                  padding: "0 14px", height: "40px", borderRadius: "6px",
-                  background: "#FFFFFF", border: "1px solid #CBD5E1",
-                  fontSize: "13px", fontWeight: 600, color: "#334155",
-                  cursor: "pointer",
-                }}
-              >
-                <span>📁 Upload Berkas</span>
-                <input
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp,image/svg+xml"
-                  onChange={handleImageFile}
-                  style={{ display: "none" }}
-                />
-              </label>
-              {imageUrl && (
-                <button
-                  type="button"
-                  onClick={() => { setImageUrl(""); setImageAlt(""); }}
-                  style={{ background: "none", border: "none", color: "#DC2626", fontSize: "13px", cursor: "pointer", fontWeight: 600 }}
-                >
-                  ✕ Hapus Gambar
-                </button>
-              )}
-            </div>
-            {imageUrl && (
-              <div style={{ display: "flex", gap: "12px", alignItems: "center", marginTop: "10px" }}>
-                <img
-                  src={imageUrl}
-                  alt={imageAlt || "Preview"}
-                  style={{ width: "90px", height: "64px", objectFit: "cover", borderRadius: "6px", border: "1px solid #CBD5E1", background: "white" }}
-                />
-                <div style={{ flex: 1 }}>
-                  <input
-                    type="text"
-                    className="form-input"
-                    placeholder="Deskripsi gambar / Alt text (contoh: Diagram Alir Algoritma)"
-                    value={imageAlt}
-                    onChange={e => setImageAlt(e.target.value)}
-                    style={{ height: "36px", fontSize: "12px" }}
-                  />
-                  <span style={{ fontSize: "11px", color: "#64748B" }}>Teks alternatif untuk aksesibilitas siswa</span>
-                </div>
-              </div>
-            )}
-            {errors.image && <span className="form-error">⚠️ {errors.image}</span>}
-          </div>
-
-          {/* Options Editor */}
-          <div className="form-group">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-              <div>
-                <label className="form-label" style={{ fontWeight: 600, margin: 0 }}>
-                  Pilihan Jawaban & Kunci Jawaban <span className="required">*</span>
-                </label>
-                <div style={{ fontSize: "12px", color: "#64748B" }}>
-                  {type === "multi_select"
-                    ? "Centang kotak pada opsi yang merupakan jawaban benar (bisa lebih dari satu)."
-                    : "Pilih lingkaran radio pada opsi yang merupakan kunci jawaban benar (tepat satu)."}
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={handleAddOption}
-                disabled={options.length >= 6}
-                style={{
-                  fontSize: "12px", fontWeight: 600, padding: "4px 10px", borderRadius: "6px",
-                  background: options.length >= 6 ? "#F1F5F9" : THEME.primaryTint,
-                  color: options.length >= 6 ? "#94A3B8" : THEME.primary,
-                  border: "1px solid " + (options.length >= 6 ? "#E2E8F0" : "#BAE6FD"),
-                  cursor: options.length >= 6 ? "not-allowed" : "pointer",
-                }}
-              >
-                + Tambah Opsi ({options.length}/6)
-              </button>
-            </div>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-              {options.map((opt, idx) => {
-                const isCorrect = type === "multi_select"
-                  ? correctAnswers.has(opt.id)
-                  : correctAnswer === opt.id;
-
-                return (
-                  <div
-                    key={opt.id}
-                    style={{
-                      display: "flex", alignItems: "center", gap: "10px",
-                      padding: "10px 14px", borderRadius: "8px",
-                      border: `1.5px solid ${isCorrect ? "#10B981" : "#E2E8F0"}`,
-                      background: isCorrect ? "#F0FDF4" : "#FFFFFF",
-                      transition: "all 0.15s",
-                    }}
-                  >
-                    {/* Toggle Selector */}
-                    {type === "multi_select" ? (
-                      <input
-                        type="checkbox"
-                        checked={isCorrect}
-                        onChange={() => toggleMultiCorrect(opt.id)}
-                        style={{ width: "18px", height: "18px", accentColor: "#10B981", cursor: "pointer" }}
-                        title="Tandai sebagai salah satu kunci jawaban benar"
-                      />
-                    ) : (
-                      <input
-                        type="radio"
-                        name="correct-option-group"
-                        checked={isCorrect}
-                        onChange={() => setCorrectAnswer(opt.id)}
-                        style={{ width: "18px", height: "18px", accentColor: "#10B981", cursor: "pointer" }}
-                        title="Tandai sebagai kunci jawaban benar"
-                      />
-                    )}
-
-                    {/* Label Badge (A, B, C...) */}
-                    <span
+              {/* Panel Gambar (Hanya jika dibuka / jika ada gambar) */}
+              {showImageSection && (
+                <div style={{ background: "#FFFBEB", padding: "12px", borderRadius: "8px", border: "1px solid #FDE68A", display: "flex", flexDirection: "column", gap: "8px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontSize: "12px", fontWeight: 700, color: "#92400E" }}>
+                      🖼️ Lampiran Gambar Soal
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowImageSection(false)}
+                      style={{ background: "none", border: "none", color: "#B45309", fontSize: "11px", cursor: "pointer", fontWeight: 600 }}
+                    >
+                      ✕ Tutup
+                    </button>
+                  </div>
+                  <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="URL Gambar (https://...) atau klik berkas"
+                      value={imageUrl}
+                      onChange={e => setImageUrl(e.target.value)}
+                      style={{ flex: 1, minWidth: "160px", height: "34px", fontSize: "12px" }}
+                    />
+                    <label
                       style={{
-                        width: "28px", height: "28px", borderRadius: "50%",
-                        background: isCorrect ? "#10B981" : "#F1F5F9",
-                        color: isCorrect ? "white" : "#475569",
-                        fontSize: "13px", fontWeight: 700,
-                        display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                        display: "inline-flex", alignItems: "center", gap: "4px",
+                        padding: "0 10px", height: "34px", borderRadius: "6px",
+                        background: "#FFFFFF", border: "1px solid #CBD5E1",
+                        fontSize: "12px", fontWeight: 600, color: "#334155",
+                        cursor: "pointer",
                       }}
                     >
-                      {opt.label}
-                    </span>
-
-                    {/* Input Option Text */}
-                    <div style={{ flex: 1 }}>
+                      <span>📁 Berkas</span>
+                      <input
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                        onChange={handleImageFile}
+                        style={{ display: "none" }}
+                      />
+                    </label>
+                    {imageUrl && (
+                      <button
+                        type="button"
+                        onClick={() => { setImageUrl(""); setImageAlt(""); }}
+                        style={{ background: "none", border: "none", color: "#DC2626", fontSize: "12px", cursor: "pointer", fontWeight: 600 }}
+                      >
+                        ✕ Hapus
+                      </button>
+                    )}
+                  </div>
+                  {imageUrl && (
+                    <div style={{ display: "flex", gap: "10px", alignItems: "center", marginTop: "2px" }}>
+                      <img
+                        src={imageUrl}
+                        alt={imageAlt || "Preview"}
+                        style={{ width: "70px", height: "48px", objectFit: "cover", borderRadius: "4px", border: "1px solid #CBD5E1", background: "white" }}
+                      />
                       <input
                         type="text"
                         className="form-input"
-                        placeholder={`Teks pilihan ${opt.label}...`}
-                        value={opt.text}
-                        onChange={e => handleOptionTextChange(idx, e.target.value)}
-                        style={{ height: "38px" }}
+                        placeholder="Keterangan gambar (opsional)"
+                        value={imageAlt}
+                        onChange={e => setImageAlt(e.target.value)}
+                        style={{ flex: 1, height: "30px", fontSize: "12px" }}
                       />
-                      {opt.text.includes("$") && (
-                        <div style={{ fontSize: "12px", color: "#475569", marginTop: "4px", paddingLeft: "4px" }}>
-                          <span style={{ fontSize: "10px", color: "#7C3AED", fontWeight: 600 }}>KaTeX: </span>
-                          <LatexRenderer text={opt.text} />
-                        </div>
-                      )}
                     </div>
+                  )}
+                  {errors.image && <span className="form-error">⚠️ {errors.image}</span>}
+                </div>
+              )}
 
-                    {/* Remove Option Button */}
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveOption(idx)}
-                      disabled={options.length <= 2}
-                      style={{
-                        width: "28px", height: "28px", borderRadius: "6px",
-                        border: "1px solid #E2E8F0", background: "white",
-                        color: options.length <= 2 ? "#CBD5E1" : "#EF4444",
-                        cursor: options.length <= 2 ? "not-allowed" : "pointer",
-                        display: "flex", alignItems: "center", justifyContent: "center", fontSize: "14px",
-                      }}
-                      title={options.length <= 2 ? "Minimal 2 opsi pilihan" : "Hapus opsi ini"}
-                    >
-                      ✕
-                    </button>
+              {/* Pilihan Jawaban (A, B, C, D) */}
+              <div className="form-group" style={{ margin: 0 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: "6px" }}>
+                  <div>
+                    <label className="form-label" style={{ fontWeight: 700, fontSize: "13px", margin: 0, color: "#1E293B" }}>
+                      Pilihan Jawaban & Kunci Jawaban <span className="required">*</span>
+                    </label>
+                    <div style={{ fontSize: "11px", color: "#64748B", marginTop: "1px" }}>
+                      {type === "multi_select"
+                        ? "Centang kotak pada pilihan yang merupakan jawaban benar:"
+                        : "Klik bulatan radio pada pilihan yang merupakan kunci jawaban benar:"}
+                    </div>
                   </div>
-                );
-              })}
-            </div>
-            {errors.options && <span className="form-error">⚠️ {errors.options}</span>}
-            {errors.correctAnswer && <span className="form-error">⚠️ {errors.correctAnswer}</span>}
-          </div>
+                  <button
+                    type="button"
+                    onClick={handleAddOption}
+                    disabled={options.length >= 6}
+                    style={{
+                      fontSize: "11px", fontWeight: 600, padding: "3px 8px", borderRadius: "5px",
+                      background: options.length >= 6 ? "#F1F5F9" : THEME.primaryTint,
+                      color: options.length >= 6 ? "#94A3B8" : THEME.primary,
+                      border: "1px solid " + (options.length >= 6 ? "#E2E8F0" : "#BAE6FD"),
+                      cursor: options.length >= 6 ? "not-allowed" : "pointer",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    + Tambah ({options.length}/6)
+                  </button>
+                </div>
 
-          {/* Points & Hint */}
-          <div className="form-grid-2">
-            <div className="form-group">
-              <label className="form-label" style={{ fontWeight: 600 }}>
-                Bobot Nilai (Poin) <span className="required">*</span>
-              </label>
-              <input
-                type="number"
-                min={1}
-                max={100}
-                className={`form-input${errors.points ? " error" : ""}`}
-                value={points}
-                onChange={e => setPoints(parseInt(e.target.value, 10) || 1)}
-              />
-              {errors.points && <span className="form-error">⚠️ {errors.points}</span>}
+                <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                  {options.map((opt, idx) => {
+                    const isCorrect = type === "multi_select"
+                      ? correctAnswers.has(opt.id)
+                      : correctAnswer === opt.id;
+
+                    const optHasMath = hasNaturalOrLatexMath(opt.text);
+
+                    return (
+                      <div
+                        key={opt.id}
+                        style={{
+                          display: "flex", flexDirection: "column", gap: "3px",
+                          padding: "6px 10px", borderRadius: "6px",
+                          border: `1.5px solid ${isCorrect ? "#10B981" : "#E2E8F0"}`,
+                          background: isCorrect ? "#F0FDF4" : "#FFFFFF",
+                          transition: "all 0.15s",
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          {/* Radio / Checkbox Selector */}
+                          {type === "multi_select" ? (
+                            <input
+                              type="checkbox"
+                              checked={isCorrect}
+                              onChange={() => toggleMultiCorrect(opt.id)}
+                              style={{ width: "18px", height: "18px", accentColor: "#10B981", cursor: "pointer" }}
+                              title="Tandai sebagai jawaban benar"
+                            />
+                          ) : (
+                            <input
+                              type="radio"
+                              name="correct-option-group"
+                              checked={isCorrect}
+                              onChange={() => setCorrectAnswer(opt.id)}
+                              style={{ width: "18px", height: "18px", accentColor: "#10B981", cursor: "pointer" }}
+                              title="Tandai sebagai kunci jawaban benar"
+                            />
+                          )}
+
+                          {/* Huruf Opsi (A, B, C...) */}
+                          <span
+                            style={{
+                              width: "24px", height: "24px", borderRadius: "50%",
+                              background: isCorrect ? "#10B981" : "#F1F5F9",
+                              color: isCorrect ? "white" : "#475569",
+                              fontSize: "11px", fontWeight: 700,
+                              display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                            }}
+                          >
+                            {opt.label}
+                          </span>
+
+                          {/* Input Teks */}
+                          <div style={{ flex: 1 }}>
+                            <input
+                              type="text"
+                              className="form-input"
+                              placeholder={`Teks pilihan ${opt.label}... (misal: 1/2 atau 2x^2)`}
+                              value={opt.text}
+                              onChange={e => handleOptionTextChange(idx, e.target.value)}
+                              style={{ height: "34px", fontSize: "13px" }}
+                            />
+                          </div>
+
+                          {/* Tombol Hapus Opsi */}
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveOption(idx)}
+                            disabled={options.length <= 2}
+                            style={{
+                              width: "26px", height: "26px", borderRadius: "5px",
+                              border: "1px solid #E2E8F0", background: "white",
+                              color: options.length <= 2 ? "#CBD5E1" : "#EF4444",
+                              cursor: options.length <= 2 ? "not-allowed" : "pointer",
+                              display: "flex", alignItems: "center", justifyContent: "center", fontSize: "12px",
+                            }}
+                            title={options.length <= 2 ? "Minimal 2 pilihan" : "Hapus opsi ini"}
+                          >
+                            ✕
+                          </button>
+                        </div>
+
+                        {/* Inline preview jika opsi memuat rumus */}
+                        {optHasMath && (
+                          <div
+                            style={{
+                              marginLeft: "32px",
+                              fontSize: "11px",
+                              color: "#334155",
+                              padding: "2px 6px",
+                              background: "#F8FAFC",
+                              borderRadius: "4px",
+                              border: "1px dashed #CBD5E1",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "4px",
+                              alignSelf: "flex-start",
+                            }}
+                          >
+                            <span style={{ fontSize: "10px", color: "#1B76BF", fontWeight: 700 }}>
+                              Rumus:
+                            </span>
+                            <LatexRenderer text={opt.text} />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                {errors.options && <span className="form-error">⚠️ {errors.options}</span>}
+                {errors.correctAnswer && <span className="form-error">⚠️ {errors.correctAnswer}</span>}
+              </div>
             </div>
-            <div className="form-group">
-              <label className="form-label" style={{ fontWeight: 600 }}>
-                Petunjuk / Pembahasan (Opsional)
-              </label>
-              <input
-                type="text"
-                className="form-input"
-                placeholder="Penjelasan ringkas atau petunjuk rumus..."
-                value={hint}
-                onChange={e => setHint(e.target.value)}
-              />
+
+            {/* ─── WINDOW 2: LEMBAR SISWA (PANEL KANAN) ─────────────────────── */}
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "8px",
+                position: "sticky",
+                top: 0,
+              }}
+            >
+              {/* Header Lembar Siswa */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: "13px", fontWeight: 700, color: "#334155", display: "flex", alignItems: "center", gap: "6px" }}>
+                  <span>📄 Lembar Tampilan Siswa</span>
+                </span>
+                <span style={{ fontSize: "11px", fontWeight: 600, background: "#EFF6FF", color: "#1D4ED8", padding: "2px 8px", borderRadius: "99px", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                  <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#2563EB" }} />
+                  Hasil Nyata
+                </span>
+              </div>
+
+              {/* Card Kertas Ujian Siswa */}
+              <div
+                style={{
+                  background: "#FFFFFF",
+                  border: "1.5px solid #CBD5E1",
+                  borderRadius: "10px",
+                  padding: "16px",
+                  boxShadow: "0 2px 8px rgba(0,0,0,0.03)",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "12px",
+                }}
+              >
+                {/* Meta Top Bar */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingBottom: "8px", borderBottom: "1px solid #F1F5F9" }}>
+                  <span style={{ fontSize: "12px", fontWeight: 600, color: "#64748B" }}>
+                    📚 {selectedBank?.title || "Bank Soal"}
+                  </span>
+                  <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                    <QuestionTypeBadge type={type} />
+                    <span style={{ fontSize: "11px", fontWeight: 700, background: "#F1F5F9", color: "#475569", padding: "2px 6px", borderRadius: "99px" }}>
+                      {points} Poin
+                    </span>
+                  </div>
+                </div>
+
+                {/* Teks Pertanyaan */}
+                <div
+                  style={{
+                    fontSize: "14px",
+                    color: "#1E293B",
+                    lineHeight: 1.7,
+                    minHeight: "44px",
+                    padding: "8px 10px",
+                    background: "#F8FAFC",
+                    borderRadius: "6px",
+                  }}
+                >
+                  {questionText.trim() ? (
+                    <LatexRenderer text={questionText} block />
+                  ) : (
+                    <span style={{ color: "#94A3B8", fontStyle: "italic", fontSize: "12px" }}>
+                      Pertanyaan yang Anda ketik akan langsung tampil di sini...
+                    </span>
+                  )}
+                </div>
+
+                {/* Gambar (jika ada) */}
+                {imageUrl && (
+                  <img
+                    src={imageUrl}
+                    alt={imageAlt || "Lampiran Soal"}
+                    style={{ maxWidth: "100%", maxHeight: "160px", objectFit: "contain", borderRadius: "6px", border: "1px solid #E2E8F0" }}
+                  />
+                )}
+
+                {/* Pilihan Siswa */}
+                <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                  {options.map(opt => {
+                    const isCorrect = type === "multi_select"
+                      ? correctAnswers.has(opt.id)
+                      : correctAnswer === opt.id;
+
+                    return (
+                      <div
+                        key={opt.id}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "8px",
+                          padding: "6px 10px",
+                          borderRadius: "6px",
+                          border: `1.5px solid ${isCorrect ? "#10B981" : "#E2E8F0"}`,
+                          background: isCorrect ? "#F0FDF4" : "#FFFFFF",
+                          fontSize: "13px",
+                        }}
+                      >
+                        <span
+                          style={{
+                            width: "20px",
+                            height: "20px",
+                            borderRadius: "50%",
+                            background: isCorrect ? "#10B981" : "#F1F5F9",
+                            color: isCorrect ? "white" : "#475569",
+                            fontSize: "10px",
+                            fontWeight: 700,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            flexShrink: 0,
+                          }}
+                        >
+                          {opt.label}
+                        </span>
+                        <div style={{ flex: 1, color: isCorrect ? "#065F46" : "#1E293B", fontWeight: isCorrect ? 600 : 400 }}>
+                          {opt.text.trim() ? (
+                            <LatexRenderer text={opt.text} />
+                          ) : (
+                            <span style={{ color: "#94A3B8", fontStyle: "italic", fontSize: "12px" }}>
+                              (Opsi {opt.label})
+                            </span>
+                          )}
+                        </div>
+                        {isCorrect && (
+                          <span style={{ fontSize: "10px", fontWeight: 700, color: "#059669", background: "#D1FAE5", padding: "1px 6px", borderRadius: "99px", flexShrink: 0 }}>
+                            ✓ Kunci
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Hint jika diisi */}
+                {hint.trim() && (
+                  <div style={{ background: "#F5F3FF", border: "1px solid #DDD6FE", borderRadius: "6px", padding: "6px 8px", fontSize: "11px", color: "#5B21B6", display: "flex", alignItems: "center", gap: "6px" }}>
+                    <span>💡</span>
+                    <LatexRenderer text={hint} />
+                  </div>
+                )}
+              </div>
+
+              <div style={{ fontSize: "11px", color: "#64748B", paddingLeft: "4px" }}>
+                💡 Rumus seperti 1/2, 2*2, 2^2, sin, lim otomatis tertata rapi persis seperti di lembar ini.
+              </div>
             </div>
           </div>
         </div>
 
         {/* Footer */}
-        <div className="modal-footer" style={{ borderTop: "1px solid #E2E8F0", padding: "16px 24px" }}>
+        <div className="modal-footer" style={{ borderTop: "1px solid #E2E8F0", padding: "12px 20px", display: "flex", justifyContent: "flex-end", gap: "10px", flexShrink: 0 }}>
           <button className="btn btn-secondary btn-md" onClick={onClose}>Batal</button>
           <button className="btn btn-primary btn-md" onClick={handleSubmit}>
-            {initial ? "Simpan Perubahan Soal" : "Tambah Soal ke Bank"}
+            {initial ? "Simpan Perubahan" : "Simpan Soal"}
           </button>
         </div>
       </div>

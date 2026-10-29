@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import LatexRenderer from "@/app/components/LatexRenderer";
+import { hasNaturalOrLatexMath } from "@/lib/naturalMath";
 import DOMPurify from "dompurify";
 import {
   fetchExamSession,
@@ -58,7 +59,7 @@ function useIsMobile() {
 }
 
 function hasLatex(text: string) {
-  return /\$/.test(text);
+  return hasNaturalOrLatexMath(text);
 }
 
 // ─── Image Zoom Modal ─────────────────────────────────────────────────────────

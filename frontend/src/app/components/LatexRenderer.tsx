@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { formatNaturalMath } from "@/lib/naturalMath";
 
 interface Props {
   text: string;
@@ -51,7 +52,8 @@ export default function LatexRenderer({ text, block = false, style, className }:
     }
 
     // Split text into segments: $$...$$, $...$, and plain text
-    const segments = text.split(/((?:\$\$[\s\S]+?\$\$)|(?:\$[^$\n]+?\$))/g);
+    const processedText = formatNaturalMath(text);
+    const segments = processedText.split(/((?:\$\$[\s\S]+?\$\$)|(?:\$[^$\n]+?\$))/g);
 
     // Check if we even have any math — skip KaTeX import for pure text
     const hasMath = segments.some(
@@ -89,6 +91,7 @@ export default function LatexRenderer({ text, block = false, style, className }:
                 displayMode: true,
                 throwOnError: false,
                 output: "htmlAndMathml",
+                trust: false,
               });
             } catch {
               wrapper.textContent = segment;
@@ -103,6 +106,7 @@ export default function LatexRenderer({ text, block = false, style, className }:
                 displayMode: false,
                 throwOnError: false,
                 output: "htmlAndMathml",
+                trust: false,
               });
             } catch {
               span.textContent = segment;
