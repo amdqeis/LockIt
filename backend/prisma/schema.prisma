@@ -1,0 +1,214 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── GURU/DOSEN ────────────────────────────────────
+
+enum TeacherRole {
+  TEACHER
+  ADMIN
+}
+
+model Teacher {
+  id           String      @id @default(uuid())
+  email        String      @unique
+  passwordHash String      @map("password_hash")
+  fullName     String      @map("full_name")
+  // ─── RBAC ────────────────────────────────────────
+  role         TeacherRole @default(TEACHER)
+  isActive     Boolean     @default(true) @map("is_active")
+  phone        String?
+  lastLoginAt  DateTime?   @map("last_login_at") @db.Timestamptz
+  // ─────────────────────────────────────────────────
+  createdAt    DateTime    @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime    @updatedAt @map("updated_at") @db.Timestamptz
+
+  exams         Exam[]
+  warnings      Warning[]
+  refreshTokens RefreshToken[]
+
+  @@index([role])
+  @@index([isActive])
+  @@map("teachers")
+}
+
+// ─── REFRESH TOKEN ─────────────────────────────────
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  teacherId String   @map("teacher_id")
+  tokenHash String   @unique @map("token_hash")
+  expiresAt DateTime @map("expires_at") @db.Timestamptz
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  isRevoked Boolean  @default(false) @map("is_revoked")
+
+  teacher Teacher @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+
+  @@index([teacherId])
+  @@map("refresh_tokens")
+}
+
+// ─── UJIAN ─────────────────────────────────────────
+
+enum ExamStatus {
+  draft
+  active
+  ended
+  archived
+}
+
+model Exam {
+  id              String     @id @default(uuid())
+  teacherId       String     @map("teacher_id")
+  title           String
+  description     String?
+  accessCode      String     @unique @map("access_code")
+  durationMinutes Int        @map("duration_minutes")
+  status          ExamStatus @default(draft)
+  violationPolicy Json       @map("violation_policy")
+  settings        Json       @default("{}")
+  startTime       DateTime?  @map("start_time") @db.Timestamptz
+  endTime         DateTime?  @map("end_time") @db.Timestamptz
+  createdAt       DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime   @updatedAt @map("updated_at") @db.Timestamptz
+
+  teacher          Teacher           @relation(fields: [teacherId], references: [id], onDelete: Restrict)
+  questions        Question[]
+  students         Student[]
+  proctoringEvents ProctoringEvent[]
+  warnings         Warning[]
+
+  @@index([teacherId])
+  @@index([status])
+  @@map("exams")
+}
+
+// ─── SOAL ──────────────────────────────────────────
+
+model Question {
+  id           String   @id @default(uuid())
+  examId       String   @map("exam_id")
+  orderIndex   Int      @map("order_index")
+  questionText String   @map("question_text")
+  imageUrl     String?  @map("image_url")
+  options      Json
+  correctAnswer String  @map("correct_answer")
+  points       Int      @default(10)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  exam    Exam     @relation(fields: [examId], references: [id], onDelete: Cascade)
+  answers Answer[]
+
+  @@index([examId])
+  @@map("questions")
+}
+
+// ─── PESERTA ───────────────────────────────────────
+
+enum StudentStatus {
+  waiting
+  active
+  submitted
+  disconnected
+}
+
+model Student {
+  id                String        @id @default(uuid())
+  examId            String        @map("exam_id")
+  name              String
+  nisn              String
+  // LOW-04: Simpan hash SHA-256 dari session token — konsisten dengan teacher refresh token.
+  // JWT asli tidak pernah disimpan di DB; hanya hash-nya untuk verifikasi.
+  sessionTokenHash  String        @map("session_token_hash")
+  status            StudentStatus @default(waiting)
+  isLocked          Boolean       @default(false) @map("is_locked")
+  violationCount    Int           @default(0) @map("violation_count")
+  ipAddress         String?       @map("ip_address")
+  userAgent         String?       @map("user_agent")
+  joinedAt          DateTime      @default(now()) @map("joined_at") @db.Timestamptz
+  submittedAt       DateTime?     @map("submitted_at") @db.Timestamptz
+
+  exam             Exam              @relation(fields: [examId], references: [id], onDelete: Restrict)
+  answers          Answer[]
+  proctoringEvents ProctoringEvent[]
+  warnings         Warning[]
+
+  @@unique([examId, nisn])
+  @@index([sessionTokenHash])
+  @@index([examId, status])
+  @@map("students")
+}
+
+// ─── JAWABAN ───────────────────────────────────────
+
+model Answer {
+  id             String    @id @default(uuid())
+  studentId      String    @map("student_id")
+  questionId     String    @map("question_id")
+  selectedOption String?   @map("selected_option")
+  isCorrect      Boolean?  @map("is_correct")
+  answeredAt     DateTime? @map("answered_at") @db.Timestamptz
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  student  Student  @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  question Question @relation(fields: [questionId], references: [id], onDelete: Restrict)
+
+  @@unique([studentId, questionId])
+  @@map("answers")
+}
+
+// ─── EVENT PROCTORING ──────────────────────────────
+
+enum EventType {
+  fullscreen_exit
+  fullscreen_denied
+  window_blur
+  tab_switch
+  copy_attempt
+  paste_attempt
+  right_click
+  devtools
+  reconnect
+  heartbeat_lost
+}
+
+model ProctoringEvent {
+  id         String    @id @default(uuid())
+  studentId  String    @map("student_id")
+  examId     String    @map("exam_id")
+  eventType  EventType @map("event_type")
+  timestamp  DateTime  @default(now()) @db.Timestamptz
+  durationMs Int?      @map("duration_ms")
+  metadata   Json?
+
+  student Student @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  exam    Exam    @relation(fields: [examId], references: [id], onDelete: Restrict)
+
+  @@index([examId, studentId])
+  @@index([examId, timestamp])
+  @@map("proctoring_events")
+}
+
+// ─── WARNING ───────────────────────────────────────
+
+model Warning {
+  id        String   @id @default(uuid())
+  examId    String   @map("exam_id")
+  studentId String   @map("student_id")
+  teacherId String   @map("teacher_id")
+  message   String
+  sentAt    DateTime @default(now()) @map("sent_at") @db.Timestamptz
+  isRead    Boolean  @default(false) @map("is_read")
+
+  exam    Exam    @relation(fields: [examId], references: [id], onDelete: Restrict)
+  student Student @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  teacher Teacher @relation(fields: [teacherId], references: [id], onDelete: Restrict)
+
+  @@index([studentId])
+  @@map("warnings")
+}

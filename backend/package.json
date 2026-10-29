@@ -1,0 +1,42 @@
+{
+  "name": "eduquas-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "EduQuas — Platform Ujian Online dengan Web-Based Proctoring (Backend)",
+  "scripts": {
+    "dev": "PORT=3001 tsx watch --env-file=.env server.ts",
+    "build": "next build",
+    "start": "NODE_ENV=production PORT=3001 tsx --env-file=.env server.ts",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:seed": "tsx --env-file=.env prisma/seed.ts",
+    "prisma:studio": "prisma studio",
+    "lint": "next lint"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "bcryptjs": "^2.4.3",
+    "csv-writer": "^1.6.0",
+    "exceljs": "^4.4.0",
+    "fast-xml-parser": "^4.5.0",
+    "jsonwebtoken": "^9.0.2",
+    "next": "^15.1.7",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "socket.io": "^4.8.1",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/jsonwebtoken": "^9.0.9",
+    "@types/node": "^22.13.4",
+    "@types/react": "^19.0.10",
+    "@types/react-dom": "^19.0.4",
+    "prisma": "^5.22.0",
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.3"
+  }
+}
