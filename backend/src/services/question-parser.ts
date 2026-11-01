@@ -185,3 +185,72 @@ export function parseXmlQuestionBank(xmlContent: string): ParsedExamBank {
     questions: validatedQuestions,
   };
 }
+
+export function normalizeQuestionForDb(q: any, idx: number): ParsedQuestion {
+  const text = (q.questionText || q.text || `Soal nomor ${idx + 1}`).toString().trim();
+  const points = typeof q.points === "number" && q.points > 0 ? q.points : 10;
+  const orderIndex = typeof q.orderIndex === "number" && q.orderIndex > 0 ? q.orderIndex : idx + 1;
+  const imageUrl = q.imageUrl || q.image || null;
+
+  let rawOptions = Array.isArray(q.options) ? q.options : [];
+  let detectedCorrect = "";
+
+  const options: ParsedOption[] = rawOptions.map((opt: any, optIdx: number) => {
+    const letter = String.fromCharCode(65 + optIdx);
+    let label = (opt.label || opt.id || opt["@_label"] || letter).toString().toUpperCase();
+    if (label.length > 2) {
+      label = letter;
+    }
+
+    const optText = typeof opt === "string"
+      ? opt
+      : (opt.text || opt.label || opt["#text"] || opt.content || opt.value || "");
+    const optImage = typeof opt === "object" ? (opt.imageUrl || opt.image || opt["@_image"] || null) : null;
+    const isCorrect = opt.isCorrect === true || opt["@_correct"] === "true" || opt["@_correct"] === true;
+
+    if (isCorrect && !detectedCorrect) {
+      detectedCorrect = label;
+    }
+
+    return {
+      label,
+      text: optText.toString(),
+      imageUrl: optImage,
+    };
+  });
+
+  let finalCorrectAnswer = detectedCorrect;
+  if (!finalCorrectAnswer) {
+    if (typeof q.correctAnswer === "string" && q.correctAnswer.trim()) {
+      const target = q.correctAnswer.trim().toUpperCase();
+      const matched = options.find((o, oIdx) => {
+        const rawOpt = rawOptions[oIdx];
+        const rawId = rawOpt?.id?.toString()?.toUpperCase();
+        return o.label === target || rawId === target;
+      });
+      finalCorrectAnswer = matched ? matched.label : (options[0]?.label || "A");
+    } else if (Array.isArray(q.correctAnswers) && q.correctAnswers.length > 0) {
+      const firstTarget = String(q.correctAnswers[0]).trim().toUpperCase();
+      const matched = options.find((o, oIdx) => {
+        const rawOpt = rawOptions[oIdx];
+        const rawId = rawOpt?.id?.toString()?.toUpperCase();
+        return o.label === firstTarget || rawId === firstTarget;
+      });
+      finalCorrectAnswer = matched ? matched.label : (options[0]?.label || "A");
+    } else if (options.length > 0) {
+      finalCorrectAnswer = options[0].label;
+    } else {
+      finalCorrectAnswer = "A";
+    }
+  }
+
+  return {
+    orderIndex,
+    questionText: text,
+    imageUrl,
+    options,
+    correctAnswer: finalCorrectAnswer,
+    points,
+  };
+}
+

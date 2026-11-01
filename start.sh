@@ -81,6 +81,16 @@ echo -e "${BLUE}▶ Menjalankan Backend API & Socket.IO di port 3001...${NC}"
 ) 2>&1 | sed "s/^/$(echo -e "${BLUE}[BE-3001]${NC} ")/" &
 BE_PID=$!
 
+echo -e "${YELLOW}⏳ Menunggu Backend API siap di port 3001...${NC}"
+while ! curl -s -o /dev/null http://127.0.0.1:3001 2>/dev/null; do
+  if ! kill -0 "$BE_PID" 2>/dev/null; then
+    echo -e "${RED}❌ Backend terhenti secara tidak terduga. Periksa log di atas.${NC}"
+    exit 1
+  fi
+  sleep 0.3
+done
+echo -e "${GREEN}✓ Backend siap di http://localhost:3001${NC}"
+
 echo -e "${CYAN}▶ Menjalankan Frontend Next.js di port 3000...${NC}"
 (
   cd frontend

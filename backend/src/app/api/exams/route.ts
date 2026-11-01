@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { generateUniqueAccessCode } from "@/lib/code-generator";
 import { successResponse, errorResponse, safeErrorMessage } from "@/lib/response";
 import { AppError } from "@/lib/errors";
+import { normalizeQuestionForDb } from "@/services/question-parser";
 
 const createExamSchema = z.object({
   title: z.string().min(3, "Judul ujian minimal 3 karakter"),
@@ -30,12 +31,16 @@ const createExamSchema = z.object({
       randomize_questions: z.boolean().default(true),
       display_mode: z.enum(["one_by_one", "all_at_once"]).default("one_by_one"),
       auto_save_interval_seconds: z.number().int().min(5).max(120).default(30),
+      bank_id: z.string().optional(),
+      bank_title: z.string().optional(),
     })
+    .passthrough()
     .default({
       randomize_questions: true,
       display_mode: "one_by_one",
       auto_save_interval_seconds: 30,
     }),
+  questions: z.array(z.any()).optional(),
 });
 
 export async function GET(req: NextRequest) {
@@ -93,23 +98,55 @@ export async function POST(req: NextRequest) {
       return errorResponse("VALIDATION_ERROR", "Data ujian tidak valid", 400, parsed.error.flatten().fieldErrors);
     }
 
-    const { title, description, durationMinutes, violationPolicy, settings } = parsed.data;
+    const { title, description, durationMinutes, violationPolicy, settings, questions } = parsed.data;
     const accessCode = await generateUniqueAccessCode(6);
 
-    const exam = await prisma.exam.create({
-      data: {
-        teacherId: teacher.teacherId,
-        title,
-        description: description || null,
-        durationMinutes,
-        accessCode,
-        status: "draft",
-        violationPolicy,
-        settings,
-      },
+    const exam = await prisma.$transaction(async (tx) => {
+      const created = await tx.exam.create({
+        data: {
+          teacherId: teacher.teacherId,
+          title,
+          description: description || null,
+          durationMinutes,
+          accessCode,
+          status: "draft",
+          violationPolicy: violationPolicy as any,
+          settings: settings as any,
+        },
+      });
+
+      if (Array.isArray(questions) && questions.length > 0) {
+        for (let idx = 0; idx < questions.length; idx++) {
+          const norm = normalizeQuestionForDb(questions[idx], idx);
+          await tx.question.create({
+            data: {
+              examId: created.id,
+              orderIndex: norm.orderIndex,
+              questionText: norm.questionText,
+              imageUrl: norm.imageUrl,
+              options: norm.options as any,
+              correctAnswer: norm.correctAnswer,
+              points: norm.points,
+            },
+          });
+        }
+      }
+
+      return tx.exam.findUnique({
+        where: { id: created.id },
+        include: {
+          _count: {
+            select: {
+              questions: true,
+              students: true,
+            },
+          },
+        },
+      });
     });
 
     return successResponse(exam, 201);
+
   } catch (err: any) {
     if (err instanceof AppError) {
       return errorResponse(err.code, err.message, err.statusCode, err.details);

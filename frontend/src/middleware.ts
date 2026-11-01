@@ -7,13 +7,22 @@ const ADMIN_ROUTES = ["/dashboard/admin"];
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // 1. Protect all /dashboard routes — cek sesi teacher
-  if (pathname.startsWith("/dashboard")) {
-    const hasSession =
-      req.cookies.get("hasTeacherSession")?.value ||
-      req.cookies.get("refreshToken")?.value;
+  // 1. Redirect guru yang sudah login saat mengakses "/" langsung ke /dashboard
+  const hasTeacherSession =
+    req.cookies.get("hasTeacherSession")?.value === "1" ||
+    req.cookies.get("eduquas_teacher_session")?.value === "active" ||
+    Boolean(req.cookies.get("refreshToken")?.value);
 
-    if (!hasSession) {
+  if (pathname === "/") {
+    if (hasTeacherSession) {
+      return NextResponse.redirect(new URL("/dashboard", req.url));
+    }
+    return NextResponse.next();
+  }
+
+  // 2. Protect all /dashboard routes — cek sesi teacher
+  if (pathname.startsWith("/dashboard")) {
+    if (!hasTeacherSession) {
       const loginUrl = new URL("/login", req.url);
       loginUrl.searchParams.set("next", pathname);
       return NextResponse.redirect(loginUrl);
@@ -49,5 +58,5 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*"],
+  matcher: ["/dashboard/:path*", "/"],
 };

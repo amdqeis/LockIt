@@ -6,6 +6,94 @@
 
 import { apiFetch } from "./apiClient";
 
+// ─── Session Hint (localStorage) ─────────────────────────────────────────────
+// Menyimpan informasi non-sensitif sesi aktif di localStorage.
+// Digunakan untuk menampilkan UI "Lanjutkan ujian" secara instan tanpa menunggu
+// fetch backend. Data ini bukan otoritas autentikasi — hanya sebagai UX hint.
+
+const SESSION_HINT_KEY = "eduquas_active_session";
+
+export interface SessionHint {
+  studentName: string;
+  studentNisn: string;
+  examTitle: string;
+  examId: string;
+  savedAt: string; // ISO timestamp — untuk invalidasi hint yang terlalu lama
+}
+
+/** Simpan hint sesi ke localStorage (client-only). */
+export function saveSessionHint(data: Omit<SessionHint, "savedAt">): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(
+      SESSION_HINT_KEY,
+      JSON.stringify({ ...data, savedAt: new Date().toISOString() })
+    );
+  } catch {
+    // ignore QuotaExceededError
+  }
+}
+
+/** Baca hint sesi dari localStorage. Mengembalikan null jika tidak ada atau rusak. */
+export function getSessionHint(): SessionHint | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(SESSION_HINT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as SessionHint;
+    if (!parsed.examId || !parsed.examTitle) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/** Hapus hint sesi dari localStorage (setelah submit atau sesi berakhir). */
+export function clearSessionHint(): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.removeItem(SESSION_HINT_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+// ─── Check Active Session ─────────────────────────────────────────────────────
+
+export interface ActiveSessionCheck {
+  isActive: true;
+  isLocked: boolean;
+  studentId: string;
+  studentName: string;
+  studentNisn: string;
+  examId: string;
+  examTitle: string;
+  examStatus: string;
+  endTime: string | null;
+  timeLeftSeconds: number | null;
+}
+
+export interface InactiveSessionCheck {
+  isActive: false;
+  reason: "no_session" | "submitted" | "exam_ended" | "exam_not_started" | "time_expired" | "error";
+}
+
+export type SessionCheckResult = ActiveSessionCheck | InactiveSessionCheck;
+
+/**
+ * Cek apakah ada sesi ujian aktif berdasarkan cookie studentSession.
+ * Selalu resolve (tidak throw) — error internal dikembalikan sebagai { isActive: false }.
+ */
+export async function checkActiveSession(): Promise<SessionCheckResult> {
+  try {
+    const res = await apiFetch<SessionCheckResult>("/api/exam-session/check");
+    if (res.success && res.data) return res.data;
+    return { isActive: false, reason: "no_session" };
+  } catch {
+    return { isActive: false, reason: "error" };
+  }
+}
+
 export interface ValidateExamResponse {
   exam: {
     title: string;

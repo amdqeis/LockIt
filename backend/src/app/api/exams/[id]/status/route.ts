@@ -5,9 +5,12 @@ import { prisma } from "@/lib/prisma";
 import { successResponse, errorResponse, safeErrorMessage } from "@/lib/response";
 import { AppError } from "@/lib/errors";
 import { scheduleExamAutoEnd, executeExamEnd, cancelExamAutoEnd } from "@/lib/scheduler";
+import { normalizeQuestionForDb } from "@/services/question-parser";
 
 const statusSchema = z.object({
   status: z.enum(["draft", "active", "ended", "archived"]),
+  questions: z.array(z.any()).optional(),
+  bankId: z.string().optional(),
 });
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -41,8 +44,44 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
     // Validate state machine transitions
     if (currentStatus === "draft" && nextStatus === "active") {
+      let questionCount = exam._count.questions;
+
+      // If exam doesn't have questions yet but questions payload was provided, populate them
+      if (questionCount === 0 && Array.isArray(parsed.data.questions) && parsed.data.questions.length > 0) {
+        await prisma.$transaction(async (tx) => {
+          for (let idx = 0; idx < parsed.data.questions!.length; idx++) {
+            const norm = normalizeQuestionForDb(parsed.data.questions![idx], idx);
+            await tx.question.create({
+              data: {
+                examId: id,
+                orderIndex: norm.orderIndex,
+                questionText: norm.questionText,
+                imageUrl: norm.imageUrl,
+                options: norm.options as any,
+                correctAnswer: norm.correctAnswer,
+                points: norm.points,
+              },
+            });
+          }
+
+          if (parsed.data.bankId) {
+            const currentSettings = (typeof exam.settings === "object" && exam.settings !== null ? exam.settings : {}) as any;
+            await tx.exam.update({
+              where: { id },
+              data: {
+                settings: {
+                  ...currentSettings,
+                  bank_id: parsed.data.bankId,
+                },
+              },
+            });
+          }
+        });
+        questionCount = parsed.data.questions.length;
+      }
+
       // Must have at least 1 question
-      if (exam._count.questions === 0) {
+      if (questionCount === 0) {
         return errorResponse("NO_QUESTIONS", "Ujian tidak dapat dimulai karena belum memiliki soal", 400);
       }
 

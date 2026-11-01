@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import DashboardShell from "@/app/components/DashboardShell";
+import { SkeletonTable } from "@/app/components/skeleton";
 import { useTeacherAuth } from "@/contexts/AuthContext";
 import { apiFetch } from "@/lib/apiClient";
 import { useRouter } from "next/navigation";
@@ -187,14 +188,19 @@ export default function AdminTeachersPage() {
         </div>
 
         {/* ─── TABLE ─────────────────────────────────────────────────────── */}
-        <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radiusCard, overflow: "hidden" }}>
-          {loading ? (
-            <div style={{ padding: "48px", textAlign: "center", color: T.textSecondary }}>Memuat…</div>
-          ) : error ? (
-            <div style={{ padding: "48px", textAlign: "center", color: T.danger }}>{error}</div>
-          ) : teachers.length === 0 ? (
-            <div style={{ padding: "48px", textAlign: "center", color: T.textSecondary }}>Tidak ada guru ditemukan.</div>
-          ) : (
+        {loading ? (
+          <SkeletonTable
+            rows={5}
+            columns={7}
+            columnWidths={["20%", "25%", "10%", "10%", "15%", "8%", "12%"]}
+          />
+        ) : (
+          <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radiusCard, overflow: "hidden" }}>
+            {error ? (
+              <div style={{ padding: "48px", textAlign: "center", color: T.danger }}>{error}</div>
+            ) : teachers.length === 0 ? (
+              <div style={{ padding: "48px", textAlign: "center", color: T.textSecondary }}>Tidak ada guru ditemukan.</div>
+            ) : (
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
               <thead>
                 <tr style={{ background: T.bgSubtle }}>
@@ -258,6 +264,7 @@ export default function AdminTeachersPage() {
             </div>
           )}
         </div>
+        )}
       </div>
 
       {/* ─── MODAL: TAMBAH GURU ───────────────────────────────────────────── */}

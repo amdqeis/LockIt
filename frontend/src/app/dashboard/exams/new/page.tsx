@@ -4,7 +4,7 @@ import { useState, useRef, useCallback, useEffect, useId } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import DashboardShell from "@/app/components/DashboardShell";
-import { defaultQuestionBanks, QuestionBank } from "@/lib/questionBank";
+import { defaultQuestionBanks, QuestionBank, getStoredQuestionBanks, getStoredQuestions } from "@/lib/questionBank";
 import { apiFetch } from "@/lib/apiClient";
 
 // ─── Design tokens (spec §10) ─────────────────────────────────────────────────
@@ -319,11 +319,16 @@ export default function NewExamPage() {
   }, []);
 
   // Bank soal state
+  const [allBanks, setAllBanks] = useState<QuestionBank[]>(defaultQuestionBanks);
   const [selectedBank, setSelectedBank] = useState<QuestionBank | null>(null);
   const [bankSearch, setBankSearch] = useState("");
   const [bankFilter, setBankFilter] = useState("all");
   const [bankVisible, setBankVisible] = useState(5);
   const [bankLoading] = useState(false);
+
+  useEffect(() => {
+    setAllBanks(getStoredQuestionBanks());
+  }, []);
 
   // UI state
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -352,9 +357,9 @@ export default function NewExamPage() {
   }, [isDirty]);
 
   // ── Derived state ──────────────────────────────────────────────────────────
-  const subjects = ["all", ...Array.from(new Set(defaultQuestionBanks.filter(b => b.status === "active").map(b => b.subject)))];
+  const subjects = ["all", ...Array.from(new Set(allBanks.filter(b => b.status === "active").map(b => b.subject)))];
 
-  const filteredBanks = defaultQuestionBanks
+  const filteredBanks = allBanks
     .filter(b => b.status === "active")
     .filter(b => bankFilter === "all" || b.subject === bankFilter)
     .filter(b => {
@@ -448,6 +453,8 @@ export default function NewExamPage() {
     setErrors({});
     setSaving(true);
     try {
+      const bankQuestions = selectedBank ? getStoredQuestions(selectedBank.id) : [];
+
       const res = await apiFetch<any>("/api/exams", {
         method: "POST",
         body: JSON.stringify({
@@ -462,16 +469,19 @@ export default function NewExamPage() {
             detect_devtools: form.detectDevTools,
           },
           settings: {
+            bank_id: selectedBank?.id,
+            bank_title: selectedBank?.title,
             randomize_questions: form.shuffleQuestions,
             display_mode: form.displayMode,
             auto_save_interval_seconds: 30,
           },
+          questions: bankQuestions,
         }),
       });
 
       if (res.success && res.data) {
         setIsDirty(false);
-        setToast({ type: "success", msg: "Ujian berhasil dibuat." });
+        setToast({ type: "success", msg: "Ujian berhasil dibuat dan soal berhasil dikaitkan." });
         setTimeout(() => {
           setToast(null);
           router.push(`/dashboard/exams/${res.data.id}`);

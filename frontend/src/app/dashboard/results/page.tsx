@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/apiClient";
 import DashboardShell from "@/app/components/DashboardShell";
+import { SkeletonBase } from "@/app/components/skeleton";
 
 const T = {
   bgPage: "#F6F8FB",
@@ -186,31 +187,38 @@ export default function ResultsSelectionPage() {
           </div>
         )}
 
-        {/* Loading */}
+        {/* Loading Skeleton */}
         {loading && (
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              padding: "64px 0",
-              gap: "16px",
-              color: T.textSecondary,
-            }}
-          >
-            <svg
-              width="32"
-              height="32"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke={T.primary}
-              strokeWidth="2"
-              strokeLinecap="round"
-              style={{ animation: "spin 1s linear infinite" }}
-            >
-              <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
-            </svg>
-            <span style={{ fontSize: "14px" }}>Memuat daftar ujian selesai…</span>
+          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+            {[1, 2, 3].map((i) => (
+              <div
+                key={i}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "16px",
+                  padding: "16px 20px",
+                  background: T.bgCard,
+                  border: `1px solid ${T.border}`,
+                  borderRadius: T.radiusCard,
+                  boxShadow: T.shadowCard,
+                  boxSizing: "border-box",
+                }}
+              >
+                <SkeletonBase width="36px" height="36px" borderRadius="8px" />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <SkeletonBase width="45%" height="16px" borderRadius="4px" style={{ marginBottom: "6px" }} />
+                  <SkeletonBase width="30%" height="12px" borderRadius="4px" />
+                </div>
+                <div style={{ display: "flex", gap: "24px", flexShrink: 0 }}>
+                  <SkeletonBase width="45px" height="28px" borderRadius="6px" />
+                  <SkeletonBase width="45px" height="28px" borderRadius="6px" />
+                </div>
+                <div style={{ flexShrink: 0 }}>
+                  <SkeletonBase width="120px" height="36px" borderRadius="6px" />
+                </div>
+              </div>
+            ))}
           </div>
         )}
 

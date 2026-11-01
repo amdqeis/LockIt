@@ -4,7 +4,7 @@ import { useState, useRef, useCallback, useEffect, useId, Suspense } from "react
 import Link from "next/link";
 import { useRouter, useParams } from "next/navigation";
 import DashboardShell from "@/app/components/DashboardShell";
-import { defaultQuestionBanks, QuestionBank } from "@/lib/questionBank";
+import { defaultQuestionBanks, QuestionBank, getStoredQuestionBanks, getStoredQuestions } from "@/lib/questionBank";
 import { apiFetch } from "@/lib/apiClient";
 
 // ─── Design tokens (spec §10) ─────────────────────────────────────────────────
@@ -310,6 +310,13 @@ function EditExamPage() {
 
   const [form, setForm] = useState<FormState>(initialForm);
 
+  const [allBanks, setAllBanks] = useState<QuestionBank[]>(defaultQuestionBanks);
+  const [selectedBank, setSelectedBank] = useState<QuestionBank | null>(null);
+
+  useEffect(() => {
+    setAllBanks(getStoredQuestionBanks());
+  }, []);
+
   useEffect(() => {
     if (!examId) return;
     apiFetch<any>(`/api/exams/${examId}`).then((res) => {
@@ -329,6 +336,15 @@ function EditExamPage() {
           detectRightClick: beExam.violationPolicy?.detect_right_click ?? prev.detectRightClick,
           detectDevTools: beExam.violationPolicy?.detect_devtools ?? prev.detectDevTools,
         }));
+
+        const banks = getStoredQuestionBanks();
+        const bankIdFromSettings = beExam.settings?.bank_id;
+        const matched = bankIdFromSettings
+          ? banks.find(b => b.id === bankIdFromSettings)
+          : (beExam._count?.questions > 0 ? banks.find(b => b.questionCount === beExam._count.questions) : null);
+        if (matched) {
+          setSelectedBank(matched);
+        }
       }
     });
   }, [examId]);
@@ -338,11 +354,6 @@ function EditExamPage() {
     setIsDirty(true);
   }, []);
 
-  // Bank soal: pre-select based on questionCount match (best-effort)
-  const matchedBank = defaultQuestionBanks
-    .filter(b => b.status === "active")[0] ?? null;
-
-  const [selectedBank, setSelectedBank] = useState<QuestionBank | null>(matchedBank);
   const [bankSearch, setBankSearch] = useState("");
   const [bankFilter, setBankFilter] = useState("all");
   const [bankVisible, setBankVisible] = useState(5);
@@ -375,9 +386,9 @@ function EditExamPage() {
   }, [isDirty]);
 
   // ── Derived state ──────────────────────────────────────────────────────────
-  const subjects = ["all", ...Array.from(new Set(defaultQuestionBanks.filter(b => b.status === "active").map(b => b.subject)))];
+  const subjects = ["all", ...Array.from(new Set(allBanks.filter(b => b.status === "active").map(b => b.subject)))];
 
-  const filteredBanks = defaultQuestionBanks
+  const filteredBanks = allBanks
     .filter(b => b.status === "active")
     .filter(b => bankFilter === "all" || b.subject === bankFilter)
     .filter(b => {
@@ -467,6 +478,8 @@ function EditExamPage() {
     setErrors({});
     setSaving(true);
     try {
+      const bankQuestions = selectedBank ? getStoredQuestions(selectedBank.id) : [];
+
       const payload: any = {
         title: form.title.trim(),
         description: form.description?.trim() || null,
@@ -479,10 +492,13 @@ function EditExamPage() {
           detect_devtools: form.detectDevTools,
         },
         settings: {
+          bank_id: selectedBank?.id,
+          bank_title: selectedBank?.title,
           randomize_questions: form.shuffleQuestions,
           display_mode: form.displayMode,
           auto_save_interval_seconds: 30,
         },
+        questions: bankQuestions,
       };
 
       const res = await apiFetch<any>(`/api/exams/${examId}`, {

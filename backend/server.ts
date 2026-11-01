@@ -235,14 +235,17 @@ app.prepare().then(async () => {
     }
   }, 10000);
 
-  // ─── RE-SCHEDULE ACTIVE EXAMS ON BOOT ────────────────────────────────────────
-  await rescheduleActiveExamsOnBoot(io);
-
-  // MED-05: Jalankan cleanup token expired saat pertama kali boot
-  await cleanupExpiredTokens();
-
   httpServer.listen(port, () => {
     console.log(`> Ready on http://${hostname}:${port}`);
     console.log(`> Socket.IO server running on namespaces: /teacher-dashboard, /student-session`);
+  });
+
+  // ─── RE-SCHEDULE ACTIVE EXAMS & CLEANUP ON BOOT (Background) ─────────────────
+  rescheduleActiveExamsOnBoot(io).catch((err) => {
+    console.error("[Boot] Error rescheduling active exams:", err);
+  });
+
+  cleanupExpiredTokens().catch((err) => {
+    console.error("[Boot] Error cleaning up expired tokens:", err);
   });
 });

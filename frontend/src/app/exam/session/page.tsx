@@ -10,7 +10,10 @@ import {
   sendStudentHeartbeat,
   sendProctoringEvent,
   submitStudentExam,
+  saveSessionHint,
+  clearSessionHint,
 } from "@/lib/examSession";
+import { SkeletonBase, SkeletonQuestionCard } from "@/app/components/skeleton";
 
 type AutoSaveStatus = "saved" | "saving" | "failed";
 type Question = any;
@@ -485,12 +488,7 @@ export default function ExamSessionPage() {
   const [submitted, setSubmitted] = useState(false);
   const [activePanel, setActivePanel] = useState<SidePanel>(null);
   const saveTimeoutRef = useRef<Record<string, NodeJS.Timeout>>({});
-  const activityLog = useRef<{ time: string; action: string; detail: string }[]>([
-    { time: "08:00", action: "Memulai Ujian", detail: "Layar penuh diaktifkan" },
-    { time: "08:02", action: "Jawab Soal 1", detail: "Pilihan B dipilih" },
-    { time: "08:05", action: "Jawab Soal 2", detail: "Pilihan A dipilih" },
-    { time: "08:07", action: "Tandai Soal 3", detail: "Soal ditandai untuk ditinjau" },
-  ]);
+  const activityLog = useRef<{ time: string; action: string; detail: string }[]>([]);
 
   const togglePanel = (panel: SidePanel) =>
     setActivePanel((prev) => (prev === panel ? null : panel));
@@ -544,6 +542,15 @@ export default function ExamSessionPage() {
             if (student.isLocked) {
               setIsLocked(true);
             }
+            // Simpan hint ke localStorage agar auto-resume bisa bekerja jika tab ditutup
+            if (exam) {
+              saveSessionHint({
+                studentName: student.name,
+                studentNisn: student.nisn,
+                examTitle: exam.title || "",
+                examId: exam.id || "",
+              });
+            }
           }
           if (Array.isArray(beAnswers) && beAnswers.length > 0) {
             const restored: Record<string, string> = {};
@@ -571,6 +578,7 @@ export default function ExamSessionPage() {
     if (showFullscreenPrompt || isLocked || submitted) return;
     if (timeLeft <= 0) {
       setTimeExpiredOverlay(true);
+      clearSessionHint();
       submitStudentExam().finally(() => {
         setTimeout(() => {
           window.location.href = "/exam/done";
@@ -728,6 +736,7 @@ export default function ExamSessionPage() {
     } catch {
       // Continue to done page
     }
+    clearSessionHint();
     window.location.href = "/exam/done";
   };
 
@@ -1330,15 +1339,20 @@ export default function ExamSessionPage() {
           }}>
 
             {/* ── LEFT: Question + Options (2/3) ── */}
-            <div style={{
-              flex: isMobile ? undefined : "1 1 0",
-              minWidth: 0,
-              background: "white",
-              borderRadius: isMobile ? "16px" : "16px",
-              border: "1.5px solid #D9E9F2",
-              padding: isMobile ? "20px 16px 24px" : "28px 32px",
-              boxShadow: "0 2px 12px rgba(41,171,226,0.06)",
-            }}>
+            {totalQ === 0 ? (
+              <div style={{ flex: isMobile ? undefined : "1 1 0", minWidth: 0 }}>
+                <SkeletonQuestionCard />
+              </div>
+            ) : (
+              <div style={{
+                flex: isMobile ? undefined : "1 1 0",
+                minWidth: 0,
+                background: "white",
+                borderRadius: isMobile ? "16px" : "16px",
+                border: "1.5px solid #D9E9F2",
+                padding: isMobile ? "20px 16px 24px" : "28px 32px",
+                boxShadow: "0 2px 12px rgba(41,171,226,0.06)",
+              }}>
 
               {/* Meta row */}
               <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "14px", flexWrap: "wrap" }}>
@@ -1472,6 +1486,7 @@ export default function ExamSessionPage() {
                 })}
               </div>
             </div>
+            )}
 
             {/* ── RIGHT PANEL: Timer + Q-Number Grid (1/3, sticky) ── */}
             {!isMobile && (
@@ -1519,15 +1534,23 @@ export default function ExamSessionPage() {
                   </div>
 
                   {/* Grid */}
-                  <QNumberGrid
-                    questions={questionsList}
-                    currentQ={currentQ}
-                    answers={answers}
-                    multiAnswers={multiAnswers}
-                    flagged={flagged}
-                    onSelect={setCurrentQ}
-                    isQuestionAnswered={isQuestionAnswered}
-                  />
+                  {totalQ === 0 ? (
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "8px" }}>
+                      {Array.from({ length: 15 }).map((_, idx) => (
+                        <SkeletonBase key={idx} width="100%" height="36px" borderRadius="6px" />
+                      ))}
+                    </div>
+                  ) : (
+                    <QNumberGrid
+                      questions={questionsList}
+                      currentQ={currentQ}
+                      answers={answers}
+                      multiAnswers={multiAnswers}
+                      flagged={flagged}
+                      onSelect={setCurrentQ}
+                      isQuestionAnswered={isQuestionAnswered}
+                    />
+                  )}
 
                   {/* Legend */}
                   <div style={{ marginTop: "14px", display: "flex", flexDirection: "column", gap: "5px" }}>

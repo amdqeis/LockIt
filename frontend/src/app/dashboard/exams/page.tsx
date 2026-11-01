@@ -5,6 +5,11 @@ import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { apiFetch } from "@/lib/apiClient";
 import DashboardShell from "../../components/DashboardShell";
+import {
+  SkeletonExamCard,
+  SkeletonBase,
+  MotionFade,
+} from "../../components/skeleton";
 
 // Spec §7 Unified Design Tokens
 const T = {
@@ -478,9 +483,13 @@ function ExamsContent() {
                   style={{ opacity: tab.count === 0 && !isSelected ? 0.6 : 1 }}
                 >
                   <span>{tab.label}</span>
-                  <span style={{ fontSize: "12px", color: isSelected ? T.primary : T.textSecondary, fontWeight: isSelected ? 600 : 400 }}>
-                    {tab.count}
-                  </span>
+                  {loadingExams ? (
+                    <SkeletonBase width="16px" height="12px" borderRadius="4px" />
+                  ) : (
+                    <span style={{ fontSize: "12px", color: isSelected ? T.primary : T.textSecondary, fontWeight: isSelected ? 600 : 400 }}>
+                      {tab.count}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -617,7 +626,62 @@ function ExamsContent() {
         </div>
 
         {/* Exam Cards Grid or List */}
-        {filteredAndSortedExams.length === 0 ? (
+        {loadingExams ? (
+          viewMode === "grid" ? (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
+                gap: "16px",
+              }}
+            >
+              {Array.from({ length: 6 }).map((_, idx) => (
+                <SkeletonExamCard key={idx} viewMode="grid" />
+              ))}
+            </div>
+          ) : (
+            <div
+              style={{
+                background: T.bgCard,
+                border: `1px solid ${T.border}`,
+                borderRadius: T.radiusCard,
+                overflow: "hidden",
+                boxShadow: T.shadowCard,
+              }}
+            >
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left", fontSize: "13px" }}>
+                  <thead>
+                    <tr
+                      style={{
+                        background: T.bgSubtle,
+                        borderBottom: `1px solid ${T.border}`,
+                        color: T.textSecondary,
+                        fontSize: "12px",
+                        fontWeight: 600,
+                        height: "44px",
+                      }}
+                    >
+                      <th style={{ padding: "0 16px" }}>Status</th>
+                      <th style={{ padding: "0 16px" }}>Judul</th>
+                      <th style={{ padding: "0 16px" }}>Durasi</th>
+                      <th style={{ padding: "0 16px" }}>Soal</th>
+                      <th style={{ padding: "0 16px" }}>Peserta</th>
+                      <th style={{ padding: "0 16px" }}>Jadwal / Waktu</th>
+                      <th style={{ padding: "0 16px" }}>Kode akses</th>
+                      <th style={{ padding: "0 16px", textAlign: "right" }}>Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Array.from({ length: 6 }).map((_, idx) => (
+                      <SkeletonExamCard key={idx} viewMode="list" />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )
+        ) : filteredAndSortedExams.length === 0 ? (
           <div
             style={{
               background: T.bgCard,

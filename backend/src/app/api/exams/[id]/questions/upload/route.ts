@@ -61,14 +61,38 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       return errorResponse("EMPTY_CONTENT", "Isi file atau body tidak boleh kosong", 400);
     }
 
-    let parsedBank;
+    let questions: ParsedQuestion[] = [];
+    let examTitle = exam.title;
+
     if (fileType === "xml") {
-      parsedBank = parseXmlQuestionBank(fileContent);
+      const parsedBank = parseXmlQuestionBank(fileContent);
+      questions = parsedBank.questions;
+      if (parsedBank.examTitle) examTitle = parsedBank.examTitle;
     } else {
-      parsedBank = parseJsonQuestionBank(fileContent);
+      try {
+        const parsedBank = parseJsonQuestionBank(fileContent);
+        questions = parsedBank.questions;
+        if (parsedBank.examTitle) examTitle = parsedBank.examTitle;
+      } catch (err: any) {
+        let raw: any;
+        try {
+          raw = JSON.parse(fileContent);
+        } catch {
+          throw err;
+        }
+        const rawList = Array.isArray(raw) ? raw : (Array.isArray(raw?.questions) ? raw.questions : null);
+        if (rawList && rawList.length > 0) {
+          const { normalizeQuestionForDb } = await import("@/services/question-parser");
+          questions = rawList.map((q: any, idx: number) => normalizeQuestionForDb(q, idx));
+          if (raw?.title || raw?.examTitle || raw?.exam_title) {
+            examTitle = raw.title || raw.examTitle || raw.exam_title;
+          }
+        } else {
+          throw err;
+        }
+      }
     }
 
-    const questions: ParsedQuestion[] = parsedBank.questions;
 
     // Use transaction: remove previous draft questions, insert new ones
     await prisma.$transaction(async (tx) => {
@@ -92,7 +116,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return successResponse({
       examId: id,
       questionsCount: questions.length,
-      examTitle: parsedBank.examTitle || exam.title,
+      examTitle,
       message: `Berhasil mengupload ${questions.length} soal`,
     });
   } catch (err: any) {

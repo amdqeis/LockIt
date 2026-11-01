@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/apiClient";
 import DashboardShell from "@/app/components/DashboardShell";
+import { SkeletonBase, MotionFade } from "@/app/components/skeleton";
+import { getStoredQuestionBanks, getStoredQuestions, QuestionBank } from "@/lib/questionBank";
 
 type ExamStatus = "draft" | "active" | "ended" | "archived";
 
@@ -32,6 +34,17 @@ function ExamDetailPage() {
   const [toast, setToast] = useState<{ type: string; msg: string } | null>(null);
   const [copied, setCopied] = useState(false);
 
+  // Bank soal & preview state
+  const [allBanks, setAllBanks] = useState<QuestionBank[]>([]);
+  const [selectedBankToAttach, setSelectedBankToAttach] = useState<string>("");
+  const [attaching, setAttaching] = useState(false);
+  const [previewQuestions, setPreviewQuestions] = useState<any[]>([]);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+
+  useEffect(() => {
+    setAllBanks(getStoredQuestionBanks());
+  }, []);
+
   const showToast = (type: string, msg: string) => {
     setToast({ type, msg });
     setTimeout(() => setToast(null), 3500);
@@ -52,6 +65,10 @@ function ExamDetailPage() {
           questionCount: beExam._count?.questions ?? 0,
           totalParticipants: beExam._count?.students ?? 0,
           accessCode: beExam.accessCode,
+          bankId: beExam.settings?.bank_id || null,
+          bankTitle: beExam.settings?.bank_title || null,
+          shuffleQuestions: beExam.settings?.randomize_questions ?? true,
+          questionMode: beExam.settings?.display_mode === "one_by_one" ? "one-by-one" : "all-at-once",
           createdAt: new Date(beExam.createdAt).toLocaleDateString("id-ID", {
             day: "numeric",
             month: "short",
@@ -88,13 +105,87 @@ function ExamDetailPage() {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const handleOpenPreview = async () => {
+    setConfirmType("preview");
+    setLoadingPreview(true);
+    try {
+      const res = await apiFetch<any>(`/api/exams/${exam.id}/questions`);
+      if (res.success && res.data?.questions) {
+        setPreviewQuestions(res.data.questions);
+      } else {
+        setPreviewQuestions([]);
+      }
+    } catch {
+      setPreviewQuestions([]);
+    } finally {
+      setLoadingPreview(false);
+    }
+  };
+
+  const handleAttachBank = async () => {
+    if (!selectedBankToAttach) {
+      showToast("error", "Pilih bank soal terlebih dahulu");
+      return;
+    }
+    setAttaching(true);
+    try {
+      const qs = getStoredQuestions(selectedBankToAttach);
+      const chosenBank = allBanks.find(b => b.id === selectedBankToAttach);
+      const res = await apiFetch<any>(`/api/exams/${exam.id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          settings: {
+            bank_id: selectedBankToAttach,
+            bank_title: chosenBank?.title || undefined,
+          },
+          questions: qs,
+        }),
+      });
+      if (res.success) {
+        showToast("success", `✅ Berhasil mengaitkan ${qs.length} butir soal ke ujian!`);
+        setConfirmType(null);
+        fetchExamDetail();
+      } else {
+        showToast("error", res.error?.message || "Gagal mengaitkan bank soal");
+      }
+    } catch {
+      showToast("error", "Terjadi kesalahan jaringan");
+    } finally {
+      setAttaching(false);
+    }
+  };
+
   const handleModalConfirm = async () => {
     if (!confirmType || !exam) return;
     const type = confirmType;
-    setConfirmType(null);
 
     try {
       if (type === "start") {
+        // If 0 questions in DB, try auto-attaching from linked bankId or prompt attach modal
+        if (exam.questionCount === 0) {
+          if (exam.bankId) {
+            const qs = getStoredQuestions(exam.bankId);
+            if (qs.length > 0) {
+              const res = await apiFetch<any>(`/api/exams/${exam.id}/status`, {
+                method: "PUT",
+                body: JSON.stringify({ status: "active", questions: qs, bankId: exam.bankId }),
+              });
+              if (res.success) {
+                setConfirmType(null);
+                showToast("success", "Soal berhasil disinkronkan & ujian dimulai!");
+                fetchExamDetail();
+                return;
+              }
+            }
+          }
+          // No linked bank or empty questions -> open attach modal
+          setSelectedBankToAttach(exam.bankId || allBanks[0]?.id || "");
+          setConfirmType("attach-bank");
+          showToast("error", "Ujian belum memiliki soal. Silakan pilih Bank Soal untuk dikaitkan.");
+          return;
+        }
+
+        setConfirmType(null);
         const res = await apiFetch<any>(`/api/exams/${exam.id}/status`, {
           method: "PUT",
           body: JSON.stringify({ status: "active" }),
@@ -106,6 +197,7 @@ function ExamDetailPage() {
           showToast("error", res.error?.message || "Gagal memulai ujian (pastikan ujian memiliki soal)");
         }
       } else if (type === "end") {
+        setConfirmType(null);
         const res = await apiFetch<any>(`/api/exams/${exam.id}/status`, {
           method: "PUT",
           body: JSON.stringify({ status: "ended" }),
@@ -117,6 +209,7 @@ function ExamDetailPage() {
           showToast("error", res.error?.message || "Gagal mengakhiri ujian");
         }
       } else if (type === "delete") {
+        setConfirmType(null);
         const res = await apiFetch<any>(`/api/exams/${exam.id}`, {
           method: "DELETE",
         });
@@ -129,6 +222,7 @@ function ExamDetailPage() {
           showToast("error", res.error?.message || "Gagal menghapus ujian");
         }
       } else if (type === "regen") {
+        setConfirmType(null);
         const res = await apiFetch<any>(`/api/exams/${exam.id}/regenerate-code`, {
           method: "POST",
         });
@@ -145,10 +239,20 @@ function ExamDetailPage() {
   };
 
   if (!exam) {
+    if (loading) {
+      return (
+        <DashboardShell>
+          <ExamDetailSkeleton />
+        </DashboardShell>
+      );
+    }
     return (
       <DashboardShell>
-        <div style={{ padding: "32px", color: "#6B7280" }}>
-          {loading ? "Memuat data ujian..." : "Ujian tidak ditemukan."}
+        <div style={{ padding: "64px 32px", textAlign: "center", color: "#6B7280" }}>
+          <div style={{ fontSize: "16px", fontWeight: 600, marginBottom: "8px" }}>Ujian tidak ditemukan</div>
+          <Link href="/dashboard/exams" style={{ color: "#1B76BF", textDecoration: "underline", fontSize: "14px" }}>
+            Kembali ke daftar ujian
+          </Link>
         </div>
       </DashboardShell>
     );
@@ -165,7 +269,18 @@ function ExamDetailPage() {
         <Link href={`/dashboard/exams/${exam.id}/edit`} className="btn btn-secondary btn-md">
           ✏️ Edit Ujian
         </Link>
-        <button className="btn btn-ghost btn-md" onClick={() => setConfirmType("preview")}>
+        {exam.questionCount === 0 && (
+          <button
+            className="btn btn-secondary btn-md"
+            onClick={() => {
+              setSelectedBankToAttach(exam.bankId || allBanks[0]?.id || "");
+              setConfirmType("attach-bank");
+            }}
+          >
+            ⚡ Kaitkan Bank Soal
+          </button>
+        )}
+        <button className="btn btn-ghost btn-md" onClick={handleOpenPreview}>
           👁 Preview Soal
         </button>
         <button className="btn btn-danger btn-md" onClick={() => setConfirmType("delete")}>
@@ -220,6 +335,52 @@ function ExamDetailPage() {
       </header>
 
       <div style={{ padding: "28px 32px" }}>
+        {/* Warning Banner if exam has 0 questions */}
+        {exam.status === "draft" && exam.questionCount === 0 && (
+          <div style={{
+            background: "#FFFBEB", border: "1px solid #FCD34D", borderRadius: "12px",
+            padding: "16px 20px", display: "flex", alignItems: "center", justifyContent: "space-between",
+            gap: "16px", marginBottom: "20px"
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+              <span style={{ fontSize: "24px" }}>⚠️</span>
+              <div>
+                <div style={{ fontWeight: 600, color: "#92400E", fontSize: "14px" }}>
+                  Ujian Belum Memiliki Butir Soal
+                </div>
+                <div style={{ color: "#B45309", fontSize: "13px" }}>
+                  {exam.bankTitle
+                    ? `Bank soal terdaftar: "${exam.bankTitle}". Butir soal belum tersimpan ke database ujian ini.`
+                    : "Ujian ini belum memiliki butir soal. Silakan kaitkan Bank Soal agar ujian dapat dimulai."}
+                </div>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: "8px", flexShrink: 0 }}>
+              <button
+                onClick={() => {
+                  setSelectedBankToAttach(exam.bankId || allBanks[0]?.id || "");
+                  setConfirmType("attach-bank");
+                }}
+                style={{
+                  background: "#D97706", color: "white", border: "none", borderRadius: "8px",
+                  padding: "8px 16px", fontWeight: 600, fontSize: "13px", cursor: "pointer", whiteSpace: "nowrap"
+                }}
+              >
+                ⚡ Kaitkan Bank Soal
+              </button>
+              <Link
+                href={`/dashboard/exams/${exam.id}/edit`}
+                style={{
+                  background: "white", color: "#92400E", border: "1px solid #FCD34D", borderRadius: "8px",
+                  padding: "8px 16px", fontWeight: 600, fontSize: "13px", textDecoration: "none", display: "inline-flex", alignItems: "center"
+                }}
+              >
+                ✏️ Edit Ujian
+              </Link>
+            </div>
+          </div>
+        )}
+
         <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: "24px", alignItems: "start" }}>
           {/* Left Column */}
           <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
@@ -243,7 +404,11 @@ function ExamDetailPage() {
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
                   {[
                     { label: "DURASI", value: `${exam.duration} menit`, icon: "⏱" },
-                    { label: "JUMLAH SOAL", value: `${exam.questionCount} soal`, icon: "📝" },
+                    {
+                      label: "JUMLAH SOAL",
+                      value: `${exam.questionCount} soal${exam.bankTitle ? ` · ${exam.bankTitle}` : ""}`,
+                      icon: "📝",
+                    },
                     { label: "TANGGAL DIBUAT", value: exam.createdAt, icon: "📅" },
                     { label: "TOTAL PESERTA", value: `${exam.totalParticipants} orang`, icon: "👥" },
                   ].map(item => (
@@ -337,6 +502,7 @@ function ExamDetailPage() {
                 {[
                   { label: "Mode Tampilan", value: exam.questionMode === "one-by-one" ? "Satu per satu" : "Semua sekaligus" },
                   { label: "Acak Urutan", value: exam.shuffleQuestions ? "✅ Aktif" : "❌ Nonaktif" },
+                  { label: "Bank Soal", value: exam.bankTitle || (exam.bankId ? "Terkait" : "Belum dipilih") },
                 ].map(item => (
                   <div key={item.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "14px", padding: "8px 0", borderBottom: "1px solid #F3F4F6" }}>
                     <span style={{ color: "#6B7280" }}>{item.label}</span>
@@ -349,38 +515,185 @@ function ExamDetailPage() {
         </div>
       </div>
 
-      {/* Confirm Modals */}
+      {/* Confirm & Action Modals */}
       {confirmType && (
         <div style={{
           position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000,
           display: "flex", alignItems: "center", justifyContent: "center", padding: "24px"
         }} onClick={() => setConfirmType(null)}>
           <div style={{
-            background: "white", borderRadius: "16px", maxWidth: "440px", width: "100%",
-            boxShadow: "0 20px 60px rgba(0,0,0,0.2)"
+            background: "white", borderRadius: "16px", maxWidth: confirmType === "preview" ? "680px" : "480px", width: "100%",
+            boxShadow: "0 20px 60px rgba(0,0,0,0.2)", maxHeight: "85vh", display: "flex", flexDirection: "column"
           }} onClick={e => e.stopPropagation()}>
             <div style={{ padding: "20px 24px", borderBottom: "1px solid #F3F4F6", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <span style={{ fontSize: "17px", fontWeight: 700, color: "#111827" }}>
-                {confirmType === "start" ? "Mulai Ujian?" : confirmType === "end" ? "Akhiri Ujian?" : confirmType === "delete" ? "Hapus Ujian?" : confirmType === "regen" ? "Generate Ulang Kode?" : "Preview Soal"}
+                {confirmType === "start" ? "Mulai Ujian?" :
+                 confirmType === "end" ? "Akhiri Ujian?" :
+                 confirmType === "delete" ? "Hapus Ujian?" :
+                 confirmType === "regen" ? "Generate Ulang Kode?" :
+                 confirmType === "attach-bank" ? "Kaitkan Bank Soal ke Ujian" :
+                 "Preview Soal Ujian"}
               </span>
               <button onClick={() => setConfirmType(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: "18px" }}>✕</button>
             </div>
-            <div style={{ padding: "20px 24px" }}>
-              <p style={{ color: "#6B7280", lineHeight: 1.7, fontSize: "15px" }}>
-                {confirmType === "start" && "Ujian akan dimulai. Peserta yang sudah menunggu di waiting room akan langsung bisa mengerjakan. Pastikan semua siap."}
-                {confirmType === "end" && "Ujian akan diakhiri. Semua peserta yang belum submit akan di-auto-submit. Tindakan ini tidak bisa dibatalkan."}
-                {confirmType === "delete" && "Ujian akan dihapus secara permanen dan tidak bisa dipulihkan."}
-                {confirmType === "regen" && "Kode lama akan tidak valid. Peserta yang belum join perlu menggunakan kode baru. Lanjutkan?"}
-              </p>
+
+            <div style={{ padding: "20px 24px", overflowY: "auto", flex: 1 }}>
+              {confirmType === "start" && (
+                <p style={{ color: "#6B7280", lineHeight: 1.7, fontSize: "15px" }}>
+                  Ujian akan dimulai. Peserta yang sudah menunggu di waiting room akan langsung bisa mengerjakan. Pastikan seluruh peserta dan jadwal sudah siap.
+                </p>
+              )}
+
+              {confirmType === "end" && (
+                <p style={{ color: "#6B7280", lineHeight: 1.7, fontSize: "15px" }}>
+                  Ujian akan diakhiri. Semua peserta yang belum submit akan di-auto-submit dan jawaban dinilai. Tindakan ini tidak bisa dibatalkan.
+                </p>
+              )}
+
+              {confirmType === "delete" && (
+                <p style={{ color: "#6B7280", lineHeight: 1.7, fontSize: "15px" }}>
+                  Ujian akan dihapus secara permanen dan tidak bisa dipulihkan.
+                </p>
+              )}
+
+              {confirmType === "regen" && (
+                <p style={{ color: "#6B7280", lineHeight: 1.7, fontSize: "15px" }}>
+                  Kode lama akan tidak valid. Peserta yang belum join perlu menggunakan kode baru. Lanjutkan?
+                </p>
+              )}
+
+              {confirmType === "attach-bank" && (
+                <div>
+                  <p style={{ color: "#4B5563", fontSize: "14px", marginBottom: "16px", lineHeight: 1.6 }}>
+                    Pilih bank soal dari daftar untuk disinkronkan langsung ke database ujian ini:
+                  </p>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "10px", maxHeight: "280px", overflowY: "auto", paddingRight: "4px" }}>
+                    {allBanks.filter(b => b.status === "active").map((b) => {
+                      const isSel = selectedBankToAttach === b.id;
+                      return (
+                        <div
+                          key={b.id}
+                          onClick={() => setSelectedBankToAttach(b.id)}
+                          style={{
+                            border: `2px solid ${isSel ? "#2563EB" : "#E5E7EB"}`,
+                            background: isSel ? "#EFF6FF" : "#F9FAFB",
+                            borderRadius: "10px", padding: "12px 14px", cursor: "pointer",
+                            transition: "all 0.15s ease", display: "flex", justifyContent: "space-between", alignItems: "center"
+                          }}
+                        >
+                          <div>
+                            <div style={{ fontWeight: 600, color: "#111827", fontSize: "14px" }}>{b.title}</div>
+                            <div style={{ fontSize: "12px", color: "#6B7280", marginTop: "2px" }}>
+                              {b.questionCount} butir soal · {b.totalPoints} poin · {b.subject}
+                            </div>
+                          </div>
+                          <div style={{
+                            width: "20px", height: "20px", borderRadius: "50%",
+                            border: `2px solid ${isSel ? "#2563EB" : "#D1D5DB"}`,
+                            background: isSel ? "#2563EB" : "white",
+                            display: "flex", alignItems: "center", justifyContent: "center"
+                          }}>
+                            {isSel && <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: "white" }} />}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {confirmType === "preview" && (
+                <div>
+                  {loadingPreview ? (
+                    <div style={{ textAlign: "center", padding: "32px", color: "#6B7280" }}>
+                      Memuat preview butir soal...
+                    </div>
+                  ) : previewQuestions.length === 0 ? (
+                    <div style={{ textAlign: "center", padding: "32px" }}>
+                      <div style={{ fontSize: "36px", marginBottom: "8px" }}>📭</div>
+                      <div style={{ fontWeight: 600, color: "#111827", marginBottom: "4px" }}>Belum Ada Butir Soal</div>
+                      <div style={{ fontSize: "13px", color: "#6B7280", marginBottom: "16px" }}>
+                        Ujian ini belum memiliki soal di database. Silakan kaitkan Bank Soal terlebih dahulu.
+                      </div>
+                      <button
+                        className="btn btn-primary btn-sm"
+                        onClick={() => {
+                          setSelectedBankToAttach(exam.bankId || allBanks[0]?.id || "");
+                          setConfirmType("attach-bank");
+                        }}
+                      >
+                        ⚡ Kaitkan Bank Soal Sekarang
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                      <div style={{ fontSize: "13px", color: "#6B7280", fontWeight: 500 }}>
+                        Total: {previewQuestions.length} butir soal
+                      </div>
+                      {previewQuestions.map((q: any, idx: number) => {
+                        const opts = Array.isArray(q.options) ? q.options : [];
+                        return (
+                          <div key={q.id || idx} style={{
+                            background: "#F9FAFB", borderRadius: "10px", padding: "14px 16px",
+                            border: "1px solid #E5E7EB"
+                          }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "8px" }}>
+                              <span style={{ fontWeight: 700, fontSize: "14px", color: "#111827" }}>
+                                #{q.orderIndex || idx + 1}. {q.questionText}
+                              </span>
+                              <span style={{ fontSize: "11px", background: "#E0F2FE", color: "#0369A1", padding: "2px 8px", borderRadius: "6px", fontWeight: 600 }}>
+                                {q.points || 10} poin
+                              </span>
+                            </div>
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", marginTop: "10px" }}>
+                              {opts.map((opt: any, oIdx: number) => {
+                                const optLabel = (opt.label || opt.id || String.fromCharCode(65 + oIdx)).toUpperCase();
+                                const isCorrect = optLabel === (q.correctAnswer || "").toUpperCase();
+                                return (
+                                  <div key={optLabel} style={{
+                                    fontSize: "13px", padding: "6px 10px", borderRadius: "6px",
+                                    background: isCorrect ? "#DCFCE7" : "white",
+                                    border: `1px solid ${isCorrect ? "#86EFAC" : "#E5E7EB"}`,
+                                    color: isCorrect ? "#166534" : "#374151",
+                                    fontWeight: isCorrect ? 600 : 400
+                                  }}>
+                                    <strong>{optLabel}.</strong> {opt.text || opt.label} {isCorrect && "✓ (Kunci)"}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
+
             <div style={{ padding: "16px 24px", borderTop: "1px solid #F3F4F6", display: "flex", justifyContent: "flex-end", gap: "10px" }}>
-              <button onClick={() => setConfirmType(null)} className="btn btn-secondary btn-md">Batal</button>
-              <button
-                className={`btn ${confirmType === "end" || confirmType === "delete" ? "btn-danger" : "btn-primary"} btn-md`}
-                onClick={handleModalConfirm}
-              >
-                {confirmType === "start" ? "Mulai Sekarang" : confirmType === "end" ? "Akhiri Ujian" : confirmType === "delete" ? "Hapus Permanen" : "Ya, Generate Ulang"}
+              <button onClick={() => setConfirmType(null)} className="btn btn-secondary btn-md">
+                {confirmType === "preview" ? "Tutup" : "Batal"}
               </button>
+
+              {confirmType === "attach-bank" && (
+                <button
+                  disabled={attaching || !selectedBankToAttach}
+                  className="btn btn-primary btn-md"
+                  onClick={handleAttachBank}
+                >
+                  {attaching ? "Menyinkronkan..." : "Kaitkan Soal Sekarang"}
+                </button>
+              )}
+
+              {confirmType !== "attach-bank" && confirmType !== "preview" && (
+                <button
+                  className={`btn ${confirmType === "end" || confirmType === "delete" ? "btn-danger" : "btn-primary"} btn-md`}
+                  onClick={handleModalConfirm}
+                >
+                  {confirmType === "start" ? "Mulai Sekarang" : confirmType === "end" ? "Akhiri Ujian" : confirmType === "delete" ? "Hapus Permanen" : "Ya, Generate Ulang"}
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -402,6 +715,105 @@ function ExamDetailPage() {
   );
 }
 
+function ExamDetailSkeleton() {
+  return (
+    <div style={{ maxWidth: "1200px", margin: "0 auto", padding: "24px 32px 48px" }}>
+      {/* Back button skeleton */}
+      <div style={{ marginBottom: "20px" }}>
+        <SkeletonBase width="140px" height="16px" borderRadius="4px" />
+      </div>
+
+      {/* Main header card skeleton */}
+      <div
+        style={{
+          background: "var(--bg-card, #FFFFFF)",
+          border: "1px solid var(--border, #E1E6ED)",
+          borderRadius: "var(--radius-card, 8px)",
+          padding: "24px",
+          marginBottom: "24px",
+          boxShadow: "var(--shadow-card, 0 2px 8px rgba(20, 24, 40, 0.08))",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "14px" }}>
+          <SkeletonBase width="80px" height="24px" borderRadius="999px" />
+          <SkeletonBase width="120px" height="14px" borderRadius="4px" />
+        </div>
+        <SkeletonBase width="55%" height="28px" borderRadius="6px" style={{ marginBottom: "12px" }} />
+        <SkeletonBase width="85%" height="16px" borderRadius="4px" style={{ marginBottom: "20px" }} />
+
+        {/* Action buttons */}
+        <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
+          <SkeletonBase width="120px" height="40px" borderRadius="8px" />
+          <SkeletonBase width="100px" height="40px" borderRadius="8px" />
+          <SkeletonBase width="110px" height="40px" borderRadius="8px" />
+        </div>
+      </div>
+
+      {/* Grid of detail sections */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+          gap: "24px",
+        }}
+      >
+        <div
+          style={{
+            background: "var(--bg-card, #FFFFFF)",
+            border: "1px solid var(--border, #E1E6ED)",
+            borderRadius: "var(--radius-card, 8px)",
+            padding: "20px",
+            boxShadow: "var(--shadow-card, 0 2px 8px rgba(20, 24, 40, 0.08))",
+          }}
+        >
+          <SkeletonBase width="140px" height="18px" borderRadius="4px" style={{ marginBottom: "16px" }} />
+          <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <SkeletonBase width="100px" height="14px" borderRadius="4px" />
+              <SkeletonBase width="60px" height="14px" borderRadius="4px" />
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <SkeletonBase width="110px" height="14px" borderRadius="4px" />
+              <SkeletonBase width="70px" height="14px" borderRadius="4px" />
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <SkeletonBase width="90px" height="14px" borderRadius="4px" />
+              <SkeletonBase width="50px" height="14px" borderRadius="4px" />
+            </div>
+          </div>
+        </div>
+
+        <div
+          style={{
+            background: "var(--bg-card, #FFFFFF)",
+            border: "1px solid var(--border, #E1E6ED)",
+            borderRadius: "var(--radius-card, 8px)",
+            padding: "20px",
+            boxShadow: "var(--shadow-card, 0 2px 8px rgba(20, 24, 40, 0.08))",
+          }}
+        >
+          <SkeletonBase width="160px" height="18px" borderRadius="4px" style={{ marginBottom: "16px" }} />
+          <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <SkeletonBase width="120px" height="14px" borderRadius="4px" />
+              <SkeletonBase width="80px" height="14px" borderRadius="4px" />
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <SkeletonBase width="100px" height="14px" borderRadius="4px" />
+              <SkeletonBase width="90px" height="14px" borderRadius="4px" />
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <SkeletonBase width="130px" height="14px" borderRadius="4px" />
+              <SkeletonBase width="60px" height="14px" borderRadius="4px" />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function ExamDetailPageWrapper() {
   return <Suspense><ExamDetailPage /></Suspense>;
 }
+

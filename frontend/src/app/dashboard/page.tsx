@@ -7,6 +7,13 @@ import { apiFetch } from "@/lib/apiClient";
 import { useTeacherAuth } from "@/contexts/AuthContext";
 import { aggregateFlags, FlagKey } from "@/lib/proctoring";
 import DashboardShell from "../components/DashboardShell";
+import {
+  SkeletonStatCard,
+  SkeletonExamCard,
+  SkeletonLiveStrip,
+  SkeletonBase,
+  MotionFade,
+} from "../components/skeleton";
 
 // Spec §7 Unified Design Tokens
 const T = {
@@ -544,7 +551,9 @@ function DashboardContent() {
         {/* ============================================================
             2. LIVE STRIP (Spec §4.3: only rendered when active exam exists)
             ============================================================ */}
-        {activeSession && (
+        {loadingExams ? (
+          <SkeletonLiveStrip />
+        ) : activeSession ? (
           <section
             aria-label="Ujian sedang berlangsung"
             style={{
@@ -736,7 +745,7 @@ function DashboardContent() {
               </div>
             </div>
           </section>
-        )}
+        ) : null}
 
         {/* ============================================================
             3. STAT CARDS (Spec §4.4: 4 equal cols, neutral values, filterable)
@@ -750,7 +759,16 @@ function DashboardContent() {
             marginBottom: "32px",
           }}
         >
-          {/* Card 1: Total ujian (interactive button -> sets tab to 'all') */}
+          {loadingExams ? (
+            <>
+              <SkeletonStatCard />
+              <SkeletonStatCard />
+              <SkeletonStatCard />
+              <SkeletonStatCard />
+            </>
+          ) : (
+            <>
+              {/* Card 1: Total ujian (interactive button -> sets tab to 'all') */}
           <button
             type="button"
             className="stat-card-btn"
@@ -888,6 +906,8 @@ function DashboardContent() {
               {counts.ended}
             </div>
           </button>
+            </>
+          )}
         </section>
 
         {/* ============================================================
@@ -1088,15 +1108,19 @@ function DashboardContent() {
                   }}
                 >
                   <span>{tab.label}</span>
-                  <span
-                    style={{
-                      fontSize: "12px",
-                      color: isSelected ? T.primary : T.textSecondary,
-                      fontWeight: isSelected ? 600 : 400,
-                    }}
-                  >
-                    {tab.count}
-                  </span>
+                  {loadingExams ? (
+                    <SkeletonBase width="16px" height="12px" borderRadius="4px" />
+                  ) : (
+                    <span
+                      style={{
+                        fontSize: "12px",
+                        color: isSelected ? T.primary : T.textSecondary,
+                        fontWeight: isSelected ? 600 : 400,
+                      }}
+                    >
+                      {tab.count}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -1105,7 +1129,62 @@ function DashboardContent() {
           {/* ============================================================
               5. EXAM CARDS GRID / LIST VIEW (Spec §4.5 & §4.6)
               ============================================================ */}
-          {filteredExams.length === 0 ? (
+          {loadingExams ? (
+            viewMode === "grid" ? (
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+                  gap: "16px",
+                }}
+              >
+                {Array.from({ length: 6 }).map((_, idx) => (
+                  <SkeletonExamCard key={idx} viewMode="grid" />
+                ))}
+              </div>
+            ) : (
+              <div
+                style={{
+                  background: T.bgCard,
+                  border: `1px solid ${T.border}`,
+                  borderRadius: T.radiusCard,
+                  overflow: "hidden",
+                  boxShadow: T.shadowCard,
+                }}
+              >
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left", fontSize: "13px" }}>
+                    <thead>
+                      <tr
+                        style={{
+                          background: T.bgSubtle,
+                          borderBottom: `1px solid ${T.border}`,
+                          color: T.textSecondary,
+                          fontSize: "12px",
+                          fontWeight: 600,
+                          height: "44px",
+                        }}
+                      >
+                        <th style={{ padding: "0 16px" }}>Status</th>
+                        <th style={{ padding: "0 16px" }}>Judul</th>
+                        <th style={{ padding: "0 16px" }}>Durasi</th>
+                        <th style={{ padding: "0 16px" }}>Soal</th>
+                        <th style={{ padding: "0 16px" }}>Peserta</th>
+                        <th style={{ padding: "0 16px" }}>Jadwal / Waktu</th>
+                        <th style={{ padding: "0 16px" }}>Kode akses</th>
+                        <th style={{ padding: "0 16px", textAlign: "right" }}>Aksi</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Array.from({ length: 5 }).map((_, idx) => (
+                        <SkeletonExamCard key={idx} viewMode="list" />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )
+          ) : filteredExams.length === 0 ? (
             /* Empty State (Spec §4.7: illustration-free message) */
             <div
               style={{

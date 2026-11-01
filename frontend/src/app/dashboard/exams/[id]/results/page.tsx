@@ -5,6 +5,12 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { apiClient } from "@/lib/apiClient";
 import DashboardShell from "@/app/components/DashboardShell";
+import {
+  SkeletonBase,
+  SkeletonTable,
+  SkeletonStatCard,
+  MotionFade,
+} from "@/app/components/skeleton";
 
 interface ResultRow {
   id: string;
@@ -224,104 +230,143 @@ function ResultsPage() {
 
       <div style={{ padding: "24px 32px" }}>
         {/* Stats */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "14px", marginBottom: "24px" }}>
-          {[
-            { label: "Rata-rata", val: avgScore, icon: "📊", bg: "#EFF6FF", color: "#2563EB" },
-            { label: "Nilai Tertinggi", val: highestScore, icon: "🏆", bg: "#DCFCE7", color: "#16A34A" },
-            { label: "Nilai Terendah", val: lowestScore, icon: "📉", bg: "#FEE2E2", color: "#DC2626" },
-            { label: "Total Submit", val: totalCount, icon: "👥", bg: "#DBEAFE", color: "#1D4ED8" },
-            { label: "Persentase Lulus", val: `${passPct}%`, icon: "✅", bg: "#DCFCE7", color: "#16A34A" },
-          ].map((s) => (
-            <div
-              key={s.label}
-              style={{
-                background: "white",
-                borderRadius: "12px",
-                border: "1px solid #E9ECF0",
-                padding: "16px",
-                textAlign: "center",
-                boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
-              }}
-            >
+        {loading ? (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "14px", marginBottom: "24px" }}>
+            {Array.from({ length: 5 }).map((_, i) => (
+              <SkeletonStatCard key={i} />
+            ))}
+          </div>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "14px", marginBottom: "24px" }}>
+            {[
+              { label: "Rata-rata", val: avgScore, icon: "📊", bg: "#EFF6FF", color: "#2563EB" },
+              { label: "Nilai Tertinggi", val: highestScore, icon: "🏆", bg: "#DCFCE7", color: "#16A34A" },
+              { label: "Nilai Terendah", val: lowestScore, icon: "📉", bg: "#FEE2E2", color: "#DC2626" },
+              { label: "Total Submit", val: totalCount, icon: "👥", bg: "#DBEAFE", color: "#1D4ED8" },
+              { label: "Persentase Lulus", val: `${passPct}%`, icon: "✅", bg: "#DCFCE7", color: "#16A34A" },
+            ].map((s) => (
               <div
+                key={s.label}
                 style={{
-                  width: "40px",
-                  height: "40px",
-                  borderRadius: "10px",
-                  background: s.bg,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  margin: "0 auto 8px",
-                  fontSize: "18px",
+                  background: "white",
+                  borderRadius: "12px",
+                  border: "1px solid #E9ECF0",
+                  padding: "16px",
+                  textAlign: "center",
+                  boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
                 }}
               >
-                {s.icon}
-              </div>
-              <div style={{ fontSize: "24px", fontWeight: 800, color: s.color, lineHeight: 1 }}>{s.val}</div>
-              <div style={{ fontSize: "12px", color: "#9CA3AF", marginTop: "4px" }}>{s.label}</div>
-            </div>
-          ))}
-        </div>
-
-        {/* Distribution Chart */}
-        <div
-          style={{
-            background: "white",
-            borderRadius: "14px",
-            border: "1px solid #E9ECF0",
-            overflow: "hidden",
-            marginBottom: "20px",
-            boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
-          }}
-        >
-          <div style={{ padding: "16px 20px", borderBottom: "1px solid #F3F4F6", fontWeight: 600, color: "#111827" }}>
-            📊 Distribusi Nilai
-          </div>
-          <div
-            style={{
-              padding: "24px",
-              display: "flex",
-              alignItems: "flex-end",
-              gap: "20px",
-              justifyContent: "center",
-              height: "180px",
-            }}
-          >
-            {ranges.map((r) => (
-              <div
-                key={r.label}
-                style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "8px", flex: 1 }}
-              >
-                <span style={{ fontSize: "14px", fontWeight: 700, color: "#374151" }}>{r.count}</span>
                 <div
                   style={{
-                    width: "100%",
-                    maxWidth: "60px",
-                    height: `${maxCount > 0 ? (r.count / maxCount) * 100 : 0}px`,
-                    background: r.color,
-                    borderRadius: "6px 6px 0 0",
-                    transition: "height 0.5s ease",
-                    minHeight: r.count > 0 ? "8px" : "0",
+                    width: "40px",
+                    height: "40px",
+                    borderRadius: "10px",
+                    background: s.bg,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    margin: "0 auto 8px",
+                    fontSize: "18px",
                   }}
-                />
-                <span style={{ fontSize: "12px", color: "#9CA3AF" }}>{r.label}</span>
+                >
+                  {s.icon}
+                </div>
+                <div style={{ fontSize: "24px", fontWeight: 800, color: s.color, lineHeight: 1 }}>{s.val}</div>
+                <div style={{ fontSize: "12px", color: "#9CA3AF", marginTop: "4px" }}>{s.label}</div>
               </div>
             ))}
           </div>
-        </div>
+        )}
+
+        {/* Distribution Chart */}
+        {loading ? (
+          <div style={{ marginBottom: "24px" }}>
+            <SkeletonBase width="100%" height="240px" borderRadius="14px" />
+          </div>
+        ) : (
+          <div
+            style={{
+              background: "white",
+              borderRadius: "14px",
+              border: "1px solid #E9ECF0",
+              overflow: "hidden",
+              marginBottom: "20px",
+              boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
+            }}
+          >
+            <div style={{ padding: "16px 20px", borderBottom: "1px solid #F3F4F6", fontWeight: 600, color: "#111827" }}>
+              📊 Distribusi Nilai
+            </div>
+            <div
+              style={{
+                padding: "24px",
+                display: "flex",
+                alignItems: "flex-end",
+                gap: "20px",
+                justifyContent: "center",
+                height: "180px",
+              }}
+            >
+              {ranges.map((r) => (
+                <div
+                  key={r.label}
+                  style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "8px", flex: 1 }}
+                >
+                  <span style={{ fontSize: "14px", fontWeight: 700, color: "#374151" }}>{r.count}</span>
+                  <div
+                    style={{
+                      width: "100%",
+                      maxWidth: "60px",
+                      height: `${maxCount > 0 ? (r.count / maxCount) * 100 : 0}px`,
+                      background: r.color,
+                      borderRadius: "6px 6px 0 0",
+                      transition: "height 0.5s ease",
+                      minHeight: r.count > 0 ? "8px" : "0",
+                    }}
+                  />
+                  <span style={{ fontSize: "12px", color: "#9CA3AF" }}>{r.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Results Table */}
-        <div
-          style={{
-            background: "white",
-            borderRadius: "14px",
-            border: "1px solid #E9ECF0",
-            overflow: "hidden",
-            boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
-          }}
-        >
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        {loading ? (
+          <SkeletonTable
+            rows={6}
+            columns={7}
+            columnWidths={["40px", "24%", "16%", "12%", "12%", "16%", "10%"]}
+          />
+        ) : sorted.length === 0 ? (
+          <div
+            style={{
+              background: "white",
+              borderRadius: "14px",
+              border: "1px solid #E9ECF0",
+              padding: "64px 32px",
+              textAlign: "center",
+              boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
+            }}
+          >
+            <div style={{ fontSize: "16px", fontWeight: 600, color: "#111827", marginBottom: "6px" }}>
+              Belum ada peserta yang mengumpulkan ujian
+            </div>
+            <div style={{ fontSize: "13px", color: "#6B7280" }}>
+              Hasil nilai peserta akan muncul secara otomatis di sini begitu peserta selesai mengerjakan.
+            </div>
+          </div>
+        ) : (
+          <div
+            style={{
+              background: "white",
+              borderRadius: "14px",
+              border: "1px solid #E9ECF0",
+              overflow: "hidden",
+              boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
+            }}
+          >
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ background: "#F8FAFC", borderBottom: "1px solid #E9ECF0" }}>
                 <th
@@ -502,6 +547,7 @@ function ResultsPage() {
             </tbody>
           </table>
         </div>
+        )}
       </div>
 
       {toast && (

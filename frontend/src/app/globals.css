@@ -59,6 +59,11 @@
   --shadow-card-hover:    0 4px 14px rgba(20, 24, 40, 0.14);
   --shadow-bar:           0 -2px 8px rgba(20, 24, 40, 0.06);
 
+  /* Skeleton Shimmer Tokens */
+  --skeleton-base:        #E2E8F0;
+  --skeleton-highlight:   #F8FAFC;
+  --skeleton-subtle:      #EDF2F7;
+
   /* Layout */
   --sidebar-width:        248px;
   --sidebar-rail:         72px;
@@ -1823,3 +1828,41 @@ img { max-width: 100%; height: auto; display: block; }
   .filter-row { flex-direction: column; align-items: stretch; }
   .page-header { flex-direction: column; align-items: flex-start; gap: var(--space-4); }
 }
+
+/* ============================================================
+   SKELETON LOADING SHIMMER ANIMATION
+   ============================================================ */
+@keyframes skeletonShimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.skeleton-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--skeleton-base, #E2E8F0) 25%,
+    var(--skeleton-highlight, #F8FAFC) 45%,
+    var(--skeleton-base, #E2E8F0) 65%
+  );
+  background-size: 200% 100%;
+  animation: skeletonShimmer 1.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  will-change: background-position;
+}
+
+@keyframes skeletonPulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.skeleton-pulse {
+  animation: skeletonPulse 1.8s ease-in-out infinite;
+}
+

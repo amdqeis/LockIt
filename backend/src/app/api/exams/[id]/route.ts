@@ -4,6 +4,7 @@ import { authenticateTeacher } from "@/lib/middleware/auth";
 import { prisma } from "@/lib/prisma";
 import { successResponse, errorResponse, safeErrorMessage } from "@/lib/response";
 import { AppError } from "@/lib/errors";
+import { normalizeQuestionForDb } from "@/services/question-parser";
 
 const updateExamSchema = z.object({
   title: z.string().min(3).optional(),
@@ -23,8 +24,12 @@ const updateExamSchema = z.object({
       randomize_questions: z.boolean().optional(),
       display_mode: z.enum(["one_by_one", "all_at_once"]).optional(),
       auto_save_interval_seconds: z.number().int().min(5).max(120).optional(),
+      bank_id: z.string().optional(),
+      bank_title: z.string().optional(),
     })
+    .passthrough()
     .optional(),
+  questions: z.array(z.any()).optional(),
 });
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -108,13 +113,45 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       if (parsed.data.title !== undefined) updateData.title = parsed.data.title;
       if (parsed.data.description !== undefined) updateData.description = parsed.data.description;
       if (parsed.data.durationMinutes !== undefined) updateData.durationMinutes = parsed.data.durationMinutes;
-      if (parsed.data.violationPolicy !== undefined) updateData.violationPolicy = parsed.data.violationPolicy;
-      if (parsed.data.settings !== undefined) updateData.settings = parsed.data.settings;
+      if (parsed.data.violationPolicy !== undefined) updateData.violationPolicy = parsed.data.violationPolicy as any;
+      if (parsed.data.settings !== undefined) updateData.settings = parsed.data.settings as any;
     }
 
-    const updated = await prisma.exam.update({
-      where: { id },
-      data: updateData,
+    const updated = await prisma.$transaction(async (tx) => {
+      await tx.exam.update({
+        where: { id },
+        data: updateData,
+      });
+
+      if (exam.status === "draft" && Array.isArray(parsed.data.questions)) {
+        await tx.question.deleteMany({ where: { examId: id } });
+        for (let idx = 0; idx < parsed.data.questions.length; idx++) {
+          const norm = normalizeQuestionForDb(parsed.data.questions[idx], idx);
+          await tx.question.create({
+            data: {
+              examId: id,
+              orderIndex: norm.orderIndex,
+              questionText: norm.questionText,
+              imageUrl: norm.imageUrl,
+              options: norm.options as any,
+              correctAnswer: norm.correctAnswer,
+              points: norm.points,
+            },
+          });
+        }
+      }
+
+      return tx.exam.findUnique({
+        where: { id },
+        include: {
+          _count: {
+            select: {
+              questions: true,
+              students: true,
+            },
+          },
+        },
+      });
     });
 
     return successResponse(updated);

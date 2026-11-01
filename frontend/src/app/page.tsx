@@ -3,7 +3,9 @@
 import { useState, useEffect, useRef, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { validateExamCode } from "@/lib/examSession";
+import { validateExamCode, clearSessionHint } from "@/lib/examSession";
+import { useActiveSession } from "@/hooks/useActiveSession";
+import { useTeacherAuth } from "@/lib/auth";
 
 // Spec §8 & §7 Unified Design Tokens
 const T = {
@@ -39,10 +41,33 @@ function JoinContent() {
   const [rateLimitTimer, setRateLimitTimer] = useState(0);
   const [isTeacherSignedIn, setIsTeacherSignedIn] = useState(false);
 
+  const { teacher, isAuthenticated } = useTeacherAuth();
   const inputRef = useRef<HTMLInputElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
-  // Check if teacher is signed in (cookie or localStorage)
+  const { checking, sessionCheck, sessionHint, hasActiveSession } = useActiveSession();
+  const [showResumePrompt, setShowResumePrompt] = useState(false);
+
+  // Auto-redirect jika backend konfirmasi sesi aktif
+  useEffect(() => {
+    if (!checking && hasActiveSession) {
+      router.replace("/exam/session");
+    }
+  }, [checking, hasActiveSession, router]);
+
+  // Tampilkan resume banner jika ada hint localStorage
+  useEffect(() => {
+    if (sessionHint) setShowResumePrompt(true);
+  }, [sessionHint]);
+
+  // Tutup banner jika backend konfirmasi sesi tidak aktif
+  useEffect(() => {
+    if (!checking && sessionCheck && !sessionCheck.isActive) {
+      setShowResumePrompt(false);
+    }
+  }, [checking, sessionCheck]);
+
+  // Redirect guru yang sudah login langsung ke dashboard
   useEffect(() => {
     if (typeof window !== "undefined") {
       const hasCookie =
@@ -50,11 +75,12 @@ function JoinContent() {
         document.cookie.includes("eduquas_teacher_session=active");
       const hasLocal =
         localStorage.getItem("eduquas_teacher_session") === "active";
-      if (hasCookie || hasLocal) {
+      if (hasCookie || hasLocal || isAuthenticated || Boolean(teacher)) {
         setIsTeacherSignedIn(true);
+        router.replace("/dashboard");
       }
     }
-  }, []);
+  }, [isAuthenticated, teacher, router]);
 
   // Handle ?code=ABC1234 query parameter pre-fill
   useEffect(() => {
@@ -185,6 +211,42 @@ function JoinContent() {
   const isError = resultStatus === "error";
   const isNotice = resultStatus === "notice";
   const isRateLimited = resultStatus === "rate_limited";
+
+  if (isTeacherSignedIn || isAuthenticated || Boolean(teacher)) {
+    return (
+      <div
+        style={{
+          minHeight: "100dvh",
+          background: T.bgPage,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontFamily: "var(--font-family, 'Poppins', sans-serif)",
+          color: T.textSecondary,
+        }}
+      >
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+          <div
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: "50%",
+              border: `3px solid ${T.primary}`,
+              borderTopColor: "transparent",
+              animation: "spinner-rotate 0.8s linear infinite",
+            }}
+          />
+          <div style={{ fontSize: 13, fontWeight: 500 }}>Mengalihkan ke dashboard guru…</div>
+        </div>
+        <style>{`
+          @keyframes spinner-rotate {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+          }
+        `}</style>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -399,6 +461,63 @@ function JoinContent() {
           >
             Kode diberikan oleh pengawas ujian.
           </p>
+
+          {/* Resume Session Banner */}
+          {showResumePrompt && sessionHint && (
+            <div
+              style={{
+                background: "linear-gradient(135deg, #E8F6FD 0%, #EDE9FE 100%)",
+                border: "1.5px solid #29ABE2",
+                borderRadius: "10px",
+                padding: "14px 16px",
+                marginBottom: "20px",
+                textAlign: "left",
+                boxShadow: "0 4px 16px rgba(41,171,226,0.10)",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "flex-start", gap: "10px" }}>
+                <span style={{ fontSize: "20px", flexShrink: 0 }}>📋</span>
+                <div style={{ flex: 1 }}>
+                  <p style={{ fontWeight: 600, fontSize: "13px", color: "#1C303D", margin: "0 0 3px 0" }}>
+                    Ada ujian yang sedang berlangsung
+                  </p>
+                  <p style={{ fontSize: "12px", color: "#3D6A7E", margin: "0 0 10px 0" }}>
+                    <strong>{sessionHint.studentName}</strong> · {sessionHint.examTitle}
+                  </p>
+                  <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                    {checking ? (
+                      <span style={{ fontSize: "12px", color: "#5A8FA8" }}>Memeriksa sesi...</span>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => router.replace("/exam/session")}
+                          style={{
+                            background: "#29ABE2", color: "white", border: "none",
+                            borderRadius: "6px", padding: "6px 14px", fontSize: "13px",
+                            fontWeight: 600, cursor: "pointer",
+                          }}
+                        >
+                          ▶ Lanjutkan Ujian
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { clearSessionHint(); setShowResumePrompt(false); }}
+                          style={{
+                            background: "transparent", color: "#5A8FA8",
+                            border: "1px solid #A8D4E8", borderRadius: "6px",
+                            padding: "6px 12px", fontSize: "12px", cursor: "pointer",
+                          }}
+                        >
+                          Abaikan
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Form */}
           <form onSubmit={handleJoin} noValidate>

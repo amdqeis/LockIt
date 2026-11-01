@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef, Suspense } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { apiFetch } from "@/lib/apiClient";
+import { SkeletonBase, SkeletonTable } from "@/app/components/skeleton";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type ViolationKey =
@@ -11,8 +12,10 @@ type ViolationKey =
   | "fullscreen_exit"
   | "copy_attempt"
   | "paste_attempt"
+  | "copy_paste"
   | "window_blur"
   | "devtools"
+  | "devtools_open"
   | "right_click";
 
 type StudentStatus = "online" | "offline" | "blocked" | "submitted";
@@ -30,21 +33,21 @@ interface StudentFeedItem {
 }
 
 // ─── Violation Config ─────────────────────────────────────────────────────────
-const VIOLATION_CONFIG: Record<ViolationKey, { label: string; color: string; ring: string; icon: string; shortLabel: string }> = {
-  tab_switch:      { label: "Ganti Tab",        shortLabel: "Tab",         color: "#DC2626", ring: "#B91C1C", icon: "🔁" },
-  fullscreen_exit: { label: "Keluar Fullscreen", shortLabel: "Fullscreen",  color: "#EA580C", ring: "#C2410C", icon: "⛶"  },
-  copy_attempt:    { label: "Copy-Paste",        shortLabel: "Copy",        color: "#D97706", ring: "#B45309", icon: "📋" },
-  paste_attempt:   { label: "Paste Terdeteksi",  shortLabel: "Paste",       color: "#CA8A04", ring: "#A16207", icon: "📌" },
-  window_blur:     { label: "Window Blur",        shortLabel: "Blur",        color: "#7C3AED", ring: "#6D28D9", icon: "🪟" },
-  devtools:        { label: "Buka DevTools",      shortLabel: "DevTools",    color: "#0F172A", ring: "#020617", icon: "🔧" },
-  right_click:     { label: "Klik Kanan",         shortLabel: "RightClick",  color: "#6B7280", ring: "#4B5563", icon: "🖱️" },
+const VIOLATION_CONFIG: Record<string, { label: string; color: string; ring: string; icon: string; shortLabel: string }> = {
+  tab_switch:      { label: "Ganti Tab",          shortLabel: "Tab",        color: "#DC2626", ring: "#B91C1C", icon: "🔁" },
+  fullscreen_exit: { label: "Keluar Fullscreen",   shortLabel: "Fullscreen", color: "#EA580C", ring: "#C2410C", icon: "⛶"  },
+  copy_attempt:    { label: "Copy-Paste",          shortLabel: "Copy",       color: "#D97706", ring: "#B45309", icon: "📋" },
+  paste_attempt:   { label: "Paste Terdeteksi",    shortLabel: "Paste",      color: "#CA8A04", ring: "#A16207", icon: "📌" },
+  copy_paste:      { label: "Copy-Paste",          shortLabel: "Copy",       color: "#D97706", ring: "#B45309", icon: "📋" },
+  window_blur:     { label: "Window Blur",         shortLabel: "Blur",       color: "#7C3AED", ring: "#6D28D9", icon: "🪟" },
+  devtools:        { label: "Buka DevTools",       shortLabel: "DevTools",   color: "#0F172A", ring: "#020617", icon: "🔧" },
+  devtools_open:   { label: "Buka DevTools",       shortLabel: "DevTools",   color: "#0F172A", ring: "#020617", icon: "🔧" },
+  right_click:     { label: "Klik Kanan",          shortLabel: "RightClick", color: "#6B7280", ring: "#4B5563", icon: "🖱️" },
 };
 
 const VIOLATION_PRIORITY: ViolationKey[] = [
-  "tab_switch", "devtools", "copy_attempt", "paste_attempt", "fullscreen_exit", "window_blur", "right_click"
+  "tab_switch", "devtools", "devtools_open", "copy_attempt", "copy_paste", "paste_attempt", "fullscreen_exit", "window_blur", "right_click"
 ];
-
-const ALL_VIOLATIONS = Object.keys(VIOLATION_CONFIG) as ViolationKey[];
 
 const FILTER_OPTIONS = [
   { value: "all",             label: "Semua" },
@@ -53,55 +56,38 @@ const FILTER_OPTIONS = [
   { value: "tab_switch",      label: "🔁 Ganti Tab" },
   { value: "fullscreen_exit", label: "⛶ Keluar Fullscreen" },
   { value: "copy_attempt",    label: "📋 Copy-Paste" },
-  { value: "paste_attempt",   label: "📌 Paste" },
   { value: "window_blur",     label: "🪟 Window Blur" },
   { value: "devtools",        label: "🔧 DevTools" },
   { value: "right_click",     label: "🖱️ Klik Kanan" },
   { value: "no_violations",   label: "✅ Tidak Ada Pelanggaran" },
 ];
 
-// ─── Mock Students ────────────────────────────────────────────────────────────
-const MOCK_STUDENTS: StudentFeedItem[] = [
-  { studentId: "s1",  name: "Siti Nurhaliza",    identifier: "1301210001", identifierLabel: "NIM", status: "online",    activeFlags: [],                                violationCount: 0, lastEventAt: undefined },
-  { studentId: "s2",  name: "Budi Santoso",      identifier: "1301210023", identifierLabel: "NIM", status: "blocked",   activeFlags: ["tab_switch", "copy_attempt"],     violationCount: 4, lastEventAt: "2026-10-26T10:35:02Z" },
-  { studentId: "s3",  name: "Dewi Anggraini",    identifier: "1301210045", identifierLabel: "NIM", status: "online",    activeFlags: ["fullscreen_exit"],                violationCount: 1, lastEventAt: "2026-10-26T10:32:15Z" },
-  { studentId: "s4",  name: "Eko Prasetyo",      identifier: "1301210067", identifierLabel: "NIM", status: "offline",   activeFlags: [],                                violationCount: 2, lastEventAt: "2026-10-26T10:18:00Z" },
-  { studentId: "s5",  name: "Fitria Handayani",  identifier: "1301210089", identifierLabel: "NIM", status: "submitted", activeFlags: [],                                violationCount: 0, lastEventAt: undefined },
-  { studentId: "s6",  name: "Galih Permana",     identifier: "1301210101", identifierLabel: "NIM", status: "online",    activeFlags: ["tab_switch"],                     violationCount: 3, lastEventAt: "2026-10-26T10:33:55Z" },
-  { studentId: "s7",  name: "Hani Rahmawati",    identifier: "1301210122", identifierLabel: "NIM", status: "online",    activeFlags: [],                                violationCount: 0, lastEventAt: undefined },
-  { studentId: "s8",  name: "Irfan Hakim",       identifier: "1301210134", identifierLabel: "NIM", status: "online",    activeFlags: ["devtools"],                       violationCount: 1, lastEventAt: "2026-10-26T10:40:10Z" },
-  { studentId: "s9",  name: "Jasmine Putri",     identifier: "1301210156", identifierLabel: "NIM", status: "online",    activeFlags: ["window_blur"],                    violationCount: 1, lastEventAt: "2026-10-26T10:30:22Z" },
-  { studentId: "s10", name: "Karima Zahra",      identifier: "1301210178", identifierLabel: "NIM", status: "online",    activeFlags: [],                                violationCount: 0, lastEventAt: undefined },
-  { studentId: "s11", name: "Lukman Hakim",      identifier: "1301210190", identifierLabel: "NIM", status: "blocked",   activeFlags: ["devtools", "copy_attempt"],       violationCount: 5, lastEventAt: "2026-10-26T10:41:30Z" },
-  { studentId: "s12", name: "Maya Sari",         identifier: "1301210202", identifierLabel: "NIM", status: "online",    activeFlags: ["copy_attempt", "paste_attempt"],  violationCount: 2, lastEventAt: "2026-10-26T10:42:00Z" },
-  { studentId: "s13", name: "Nanda Putra",       identifier: "1301210214", identifierLabel: "NIM", status: "online",    activeFlags: [],                                violationCount: 0, lastEventAt: undefined },
-  { studentId: "s14", name: "Okky Firmansyah",   identifier: "1301210226", identifierLabel: "NIM", status: "offline",   activeFlags: [],                                violationCount: 1, lastEventAt: "2026-10-26T09:58:00Z" },
-  { studentId: "s15", name: "Putri Ayu",         identifier: "1301210238", identifierLabel: "NIM", status: "online",    activeFlags: ["right_click"],                    violationCount: 1, lastEventAt: "2026-10-26T10:38:00Z" },
-  { studentId: "s16", name: "Rizky Maulana",     identifier: "1301210250", identifierLabel: "NIM", status: "online",    activeFlags: ["fullscreen_exit", "window_blur"], violationCount: 2, lastEventAt: "2026-10-26T10:37:00Z" },
-  { studentId: "s17", name: "Sinta Dewi",        identifier: "1301210262", identifierLabel: "NIM", status: "submitted", activeFlags: [],                                violationCount: 0, lastEventAt: undefined },
-  { studentId: "s18", name: "Taufik Hidayat",    identifier: "1301210274", identifierLabel: "NIM", status: "online",    activeFlags: [],                                violationCount: 0, lastEventAt: undefined },
-];
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function getTopFlag(flags: ViolationKey[]): ViolationKey | null {
-  if (!flags.length) return null;
-  for (const f of VIOLATION_PRIORITY) if (flags.includes(f)) return f;
+  if (!flags || !flags.length) return null;
+  for (const f of VIOLATION_PRIORITY) {
+    if (flags.includes(f)) return f;
+  }
   return flags[0];
 }
+
 function getInitials(name: string) {
-  return name.split(" ").slice(0, 2).map(n => n[0]).join("").toUpperCase();
+  if (!name) return "??";
+  return name.split(" ").filter(Boolean).slice(0, 2).map(n => n[0]).join("").toUpperCase() || "??";
 }
+
 function getAvatarGradient(name: string) {
-  const hue = name.charCodeAt(0) * 17 % 360;
-  return `linear-gradient(135deg, hsl(${hue},58%,52%), hsl(${(hue + 45) % 360},68%,38%))`;
+  const seed = (name || "EduQuas").charCodeAt(0) * 17 % 360;
+  return `linear-gradient(135deg, hsl(${seed},58%,52%), hsl(${(seed + 45) % 360},68%,38%))`;
 }
+
 function formatCountdown(secs: number) {
   if (secs <= 0) return "00:00";
   const h = Math.floor(secs / 3600);
   const m = Math.floor((secs % 3600) / 60);
   const s = secs % 60;
-  if (h > 0) return `${h}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
-  return `${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
 // ─── Status Badge ─────────────────────────────────────────────────────────────
@@ -136,7 +122,7 @@ function Avatar({ name, size, status }: { name: string; size: number; status: St
 // ─── Violation Dot ────────────────────────────────────────────────────────────
 function ViolationDot({ flagKey, size = 10 }: { flagKey: ViolationKey | null; size?: number }) {
   if (!flagKey) return <span style={{ width: size, height: size, display: "inline-block", flexShrink: 0 }} />;
-  const cfg = VIOLATION_CONFIG[flagKey];
+  const cfg = VIOLATION_CONFIG[flagKey] || { label: flagKey, color: "#DC2626", ring: "#B91C1C" };
   return (
     <span title={cfg.label} style={{
       width: size, height: size, borderRadius: "50%",
@@ -154,7 +140,7 @@ function StudentCard({ student, isSelected, onClick }: {
   const topFlag = getTopFlag(student.activeFlags);
   const flagCfg = topFlag ? VIOLATION_CONFIG[topFlag] : null;
   const extraFlags = student.activeFlags.length - 1;
-  const st = STATUS_STYLE[student.status];
+  const st = STATUS_STYLE[student.status] || STATUS_STYLE.offline;
   const isBlocked = student.status === "blocked";
   const isOffline = student.status === "offline";
   const isSubmitted = student.status === "submitted";
@@ -168,7 +154,7 @@ function StudentCard({ student, isSelected, onClick }: {
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       aria-pressed={isSelected}
-      aria-label={`${student.name}, ${student.identifierLabel}: ${student.identifier}, status: ${st.label}${topFlag ? `, pelanggaran: ${VIOLATION_CONFIG[topFlag].label}` : ""}`}
+      aria-label={`${student.name}, ${student.identifierLabel}: ${student.identifier}, status: ${st.label}${topFlag && flagCfg ? `, pelanggaran: ${flagCfg.label}` : ""}`}
       style={{
         position: "relative", background: isBlocked ? "#FFF5F5" : "white",
         border: `2px solid ${borderColor}`, borderRadius: 8,
@@ -182,10 +168,10 @@ function StudentCard({ student, isSelected, onClick }: {
       {/* Top-left: violation dot */}
       <div style={{ position: "absolute", top: 8, left: 8, display: "flex", alignItems: "center", gap: 3 }}>
         <ViolationDot flagKey={topFlag} />
-        {topFlag && extraFlags > 0 && (
+        {topFlag && extraFlags > 0 && flagCfg && (
           <span style={{
-            fontSize: 9, fontWeight: 700, color: flagCfg?.color,
-            background: `${flagCfg?.color}18`, borderRadius: 99, padding: "0 4px", lineHeight: "14px",
+            fontSize: 9, fontWeight: 700, color: flagCfg.color,
+            background: `${flagCfg.color}18`, borderRadius: 99, padding: "0 4px", lineHeight: "14px",
           }}>+{extraFlags}</span>
         )}
       </div>
@@ -211,7 +197,6 @@ function StudentCard({ student, isSelected, onClick }: {
       {/* Avatar */}
       <div style={{ marginTop: 18, marginBottom: 8, position: "relative" }}>
         <Avatar name={student.name} size={44} status={student.status} />
-        {/* Status indicator dot */}
         <div style={{
           position: "absolute", bottom: -1, right: -1, width: 13, height: 13, borderRadius: "50%",
           background: st.dot, border: "2px solid white",
@@ -253,20 +238,20 @@ function StudentCard({ student, isSelected, onClick }: {
           fontSize: 9, fontWeight: 600, color: "#0369A1",
           background: "#E0F4FD", borderRadius: 99, padding: "2px 8px", lineHeight: "15px",
         }}>✓ Selesai</div>
-      ) : topFlag ? (
+      ) : topFlag && flagCfg ? (
         <div style={{
-          fontSize: 9, fontWeight: 600, color: flagCfg?.color,
-          background: `${flagCfg?.color}15`, borderRadius: 99, padding: "2px 8px", lineHeight: "15px",
+          fontSize: 9, fontWeight: 600, color: flagCfg.color,
+          background: `${flagCfg.color}15`, borderRadius: 99, padding: "2px 8px", lineHeight: "15px",
           display: "flex", alignItems: "center", gap: 3, maxWidth: "calc(100% - 8px)",
           overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
         }}>
-          <span>{VIOLATION_CONFIG[topFlag].icon}</span>
-          {VIOLATION_CONFIG[topFlag].shortLabel}
+          <span>{flagCfg.icon}</span>
+          {flagCfg.shortLabel}
         </div>
       ) : (
         <div style={{
-          fontSize: 9, color: "#86EFAC", background: "#F0FDF4",
-          borderRadius: 99, padding: "2px 8px", lineHeight: "15px",
+          fontSize: 9, color: "#16A34A", background: "#DCFCE7",
+          borderRadius: 99, padding: "2px 8px", lineHeight: "15px", fontWeight: 600,
         }}>✓ Aman</div>
       )}
     </button>
@@ -279,7 +264,8 @@ function StudentListRow({ student, index, isSelected, onClick }: {
 }) {
   const [hovered, setHovered] = useState(false);
   const topFlag = getTopFlag(student.activeFlags);
-  const st = STATUS_STYLE[student.status];
+  const flagCfg = topFlag ? VIOLATION_CONFIG[topFlag] : null;
+  const st = STATUS_STYLE[student.status] || STATUS_STYLE.offline;
 
   return (
     <button onClick={onClick} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}
@@ -297,7 +283,7 @@ function StudentListRow({ student, index, isSelected, onClick }: {
         <div style={{ fontSize: 13, fontWeight: 600, color: student.status === "blocked" ? "#DC2626" : student.status === "offline" ? "#9CA3AF" : "#1F2430", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
           {student.name}
         </div>
-        <div style={{ fontSize: 11, color: "#8A8F99" }}>{student.identifier}</div>
+        <div style={{ fontSize: 11, color: "#8A8F99" }}>{student.identifierLabel}: {student.identifier}</div>
       </div>
       <div style={{ flex: 1, minWidth: 80 }}>
         <span style={{
@@ -306,13 +292,13 @@ function StudentListRow({ student, index, isSelected, onClick }: {
         }}>{st.label}</span>
       </div>
       <div style={{ flex: 1.5, minWidth: 0 }}>
-        {topFlag ? (
+        {topFlag && flagCfg ? (
           <span style={{
-            fontSize: 11, fontWeight: 600, color: VIOLATION_CONFIG[topFlag].color,
-            background: `${VIOLATION_CONFIG[topFlag].color}15`, borderRadius: 99, padding: "2px 9px",
+            fontSize: 11, fontWeight: 600, color: flagCfg.color,
+            background: `${flagCfg.color}15`, borderRadius: 99, padding: "2px 9px",
             display: "inline-flex", alignItems: "center", gap: 4,
           }}>
-            <span>{VIOLATION_CONFIG[topFlag].icon}</span>{VIOLATION_CONFIG[topFlag].shortLabel}
+            <span>{flagCfg.icon}</span>{flagCfg.shortLabel}
           </span>
         ) : <span style={{ fontSize: 11, color: "#9CA3AF" }}>—</span>}
       </div>
@@ -333,7 +319,7 @@ function StudentListRow({ student, index, isSelected, onClick }: {
   );
 }
 
-// ─── Detail Panel ─────────────────────────────────────────────────────────────
+// ─── Detail Panel (Real Violations History) ───────────────────────────────────
 function DetailPanel({
   examId,
   student,
@@ -346,7 +332,31 @@ function DetailPanel({
   onActionDone?: () => void;
 }) {
   const topFlag = getTopFlag(student.activeFlags);
-  const st = STATUS_STYLE[student.status];
+  const st = STATUS_STYLE[student.status] || STATUS_STYLE.offline;
+
+  const [history, setHistory] = useState<any[]>([]);
+  const [warnings, setWarnings] = useState<any[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(true);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function loadViolations() {
+      setLoadingHistory(true);
+      try {
+        const res = await apiFetch<any>(`/api/exams/${examId}/students/${student.studentId}/violations`);
+        if (isMounted && res.success && res.data) {
+          setHistory(res.data.events || []);
+          setWarnings(res.data.warnings || []);
+        }
+      } catch {
+        // error handling
+      } finally {
+        if (isMounted) setLoadingHistory(false);
+      }
+    }
+    loadViolations();
+    return () => { isMounted = false; };
+  }, [examId, student.studentId]);
 
   const handleUnlock = async () => {
     try {
@@ -383,12 +393,6 @@ function DetailPanel({
       alert("Terjadi kesalahan jaringan.");
     }
   };
-
-  const mockHistory = [
-    ...(student.activeFlags.map((f, i) => ({ flag: f, time: "10:41", status: "active" as const }))),
-    { flag: "fullscreen_exit" as ViolationKey, time: "10:32", status: "cleared" as const },
-    { flag: "window_blur" as ViolationKey, time: "10:28", status: "cleared" as const },
-  ].slice(0, 4);
 
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 300, display: "flex", justifyContent: "flex-end" }} onClick={onClose}>
@@ -440,7 +444,7 @@ function DetailPanel({
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
                 {student.activeFlags.map(flag => {
-                  const cfg = VIOLATION_CONFIG[flag];
+                  const cfg = VIOLATION_CONFIG[flag] || { label: flag, icon: "⚠️", color: "#DC2626" };
                   return (
                     <div key={flag} style={{
                       display: "flex", alignItems: "center", gap: 10, padding: "10px 13px",
@@ -459,31 +463,61 @@ function DetailPanel({
             )}
           </div>
 
-          {/* History */}
+          {/* Riwayat Pelanggaran Riil */}
           <div style={{ marginBottom: 20 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8F99", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 10 }}>Riwayat Pelanggaran</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8F99", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 10 }}>Riwayat Pelanggaran Riil</div>
             <div style={{ borderRadius: 8, border: "1px solid #E3E5EA", overflow: "hidden" }}>
-              {mockHistory.length > 0 ? mockHistory.map((evt, i) => (
-                <div key={i} style={{
-                  display: "flex", alignItems: "center", gap: 10, padding: "9px 13px",
-                  borderBottom: i < mockHistory.length - 1 ? "1px solid #F0F2F5" : undefined,
-                }}>
-                  <span style={{ fontSize: 14 }}>{VIOLATION_CONFIG[evt.flag].icon}</span>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 12, fontWeight: 500, color: "#1F2430" }}>{VIOLATION_CONFIG[evt.flag].label}</div>
-                    <div style={{ fontSize: 11, color: "#8A8F99" }}>{evt.time}</div>
-                  </div>
-                  <span style={{
-                    fontSize: 10, fontWeight: 600, padding: "1px 7px", borderRadius: 99,
-                    background: evt.status === "active" ? "#FEE2E2" : "#F0FDF4",
-                    color: evt.status === "active" ? "#DC2626" : "#16A34A",
-                  }}>{evt.status === "active" ? "Aktif" : "Selesai"}</span>
+              {loadingHistory ? (
+                <div style={{ padding: "16px 13px", display: "flex", flexDirection: "column", gap: 8 }}>
+                  <SkeletonBase width="100%" height="28px" borderRadius="4px" />
+                  <SkeletonBase width="85%" height="28px" borderRadius="4px" />
                 </div>
-              )) : (
-                <div style={{ padding: "16px 13px", fontSize: 13, color: "#9CA3AF", fontStyle: "italic" }}>Belum ada riwayat</div>
+              ) : history.length > 0 ? (
+                history.map((evt, i) => {
+                  const cfg = VIOLATION_CONFIG[evt.eventType as ViolationKey] || {
+                    label: evt.eventType,
+                    icon: "⚠️",
+                    color: "#DC2626",
+                  };
+                  return (
+                    <div key={evt.id || i} style={{
+                      display: "flex", alignItems: "center", gap: 10, padding: "9px 13px",
+                      borderBottom: i < history.length - 1 ? "1px solid #F0F2F5" : undefined,
+                    }}>
+                      <span style={{ fontSize: 14 }}>{cfg.icon}</span>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 12, fontWeight: 500, color: "#1F2430" }}>{cfg.label}</div>
+                        <div style={{ fontSize: 11, color: "#8A8F99" }}>
+                          {new Date(evt.timestamp).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                        </div>
+                      </div>
+                      <span style={{
+                        fontSize: 10, fontWeight: 600, padding: "1px 7px", borderRadius: 99,
+                        background: "#FEE2E2", color: "#DC2626",
+                      }}>Terdeteksi</span>
+                    </div>
+                  );
+                })
+              ) : (
+                <div style={{ padding: "16px 13px", fontSize: 13, color: "#9CA3AF", fontStyle: "italic" }}>Belum ada riwayat pelanggaran</div>
               )}
             </div>
           </div>
+
+          {/* Warnings Log */}
+          {warnings.length > 0 && (
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8F99", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 10 }}>Peringatan Terkirim</div>
+              <div style={{ borderRadius: 8, border: "1px solid #E3E5EA", overflow: "hidden" }}>
+                {warnings.map((w, i) => (
+                  <div key={w.id || i} style={{ padding: "8px 12px", borderBottom: i < warnings.length - 1 ? "1px solid #F0F2F5" : undefined, background: "#FFFBEB" }}>
+                    <div style={{ fontSize: 12, color: "#92400E", fontWeight: 500 }}>"{w.message}"</div>
+                    <div style={{ fontSize: 10, color: "#B45309", marginTop: 2 }}>{new Date(w.sentAt).toLocaleTimeString("id-ID")}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Actions */}
@@ -516,10 +550,11 @@ function DetailPanel({
 // ─── Main Page ────────────────────────────────────────────────────────────────
 function MonitorPageContent() {
   const params = useParams();
-  const examId = (params?.id as string) ?? "exam-1";
+  const examId = (params?.id as string) ?? "";
   const [exam, setExam] = useState({
     id: examId,
     title: "Monitoring Ujian",
+    accessCode: "",
     duration: 90,
     violationPolicy: {
       maxViolations: 3,
@@ -530,11 +565,12 @@ function MonitorPageContent() {
     },
   });
 
+  const [loading, setLoading] = useState(true);
   const [secondsLeft, setSecondsLeft] = useState(90 * 60);
   const [filter, setFilter] = useState("all");
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [selectedStudent, setSelectedStudent] = useState<StudentFeedItem | null>(null);
-  const [students, setStudents] = useState<StudentFeedItem[]>(MOCK_STUDENTS);
+  const [students, setStudents] = useState<StudentFeedItem[]>([]);
   const [filterOpen, setFilterOpen] = useState(false);
   const filterRef = useRef<HTMLDivElement>(null);
 
@@ -545,8 +581,6 @@ function MonitorPageContent() {
     return () => clearInterval(t);
   }, [secondsLeft]);
 
-  const [examMeta, setExamMeta] = useState<any>(exam);
-
   // Poll real-time dashboard data and student presence
   const fetchDashboardData = useCallback(async () => {
     if (!examId) return;
@@ -556,18 +590,16 @@ function MonitorPageContent() {
         apiFetch<any>(`/api/exams/${examId}/students?pageSize=100`),
       ]);
 
+      let eventsByStudent: Record<string, ViolationKey[]> = {};
+
       if (dashRes.success && dashRes.data) {
         const { exam: beExam, serverTime, recentEvents } = dashRes.data;
         if (beExam) {
-          setExamMeta((prev: any) => ({
-            ...prev,
-            title: beExam.title || prev.title,
-            duration: beExam.durationMinutes || prev.duration,
-          }));
           setExam((prev) => ({
             ...prev,
             id: beExam.id || prev.id,
             title: beExam.title || prev.title,
+            accessCode: beExam.accessCode || prev.accessCode,
             duration: beExam.durationMinutes || prev.duration,
             violationPolicy: {
               maxViolations: beExam.violationPolicy?.max_violations ?? prev.violationPolicy.maxViolations,
@@ -586,42 +618,45 @@ function MonitorPageContent() {
           }
         }
 
-        if (stuRes.success && stuRes.data?.students && stuRes.data.students.length > 0) {
-          const eventsByStudent: Record<string, ViolationKey[]> = {};
-          if (Array.isArray(recentEvents)) {
-            recentEvents.forEach((ev: any) => {
-              if (ev.studentId && ev.eventType) {
-                if (!eventsByStudent[ev.studentId]) eventsByStudent[ev.studentId] = [];
-                if (!eventsByStudent[ev.studentId].includes(ev.eventType)) {
-                  eventsByStudent[ev.studentId].push(ev.eventType);
-                }
+        if (Array.isArray(recentEvents)) {
+          recentEvents.forEach((ev: any) => {
+            if (ev.studentId && ev.eventType) {
+              if (!eventsByStudent[ev.studentId]) eventsByStudent[ev.studentId] = [];
+              if (!eventsByStudent[ev.studentId].includes(ev.eventType)) {
+                eventsByStudent[ev.studentId].push(ev.eventType);
               }
-            });
-          }
-
-          const mapped: StudentFeedItem[] = stuRes.data.students.map((s: any) => {
-            const activeFlags = eventsByStudent[s.id] || [];
-            let status: StudentStatus = "offline";
-            if (s.isLocked) status = "blocked";
-            else if (s.status === "active") status = "online";
-            else if (s.status === "submitted") status = "submitted";
-
-            return {
-              studentId: s.id,
-              name: s.name,
-              identifier: s.nisn,
-              identifierLabel: "NISN",
-              status,
-              activeFlags,
-              violationCount: s.violationCount || 0,
-              lastEventAt: s.joinedAt,
-            };
+            }
           });
-          setStudents(mapped);
         }
+      }
+
+      if (stuRes.success && Array.isArray(stuRes.data?.students)) {
+        const mapped: StudentFeedItem[] = stuRes.data.students.map((s: any) => {
+          const activeFlags = eventsByStudent[s.id] || [];
+          let status: StudentStatus = "offline";
+          if (s.isLocked) status = "blocked";
+          else if (s.status === "active") status = "online";
+          else if (s.status === "submitted") status = "submitted";
+
+          return {
+            studentId: s.id,
+            name: s.name,
+            identifier: s.nisn,
+            identifierLabel: "NISN",
+            status,
+            activeFlags,
+            violationCount: s.violationCount || 0,
+            lastEventAt: s.joinedAt,
+          };
+        });
+        setStudents(mapped);
+      } else {
+        setStudents([]);
       }
     } catch {
       // Keep existing data on polling error
+    } finally {
+      setLoading(false);
     }
   }, [examId]);
 
@@ -670,7 +705,7 @@ function MonitorPageContent() {
         padding: "0 24px", gap: 12, flexShrink: 0,
         position: "sticky", top: 0, zIndex: 100,
       }}>
-        <Link href={`/dashboard/exams/${examId}`} style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, borderRadius: 8, color: "#4A6678", textDecoration: "none" }} aria-label="Kembali">
+        <Link href={examId ? `/dashboard/exams/${examId}` : "/dashboard"} style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, borderRadius: 8, color: "#4A6678", textDecoration: "none" }} aria-label="Kembali">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
         </Link>
         <div>
@@ -693,9 +728,13 @@ function MonitorPageContent() {
             <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#16A34A", display: "inline-block" }} className="live-pulse" />
             <span style={{ fontSize: 12, fontWeight: 600, color: "#16A34A" }}>Live</span>
           </div>
-          <span style={{ fontSize: 12, color: "#8A8F99" }}>
-            <span style={{ color: "#16A34A", fontWeight: 600 }}>{onlineCount}</span> online · <span style={{ color: "#9CA3AF" }}>{offlineCount}</span> offline · {students.length} total
-          </span>
+          {loading ? (
+            <SkeletonBase width="140px" height="14px" borderRadius="4px" />
+          ) : (
+            <span style={{ fontSize: 12, color: "#8A8F99" }}>
+              <span style={{ color: "#16A34A", fontWeight: 600 }}>{onlineCount}</span> online · <span style={{ color: "#9CA3AF" }}>{offlineCount}</span> offline · {students.length} total
+            </span>
+          )}
         </div>
       </header>
 
@@ -771,11 +810,13 @@ function MonitorPageContent() {
 
         {/* Violation legend buttons */}
         <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-          {(Object.entries(VIOLATION_CONFIG) as [ViolationKey, typeof VIOLATION_CONFIG[ViolationKey]][]).map(([key, cfg]) => {
-            const count = countByViolation(key);
+          {["tab_switch", "fullscreen_exit", "copy_attempt", "window_blur", "devtools", "right_click"].map((key) => {
+            const cfg = VIOLATION_CONFIG[key];
+            if (!cfg) return null;
+            const count = countByViolation(key as ViolationKey);
             const active = filter === key;
             return (
-              <button key={key} onClick={() => handleLegendClick(key)} aria-pressed={active}
+              <button key={key} onClick={() => handleLegendClick(key as ViolationKey)} aria-pressed={active}
                 style={{
                   display: "flex", alignItems: "center", gap: 5, borderRadius: 20, padding: "3px 8px 3px 5px",
                   background: active ? `${cfg.color}15` : "transparent",
@@ -859,51 +900,128 @@ function MonitorPageContent() {
         </div>
       )}
 
-      {/* Grid / List */}
+      {/* Content Area */}
       <div style={{ flex: 1, padding: 20, overflowY: "auto" }}>
-        <div style={{ fontSize: 12, color: "#8A8F99", marginBottom: 12, display: "flex", alignItems: "center", gap: 0 }}>
-          Menampilkan {filteredStudents.length} dari {students.length} peserta
-          {filter !== "all" && (
-            <button onClick={() => setFilter("all")} style={{ marginLeft: 10, color: "#29ABE2", background: "none", border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "var(--font-family)" }}>
-              Tampilkan semua →
-            </button>
-          )}
-        </div>
-
-        {filteredStudents.length === 0 ? (
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "64px 24px", gap: 12 }}>
-            <div style={{ fontSize: 40 }}>🔍</div>
-            <div style={{ fontSize: 16, fontWeight: 600, color: "#1F2430" }}>Tidak ada peserta yang sesuai filter</div>
-            <button onClick={() => setFilter("all")} style={{ padding: "9px 20px", background: "#29ABE2", color: "white", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "var(--font-family)" }}>
-              Tampilkan Semua
-            </button>
+        {loading ? (
+          <div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+              <SkeletonBase width="180px" height="14px" borderRadius="4px" />
+              <SkeletonBase width="80px" height="14px" borderRadius="4px" />
+            </div>
+            {viewMode === "grid" ? (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))", gap: 14 }}>
+                {Array.from({ length: 12 }).map((_, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      position: "relative",
+                      background: "white",
+                      border: "2px solid #F1F5F9",
+                      borderRadius: 8,
+                      padding: "10px 10px 12px",
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      minHeight: 140,
+                      boxShadow: "0 2px 8px rgba(20,24,40,0.06)",
+                    }}
+                  >
+                    <div style={{ marginTop: 18, marginBottom: 8 }}>
+                      <SkeletonBase width="44px" height="44px" borderRadius="50%" />
+                    </div>
+                    <SkeletonBase width="70%" height="12px" borderRadius="4px" style={{ marginBottom: 6 }} />
+                    <SkeletonBase width="50%" height="10px" borderRadius="4px" style={{ marginBottom: 10 }} />
+                    <SkeletonBase width="60px" height="18px" borderRadius="99px" />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <SkeletonTable rows={8} cols={6} />
+            )}
           </div>
-        ) : viewMode === "grid" ? (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))", gap: 14 }}>
-            {filteredStudents.map(student => (
-              <StudentCard key={student.studentId} student={student}
-                isSelected={selectedStudent?.studentId === student.studentId}
-                onClick={() => setSelectedStudent(selectedStudent?.studentId === student.studentId ? null : student)}
-              />
-            ))}
+        ) : students.length === 0 ? (
+          <div style={{
+            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+            padding: "56px 24px", background: "white", borderRadius: 12, border: "1px solid #E3E5EA",
+            boxShadow: "0 2px 8px rgba(20,24,40,0.04)", textAlign: "center", maxWidth: 520, margin: "32px auto 0"
+          }}>
+            <div style={{ width: 56, height: 56, borderRadius: "50%", background: "#E0F4FD", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, marginBottom: 16 }}>
+              👥
+            </div>
+            <h3 style={{ fontSize: 17, fontWeight: 700, color: "#1F2430", margin: "0 0 8px" }}>
+              Belum Ada Peserta yang Bergabung
+            </h3>
+            <p style={{ fontSize: 13, color: "#6B7280", margin: "0 0 18px", maxWidth: 400, lineHeight: 1.5 }}>
+              Peserta yang memasukkan kode ujian dan mulai mengerjakan akan otomatis muncul di layar pemantauan ini secara real-time.
+            </p>
+            {exam.accessCode && (
+              <div style={{
+                display: "inline-flex", alignItems: "center", gap: 8, padding: "8px 16px",
+                background: "#F8FAFC", border: "1px dashed #CBD5E1", borderRadius: 8, marginBottom: 20
+              }}>
+                <span style={{ fontSize: 12, color: "#64748B" }}>Kode Akses:</span>
+                <span style={{ fontSize: 16, fontWeight: 800, color: "#0284C7", letterSpacing: "0.08em", fontFamily: "var(--font-mono, monospace)" }}>
+                  {exam.accessCode}
+                </span>
+              </div>
+            )}
+            <button
+              onClick={() => { setLoading(true); fetchDashboardData(); }}
+              style={{
+                padding: "8px 18px", borderRadius: 8, background: "#29ABE2", color: "white",
+                border: "none", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "var(--font-family)"
+              }}
+            >
+              🔄 Segarkan Data
+            </button>
           </div>
         ) : (
-          <div style={{ background: "white", borderRadius: 10, border: "1px solid #E3E5EA", overflow: "hidden" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "0 20px", height: 40, background: "#F8FAFC", borderBottom: "1px solid #E3E5EA", fontSize: 11, fontWeight: 700, color: "#8A8F99", textTransform: "uppercase", letterSpacing: "0.06em", position: "sticky", top: 0 }}>
-              <span style={{ width: 10 }} /><span style={{ width: 30 }} />
-              <span style={{ flex: 2 }}>Nama</span>
-              <span style={{ flex: 1, minWidth: 80 }}>Status</span>
-              <span style={{ flex: 1.5 }}>Pelanggaran Aktif</span>
-              <span style={{ flex: 0.6, textAlign: "center" }}>Total</span>
-              <span style={{ flex: 1, textAlign: "right" }}>Waktu</span>
+          <>
+            <div style={{ fontSize: 12, color: "#8A8F99", marginBottom: 12, display: "flex", alignItems: "center", gap: 0 }}>
+              Menampilkan {filteredStudents.length} dari {students.length} peserta
+              {filter !== "all" && (
+                <button onClick={() => setFilter("all")} style={{ marginLeft: 10, color: "#29ABE2", background: "none", border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "var(--font-family)" }}>
+                  Tampilkan semua →
+                </button>
+              )}
             </div>
-            {filteredStudents.map((student, i) => (
-              <StudentListRow key={student.studentId} student={student} index={i}
-                isSelected={selectedStudent?.studentId === student.studentId}
-                onClick={() => setSelectedStudent(selectedStudent?.studentId === student.studentId ? null : student)}
-              />
-            ))}
-          </div>
+
+            {filteredStudents.length === 0 ? (
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "64px 24px", gap: 12 }}>
+                <div style={{ fontSize: 40 }}>🔍</div>
+                <div style={{ fontSize: 16, fontWeight: 600, color: "#1F2430" }}>Tidak ada peserta yang sesuai filter</div>
+                <button onClick={() => setFilter("all")} style={{ padding: "9px 20px", background: "#29ABE2", color: "white", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "var(--font-family)" }}>
+                  Tampilkan Semua
+                </button>
+              </div>
+            ) : viewMode === "grid" ? (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))", gap: 14 }}>
+                {filteredStudents.map(student => (
+                  <StudentCard key={student.studentId} student={student}
+                    isSelected={selectedStudent?.studentId === student.studentId}
+                    onClick={() => setSelectedStudent(selectedStudent?.studentId === student.studentId ? null : student)}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div style={{ background: "white", borderRadius: 10, border: "1px solid #E3E5EA", overflow: "hidden" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "0 20px", height: 40, background: "#F8FAFC", borderBottom: "1px solid #E3E5EA", fontSize: 11, fontWeight: 700, color: "#8A8F99", textTransform: "uppercase", letterSpacing: "0.06em", position: "sticky", top: 0 }}>
+                  <span style={{ width: 10 }} /><span style={{ width: 30 }} />
+                  <span style={{ flex: 2 }}>Nama</span>
+                  <span style={{ flex: 1, minWidth: 80 }}>Status</span>
+                  <span style={{ flex: 1.5 }}>Pelanggaran Aktif</span>
+                  <span style={{ flex: 0.6, textAlign: "center" }}>Total</span>
+                  <span style={{ flex: 1, textAlign: "right" }}>Waktu</span>
+                </div>
+                {filteredStudents.map((student, i) => (
+                  <StudentListRow key={student.studentId} student={student} index={i}
+                    isSelected={selectedStudent?.studentId === student.studentId}
+                    onClick={() => setSelectedStudent(selectedStudent?.studentId === student.studentId ? null : student)}
+                  />
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
 
