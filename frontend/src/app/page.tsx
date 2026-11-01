@@ -47,6 +47,26 @@ function JoinContent() {
 
   const { checking, sessionCheck, sessionHint, hasActiveSession } = useActiveSession();
   const [showResumePrompt, setShowResumePrompt] = useState(false);
+  const [submitSuccessBanner, setSubmitSuccessBanner] = useState<string | null>(null);
+  const [alreadySubmittedBanner, setAlreadySubmittedBanner] = useState<string | null>(null);
+
+  // Deteksi pengumpulan ujian dan cegah akses ulang
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const justSubmitted = sessionStorage.getItem("exam_just_submitted");
+    const examTitle = sessionStorage.getItem("exam_submitted_title");
+    if (justSubmitted === "true") {
+      sessionStorage.removeItem("exam_just_submitted");
+      sessionStorage.removeItem("exam_submitted_title");
+      setSubmitSuccessBanner(`Ujian "${examTitle || "Ujian"}" berhasil dikumpulkan! Jawaban Anda telah tersimpan.`);
+    }
+
+    const alreadySubmitted = sessionStorage.getItem("exam_already_submitted");
+    if (alreadySubmitted === "true") {
+      sessionStorage.removeItem("exam_already_submitted");
+      setAlreadySubmittedBanner("Kamu sudah mengerjakan ujian ini sebelumnya.");
+    }
+  }, []);
 
   // Auto-redirect jika backend konfirmasi sesi aktif
   useEffect(() => {
@@ -516,6 +536,76 @@ function JoinContent() {
                   </div>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* Banner Sukses Mengumpulkan Ujian */}
+          {submitSuccessBanner && (
+            <div
+              style={{
+                background: "#ECFDF5",
+                border: "1.5px solid #10B981",
+                color: "#065F46",
+                borderRadius: "8px",
+                padding: "12px 16px",
+                marginBottom: "20px",
+                fontSize: "13px",
+                lineHeight: 1.5,
+                textAlign: "left",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "8px",
+                boxShadow: "0 2px 8px rgba(16,185,129,0.12)",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <span style={{ fontSize: "18px" }}>✅</span>
+                <span>{submitSuccessBanner}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSubmitSuccessBanner(null)}
+                style={{ background: "none", border: "none", color: "#065F46", cursor: "pointer", fontSize: "16px", padding: 0 }}
+                aria-label="Tutup notifikasi"
+              >
+                ×
+              </button>
+            </div>
+          )}
+
+          {/* Banner Peringatan Sudah Mengerjakan */}
+          {alreadySubmittedBanner && (
+            <div
+              style={{
+                background: "#FFFBEB",
+                border: "1.5px solid #F59E0B",
+                color: "#92400E",
+                borderRadius: "8px",
+                padding: "12px 16px",
+                marginBottom: "20px",
+                fontSize: "13px",
+                lineHeight: 1.5,
+                textAlign: "left",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "8px",
+                boxShadow: "0 2px 8px rgba(245,158,11,0.12)",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <span style={{ fontSize: "18px" }}>⚠️</span>
+                <span>{alreadySubmittedBanner}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAlreadySubmittedBanner(null)}
+                style={{ background: "none", border: "none", color: "#92400E", cursor: "pointer", fontSize: "16px", padding: 0 }}
+                aria-label="Tutup peringatan"
+              >
+                ×
+              </button>
             </div>
           )}
 

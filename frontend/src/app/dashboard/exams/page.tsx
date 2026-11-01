@@ -72,7 +72,7 @@ function ExamsContent() {
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [openMenuExamId, setOpenMenuExamId] = useState<string | null>(null);
-  const [confirmModal, setConfirmModal] = useState<{ type: "delete" | "archive" | "restore"; exam: ExamItem } | null>(null);
+  const [confirmModal, setConfirmModal] = useState<{ type: "delete" | "archive" | "restore" | "duplicate"; exam: ExamItem } | null>(null);
 
   useEffect(() => {
     if (filterParam === "ended") setSelectedTab("ended");
@@ -167,6 +167,16 @@ function ExamsContent() {
           fetchExams();
         } else {
           showToast(res.error?.message || "Gagal mengarsipkan ujian");
+        }
+      } else if (type === "duplicate") {
+        const res = await apiFetch<any>(`/api/exams/${exam.id}/duplicate`, {
+          method: "POST",
+        });
+        if (res.success && res.data?.exam) {
+          showToast(`Ujian berhasil diduplikasi: "${res.data.exam.title}"`);
+          fetchExams();
+        } else {
+          showToast(res.error?.message || "Gagal menduplikasi ujian");
         }
       } else {
         showToast("Aksi berhasil diproses");
@@ -823,6 +833,15 @@ function ExamsContent() {
                             >
                               Detail
                             </Link>
+                            <button
+                              type="button"
+                              className="action-btn-outline"
+                              style={{ height: "32px", padding: "0 8px", fontSize: "12px" }}
+                              title="Duplikat Ujian"
+                              onClick={() => setConfirmModal({ type: "duplicate", exam })}
+                            >
+                              📋
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -867,13 +886,21 @@ function ExamsContent() {
               onClick={(e) => e.stopPropagation()}
             >
               <h3 style={{ fontSize: "16px", fontWeight: 600, color: T.textPrimary, marginTop: 0, marginBottom: "8px" }}>
-                {confirmModal.type === "delete" ? "Hapus ujian?" : confirmModal.type === "archive" ? "Arsipkan ujian?" : "Pulihkan ujian?"}
+                {confirmModal.type === "delete"
+                  ? "Hapus ujian?"
+                  : confirmModal.type === "archive"
+                  ? "Arsipkan ujian?"
+                  : confirmModal.type === "duplicate"
+                  ? "Duplikat ujian?"
+                  : "Pulihkan ujian?"}
               </h3>
               <p style={{ fontSize: "13px", color: T.textSecondary, lineHeight: "20px", marginBottom: "20px" }}>
                 {confirmModal.type === "delete"
                   ? `Ujian "${confirmModal.exam.title}" akan dihapus permanen.`
                   : confirmModal.type === "archive"
                   ? `Ujian "${confirmModal.exam.title}" akan dipindahkan ke arsip.`
+                  : confirmModal.type === "duplicate"
+                  ? `Salinan baru dari ujian "${confirmModal.exam.title}" beserta seluruh butir soalnya akan dibuat berstatus draft.`
                   : `Ujian "${confirmModal.exam.title}" akan dipulihkan.`}
               </p>
               <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
@@ -886,7 +913,13 @@ function ExamsContent() {
                   style={{ backgroundColor: confirmModal.type === "delete" ? T.danger : T.primary }}
                   onClick={handleModalConfirm}
                 >
-                  {confirmModal.type === "delete" ? "Ya, hapus" : confirmModal.type === "archive" ? "Ya, arsipkan" : "Ya, pulihkan"}
+                  {confirmModal.type === "delete"
+                    ? "Ya, hapus"
+                    : confirmModal.type === "archive"
+                    ? "Ya, arsipkan"
+                    : confirmModal.type === "duplicate"
+                    ? "Ya, duplikat"
+                    : "Ya, pulihkan"}
                 </button>
               </div>
             </div>
@@ -1029,7 +1062,7 @@ function ExamCardItem({
   isMenuOpen: boolean;
   onToggleMenu: (id: string) => void;
   onCopyCode: (code: string) => void;
-  onActionConfirm: (type: "delete" | "archive" | "restore", exam: ExamItem) => void;
+  onActionConfirm: (type: "delete" | "archive" | "restore" | "duplicate", exam: ExamItem) => void;
 }) {
   const isArchived = exam.status === "archived";
   const showAccessCode = exam.status === "active" || exam.status === "scheduled";
@@ -1066,8 +1099,16 @@ function ExamCardItem({
                 minWidth: "140px",
               }}
             >
-              <button type="button" className="action-btn-outline" style={{ border: "none", width: "100%", justifyContent: "flex-start", height: "32px", fontSize: "12px" }}>
-                Duplikat
+              <button
+                type="button"
+                className="action-btn-outline"
+                style={{ border: "none", width: "100%", justifyContent: "flex-start", height: "32px", fontSize: "12px" }}
+                onClick={() => {
+                  onToggleMenu(exam.id);
+                  onActionConfirm("duplicate", exam);
+                }}
+              >
+                📋 Duplikat
               </button>
               {exam.status === "archived" ? (
                 <button

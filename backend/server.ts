@@ -113,7 +113,17 @@ app.prepare().then(async () => {
 
   studentNs.use(async (socket, next) => {
     try {
-      const token = socket.handshake.auth?.token;
+      let token = socket.handshake.auth?.token;
+      if (!token && socket.handshake.headers?.cookie) {
+        const rawCookies = socket.handshake.headers.cookie.split(";");
+        for (const cookieItem of rawCookies) {
+          const [k, v] = cookieItem.trim().split("=");
+          if (k === "studentSession" && v) {
+            token = decodeURIComponent(v);
+            break;
+          }
+        }
+      }
       if (!token) {
         return next(new Error("Token sesi peserta wajib disertakan"));
       }
@@ -158,7 +168,7 @@ app.prepare().then(async () => {
       studentId: student.id,
       name: student.name,
       nisn: student.nisn,
-      status: "active",
+      status: student.status,
       lastSeen: new Date().toISOString(),
     });
 

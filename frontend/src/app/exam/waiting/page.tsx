@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { fetchExamSession } from "@/lib/examSession";
+import { clearSessionHint } from "@/lib/examSession";
+import { io as socketIO, Socket } from "socket.io-client";
 
 interface ParticipantInfo {
   name: string;
@@ -22,39 +23,87 @@ const DEFAULT_PARTICIPANT: ParticipantInfo = {
   questionCount: 0,
 };
 
+type StudentState = "waiting" | "accepted" | "active" | "kicked";
 type ConnectionStatus = "connected" | "reconnecting" | "offline";
 
 export default function WaitingPage() {
   const router = useRouter();
+
+  useEffect(() => {
+    router.replace("/exam/lobby");
+  }, [router]);
+
   const [participant, setParticipant] = useState<ParticipantInfo>(DEFAULT_PARTICIPANT);
-  const [dots, setDots] = useState(".");
+  const [studentStatus, setStudentStatus] = useState<StudentState>("waiting");
+  const [kickReason, setKickReason] = useState<string | null>(null);
+  const [statusMessage, setStatusMessage] = useState<string>("Menunggu pengawas menerima kamu ke ruang ujian...");
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connected");
   const [secondsWaited, setSecondsWaited] = useState(0);
-  const [pulse, setPulse] = useState(false);
 
-  // Poll session to verify status and redirect when teacher starts the exam
+  // Timer counter for seconds waited
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setSecondsWaited((s) => s + 1);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Poll waiting room status via HTTP endpoint
   useEffect(() => {
     let cancelled = false;
 
-    const checkSession = async () => {
+    const checkWaitingStatus = async () => {
       try {
-        const res = await fetchExamSession();
+        const res = await fetch("/api/exam-session/waiting", {
+          cache: "no-store",
+          credentials: "include",
+        });
+
         if (cancelled) return;
-        if (res.success && res.data) {
-          const session = res.data;
-          setConnectionStatus("connected");
-          setParticipant((prev) => ({
-            ...prev,
-            name: session.student.name,
-            nisn: session.student.nisn,
-            exam: session.exam.title,
-            accessCode: session.exam.accessCode ?? prev.accessCode,
-            duration: session.exam.durationMinutes,
-            questionCount: session.questions.length,
-          }));
-          if (!session.exam.status || session.exam.status === "active") {
-            router.push("/exam/session");
+
+        if (res.ok) {
+          const json = await res.json();
+          if (json.success && json.data) {
+            setConnectionStatus("connected");
+            const { student, exam } = json.data;
+
+            setParticipant((prev) => ({
+              ...prev,
+              name: student.name || prev.name,
+              nisn: student.nisn || prev.nisn,
+              exam: exam.title || prev.exam,
+              accessCode: exam.accessCode || prev.accessCode,
+              duration: exam.durationMinutes || prev.duration,
+              questionCount: exam.questionCount ?? prev.questionCount,
+            }));
+
+            if (student.status === "active") {
+              router.push("/exam/session");
+              return;
+            }
+
+            if (student.status === "kicked") {
+              setStudentStatus("kicked");
+              setKickReason(student.kickReason || "Dikeluarkan oleh pengawas");
+              clearSessionHint();
+              setTimeout(() => {
+                sessionStorage.setItem("exam_already_submitted", "true");
+                router.push("/");
+              }, 3000);
+              return;
+            }
+
+            if (student.status === "accepted") {
+              setStudentStatus("accepted");
+              setStatusMessage("Kamu telah diterima oleh pengawas! Menunggu ujian dimulai.");
+            } else if (student.status === "waiting") {
+              setStudentStatus("waiting");
+              setStatusMessage("Menunggu pengawas menerima kamu ke ruang ujian...");
+            }
           }
+        } else if (res.status === 401 || res.status === 403) {
+          // Token expired or invalid
+          setConnectionStatus("offline");
         } else {
           setConnectionStatus("reconnecting");
         }
@@ -63,11 +112,64 @@ export default function WaitingPage() {
       }
     };
 
-    checkSession();
-    const interval = setInterval(checkSession, 4000);
+    checkWaitingStatus();
+    const interval = setInterval(checkWaitingStatus, 3000);
+
     return () => {
       cancelled = true;
       clearInterval(interval);
+    };
+  }, [router]);
+
+  // Socket.IO real-time listener (best effort)
+  useEffect(() => {
+    let socket: Socket | null = null;
+    try {
+      const socketUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+      socket = socketIO(`${socketUrl}/student-session`, {
+        withCredentials: true,
+        transports: ["websocket", "polling"],
+        reconnectionAttempts: 5,
+        timeout: 5000,
+      });
+
+      socket.on("connect", () => {
+        setConnectionStatus("connected");
+      });
+
+      socket.on("student_accepted", (data: { message?: string }) => {
+        setStudentStatus("accepted");
+        if (data?.message) {
+          setStatusMessage(data.message);
+        }
+      });
+
+      socket.on("exam_started", () => {
+        setStudentStatus("active");
+        router.push("/exam/session");
+      });
+
+      socket.on("student_kicked", (data: { reason?: string }) => {
+        setStudentStatus("kicked");
+        setKickReason(data?.reason || "Dikeluarkan oleh pengawas ujian");
+        clearSessionHint();
+        setTimeout(() => {
+          sessionStorage.setItem("exam_already_submitted", "true");
+          router.push("/");
+        }, 3000);
+      });
+
+      socket.on("connect_error", () => {
+        // Fallback silently to HTTP polling
+      });
+    } catch {
+      // Ignore socket setup error, rely on HTTP polling
+    }
+
+    return () => {
+      if (socket) {
+        socket.disconnect();
+      }
     };
   }, [router]);
 
@@ -79,7 +181,7 @@ export default function WaitingPage() {
   const connConfig = {
     connected: { dot: "#22C55E", bg: "rgba(34,197,94,0.12)", color: "#16A34A", text: "Terhubung ke server" },
     reconnecting: { dot: "#F59E0B", bg: "rgba(245,158,11,0.12)", color: "#D97706", text: "Menghubungkan ulang..." },
-    offline: { dot: "#EF4444", bg: "rgba(239,68,68,0.12)", color: "#DC2626", text: "Terputus dari server" },
+    offline: { dot: "#EF4444", bg: "rgba(239,68,68,0.12)", color: "#DC2626", text: "Sesi tidak aktif" },
   }[connectionStatus];
 
   return (
@@ -95,7 +197,7 @@ export default function WaitingPage() {
       <div style={{ width: "100%", maxWidth: "480px" }}>
 
         {/* Logo */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "10px", marginBottom: "40px" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "10px", marginBottom: "32px" }}>
           <div style={{
             width: "38px", height: "38px",
             background: "linear-gradient(135deg, #0284C7, #29ABE2)",
@@ -118,78 +220,130 @@ export default function WaitingPage() {
           {/* Animated top stripe */}
           <div style={{
             height: "4px",
-            background: "linear-gradient(90deg, #29ABE2, #0EA5E9, #7DD3FC, #29ABE2)",
+            background: studentStatus === "accepted"
+              ? "linear-gradient(90deg, #10B981, #34D399, #059669)"
+              : studentStatus === "kicked"
+              ? "linear-gradient(90deg, #EF4444, #F87171, #DC2626)"
+              : "linear-gradient(90deg, #29ABE2, #0EA5E9, #7DD3FC, #29ABE2)",
             backgroundSize: "200% 100%",
             animation: "stripe 2s linear infinite",
           }} />
 
           <div style={{ padding: "36px 32px 32px", textAlign: "center" }}>
-            {/* Waiting animation */}
-            <div style={{ position: "relative", display: "inline-flex", marginBottom: "28px" }}>
-              {/* Outer ring */}
-              <div style={{
-                width: "100px", height: "100px", borderRadius: "50%",
-                border: "3px solid #C8E6F5",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                position: "relative",
-              }}>
-                {/* Spinning ring */}
+            {/* Status animation icon */}
+            <div style={{ position: "relative", display: "inline-flex", marginBottom: "24px" }}>
+              {studentStatus === "accepted" ? (
                 <div style={{
-                  position: "absolute", inset: "-3px", borderRadius: "50%",
-                  border: "3px solid transparent",
-                  borderTopColor: "#29ABE2",
-                  borderRightColor: "#7DD3FC",
-                  animation: "spin 1.4s linear infinite",
-                }} />
-                {/* Inner icon */}
-                <div style={{
-                  width: "64px", height: "64px", borderRadius: "50%",
-                  background: "linear-gradient(135deg, #E0F4FD, #C8E6F5)",
+                  width: "90px", height: "90px", borderRadius: "50%",
+                  background: "#ECFDF5", border: "3px solid #10B981",
                   display: "flex", alignItems: "center", justifyContent: "center",
-                  fontSize: "28px",
-                  transform: pulse ? "scale(1.08)" : "scale(1)",
-                  transition: "transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)",
+                  fontSize: "40px", boxShadow: "0 0 20px rgba(16,185,129,0.25)",
                 }}>
-                  ⏳
+                  ✅
                 </div>
-              </div>
+              ) : studentStatus === "kicked" ? (
+                <div style={{
+                  width: "90px", height: "90px", borderRadius: "50%",
+                  background: "#FEF2F2", border: "3px solid #EF4444",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: "40px", boxShadow: "0 0 20px rgba(239,68,68,0.25)",
+                }}>
+                  🚫
+                </div>
+              ) : (
+                <div style={{
+                  width: "90px", height: "90px", borderRadius: "50%",
+                  border: "3px solid #C8E6F5",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  position: "relative",
+                }}>
+                  <div style={{
+                    position: "absolute", inset: "-3px", borderRadius: "50%",
+                    border: "3px solid transparent",
+                    borderTopColor: "#29ABE2",
+                    borderRightColor: "#7DD3FC",
+                    animation: "spin 1.4s linear infinite",
+                  }} />
+                  <div style={{
+                    width: "60px", height: "60px", borderRadius: "50%",
+                    background: "linear-gradient(135deg, #E0F4FD, #C8E6F5)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: "26px",
+                  }}>
+                    ⏳
+                  </div>
+                </div>
+              )}
             </div>
 
-            <h1 style={{ fontSize: "22px", fontWeight: 700, color: "#1C303D", marginBottom: "10px", letterSpacing: "-0.02em" }}>
-              Menunggu ujian dimulai{dots}
-            </h1>
-            <p style={{ color: "#6E8EA0", fontSize: "14px", lineHeight: 1.7, marginBottom: "28px" }}>
-              Jangan tutup atau reload halaman ini.<br />
-              Ujian akan dimulai secara otomatis saat pengawas mengaktifkannya.
-            </p>
+            {studentStatus === "accepted" ? (
+              <>
+                <h1 style={{ fontSize: "21px", fontWeight: 700, color: "#065F46", marginBottom: "8px" }}>
+                  Kamu Telah Diterima!
+                </h1>
+                <p style={{ color: "#047857", fontSize: "14px", lineHeight: 1.6, marginBottom: "24px" }}>
+                  {statusMessage}<br />
+                  <span style={{ fontSize: "13px", color: "#6E8EA0" }}>Halaman akan otomatis beralih saat pengawas menekan Mulai Ujian.</span>
+                </p>
+              </>
+            ) : studentStatus === "kicked" ? (
+              <>
+                <h1 style={{ fontSize: "21px", fontWeight: 700, color: "#991B1B", marginBottom: "8px" }}>
+                  Dikeluarkan dari Ujian
+                </h1>
+                <p style={{ color: "#DC2626", fontSize: "14px", lineHeight: 1.6, marginBottom: "12px" }}>
+                  Alasan: <strong>{kickReason || "Dikeluarkan oleh pengawas"}</strong>
+                </p>
+                <p style={{ color: "#6E8EA0", fontSize: "12px", marginBottom: "24px" }}>
+                  Mengalihkan kembali ke halaman utama...
+                </p>
+              </>
+            ) : (
+              <>
+                <h1 style={{ fontSize: "21px", fontWeight: 700, color: "#1C303D", marginBottom: "8px" }}>
+                  Menunggu Pengawas
+                </h1>
+                <p style={{ color: "#6E8EA0", fontSize: "14px", lineHeight: 1.6, marginBottom: "24px" }}>
+                  Pengawas sedang meninjau peserta di ruang tunggu.<br />
+                  Mohon tetap di halaman ini.
+                </p>
+              </>
+            )}
 
             {/* Participant info */}
             <div style={{
               background: "#F8FCFF",
               border: "1.5px solid #D9E9F2",
               borderRadius: "14px",
-              padding: "18px 20px",
+              padding: "16px 18px",
               textAlign: "left",
-              marginBottom: "20px",
+              marginBottom: "18px",
             }}>
-              <div style={{ fontSize: "10px", color: "#98B4C4", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "14px" }}>
-                Info Peserta
+              <div style={{ fontSize: "10px", color: "#98B4C4", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "12px" }}>
+                Info Peserta &amp; Ujian
               </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "9px" }}>
                 {[
                   { label: "Nama", value: participant.name },
                   { label: "NISN", value: participant.nisn, mono: true },
                   { label: "Ujian", value: participant.exam },
                   { label: "Kode Akses", value: participant.accessCode || "-", mono: true, badge: true },
-                ].map(({ label, value, mono, badge }) => (
+                  {
+                    label: "Status Ruang Tunggu",
+                    value: studentStatus === "accepted" ? "Diterima" : studentStatus === "kicked" ? "Dikeluarkan" : "Menunggu Konfirmasi",
+                    badge: true,
+                    statusBadge: studentStatus,
+                  },
+                ].map(({ label, value, mono, badge, statusBadge }) => (
                   <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" }}>
                     <span style={{ fontSize: "13px", color: "#6E8EA0", flexShrink: 0 }}>{label}</span>
                     {badge ? (
                       <span style={{
-                        fontSize: "12px", fontWeight: 700,
-                        background: "#E0F4FD", color: "#0284C7",
+                        fontSize: "11px", fontWeight: 700,
+                        background: statusBadge === "accepted" ? "#ECFDF5" : statusBadge === "kicked" ? "#FEF2F2" : "#E0F4FD",
+                        color: statusBadge === "accepted" ? "#059669" : statusBadge === "kicked" ? "#DC2626" : "#0284C7",
                         padding: "2px 10px", borderRadius: "999px",
-                        fontFamily: "monospace", letterSpacing: "0.08em",
+                        fontFamily: mono ? "monospace" : undefined, letterSpacing: "0.04em",
                       }}>{value}</span>
                     ) : (
                       <span style={{ fontSize: "13px", fontWeight: 600, color: "#1C303D", textAlign: "right", fontFamily: mono ? "monospace" : undefined }}>{value}</span>
@@ -223,17 +377,17 @@ export default function WaitingPage() {
                 display: "flex", flexDirection: "column", alignItems: "center", gap: "2px",
               }}>
                 <span style={{ fontSize: "18px", fontWeight: 700, color: "#29ABE2" }}>{formatWaited(secondsWaited)}</span>
-                <span style={{ fontSize: "11px", color: "#6E8EA0" }}>Menunggu</span>
+                <span style={{ fontSize: "11px", color: "#6E8EA0" }}>Waktu Tunggu</span>
               </div>
             </div>
 
             {/* Connection status */}
             <div style={{
               display: "inline-flex", alignItems: "center", gap: "8px",
-              padding: "8px 16px", borderRadius: "999px",
+              padding: "7px 16px", borderRadius: "999px",
               background: connConfig.bg,
               color: connConfig.color,
-              fontSize: "13px", fontWeight: 500,
+              fontSize: "12px", fontWeight: 500,
               transition: "all 0.3s",
             }}>
               <span style={{
@@ -244,10 +398,6 @@ export default function WaitingPage() {
               }} />
               {connConfig.text}
             </div>
-
-            <p style={{ marginTop: "14px", fontSize: "11px", color: "#C8E6F5" }}>
-              Demo: ujian akan dimulai otomatis dalam beberapa detik
-            </p>
           </div>
         </div>
 
@@ -264,7 +414,7 @@ export default function WaitingPage() {
         }}>
           <span style={{ fontSize: "16px", flexShrink: 0 }}>⚠️</span>
           <p style={{ fontSize: "12px", color: "#92400E", lineHeight: 1.6, margin: 0 }}>
-            Pastikan jaringan internetmu stabil dan browser dalam kondisi terbuka penuh. Keluar dari halaman ini setelah ujian dimulai akan dicatat sebagai pelanggaran.
+            Pastikan jaringan internetmu stabil dan browser dalam kondisi terbuka penuh. Jangan membuka aplikasi lain selama menunggu.
           </p>
         </div>
       </div>

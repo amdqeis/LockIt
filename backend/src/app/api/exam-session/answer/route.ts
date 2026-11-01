@@ -8,11 +8,12 @@ import { AppError } from "@/lib/errors";
 
 const answerSchema = z.object({
   questionId: z.string().uuid("ID soal tidak valid"),
-  // MED-04: Hanya terima opsi jawaban yang valid (A-F) atau null untuk clear jawaban
   selectedOption: z
     .string()
-    .regex(/^[A-Fa-f]$/, "Opsi jawaban harus berupa satu huruf antara A hingga F")
-    .nullable(),
+    .trim()
+    .max(50, "Opsi jawaban terlalu panjang")
+    .nullable()
+    .optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -20,10 +21,10 @@ export async function POST(req: NextRequest) {
     const { student } = await authenticateStudent(req);
     const exam = student.exam;
 
-    // Rate limiting: 30 requests per minute per student
+    // Rate limiting: 60 requests per minute per student
     const rateLimit = checkRateLimit(student.id, {
       windowMs: 60 * 1000,
-      max: 30,
+      max: 60,
       keyPrefix: "exam:answer",
     });
 
@@ -61,6 +62,15 @@ export async function POST(req: NextRequest) {
 
     const { questionId, selectedOption } = parsed.data;
 
+    const cleanOption =
+      selectedOption && selectedOption.trim().length > 0
+        ? selectedOption.trim().toUpperCase()
+        : null;
+
+    if (cleanOption && !/^([A-Z])(,[A-Z])*$/.test(cleanOption)) {
+      return errorResponse("VALIDATION_ERROR", "Format opsi jawaban harus huruf tunggal atau huruf dipisah koma (mis. A,C)", 400);
+    }
+
     // Verify question belongs to this exam
     const question = await prisma.question.findUnique({
       where: { id: questionId },
@@ -79,13 +89,13 @@ export async function POST(req: NextRequest) {
         },
       },
       update: {
-        selectedOption: selectedOption ? selectedOption.toUpperCase() : null,
+        selectedOption: cleanOption,
         updatedAt: now,
       },
       create: {
         studentId: student.id,
         questionId,
-        selectedOption: selectedOption ? selectedOption.toUpperCase() : null,
+        selectedOption: cleanOption,
         answeredAt: now,
       },
     });

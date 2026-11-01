@@ -36,12 +36,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     let disconnectedCount = 0;
     let submittedCount = 0;
     let waitingCount = 0;
+    let acceptedCount = 0;
 
     for (const group of studentStatusCounts) {
       if (group.status === "active") onlineCount = group._count.id;
       else if (group.status === "disconnected") disconnectedCount = group._count.id;
       else if (group.status === "submitted") submittedCount = group._count.id;
       else if (group.status === "waiting") waitingCount = group._count.id;
+      else if (group.status === "accepted") acceptedCount = group._count.id;
     }
 
     // Total violations count across all students
@@ -59,11 +61,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       },
     });
 
-    // Recent 10 proctoring events
+    // Recent 50 proctoring events
     const recentEvents = await prisma.proctoringEvent.findMany({
       where: { examId: id },
       orderBy: { timestamp: "desc" },
-      take: 10,
+      take: 50,
       include: {
         student: {
           select: {
@@ -91,6 +93,24 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       },
     });
 
+    // Peserta yang sedang berada di lobby (waiting atau accepted)
+    const lobbyStudents = await prisma.student.findMany({
+      where: {
+        examId: id,
+        status: { in: ["waiting", "accepted"] },
+      },
+      orderBy: { joinedAt: "asc" },
+      select: {
+        id: true,
+        name: true,
+        nisn: true,
+        status: true,
+        joinedAt: true,
+        acceptedAt: true,
+        ipAddress: true,
+      },
+    });
+
     return successResponse({
       exam: {
         id: exam.id,
@@ -108,9 +128,20 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         disconnectedCount,
         submittedCount,
         waitingCount,
+        acceptedCount,
+        lobbyCount: waitingCount + acceptedCount,
         lockedCount,
         totalViolations,
       },
+      lobbyStudents: lobbyStudents.map((s) => ({
+        id: s.id,
+        name: s.name,
+        nisn: s.nisn,
+        status: s.status,
+        joinedAt: s.joinedAt.toISOString(),
+        acceptedAt: s.acceptedAt ? s.acceptedAt.toISOString() : null,
+        ipAddress: s.ipAddress,
+      })),
       recentEvents: recentEvents.map((ev) => ({
         id: ev.id,
         studentId: ev.studentId,

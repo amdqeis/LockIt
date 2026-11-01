@@ -105,6 +105,7 @@ export interface ValidateExamResponse {
 }
 
 export interface JoinExamResponse {
+  nextStep?: "session" | "waiting_room" | string;
   student: {
     id: string;
     name: string;
@@ -268,4 +269,44 @@ export async function submitStudentExam() {
   }>("/api/exam-session/submit", {
     method: "POST",
   });
+}
+
+export interface LobbyParticipant {
+  id: string;
+  name: string;
+  nisn: string;
+  status: string;
+  joinedAt: string;
+  isSelf?: boolean;
+}
+
+export interface LobbyData {
+  currentStudent: {
+    id: string;
+    name: string;
+    nisn: string;
+    status: string;
+    kickReason: string | null;
+  };
+  exam: {
+    id: string;
+    title: string;
+    accessCode: string;
+    durationMinutes: number;
+    status: string;
+    questionCount: number;
+    startTime: string | null;
+    endTime: string | null;
+    serverTime: string;
+  };
+  participants: LobbyParticipant[];
+  totalParticipants: number;
+  canStartExam: boolean;
+}
+
+/**
+ * Fetch current exam lobby status and list of participants
+ */
+export async function fetchLobbyStatus() {
+  return apiFetch<LobbyData>("/api/exam-session/lobby");
 }

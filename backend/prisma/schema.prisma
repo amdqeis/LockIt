@@ -71,7 +71,7 @@ model Exam {
   accessCode      String     @unique @map("access_code")
   durationMinutes Int        @map("duration_minutes")
   status          ExamStatus @default(draft)
-  violationPolicy Json       @map("violation_policy")
+  violationPolicy Json       @default("{\"max_violations\": 3, \"action\": \"lock\", \"notify_student\": false}") @map("violation_policy")
   settings        Json       @default("{}")
   startTime       DateTime?  @map("start_time") @db.Timestamptz
   endTime         DateTime?  @map("end_time") @db.Timestamptz
@@ -113,9 +113,11 @@ model Question {
 
 enum StudentStatus {
   waiting
+  accepted
   active
   submitted
   disconnected
+  kicked
 }
 
 model Student {
@@ -132,6 +134,9 @@ model Student {
   ipAddress         String?       @map("ip_address")
   userAgent         String?       @map("user_agent")
   joinedAt          DateTime      @default(now()) @map("joined_at") @db.Timestamptz
+  acceptedAt        DateTime?     @map("accepted_at") @db.Timestamptz
+  kickedAt          DateTime?     @map("kicked_at") @db.Timestamptz
+  kickReason        String?       @map("kick_reason")
   submittedAt       DateTime?     @map("submitted_at") @db.Timestamptz
 
   exam             Exam              @relation(fields: [examId], references: [id], onDelete: Restrict)
@@ -176,6 +181,8 @@ enum EventType {
   devtools
   reconnect
   heartbeat_lost
+  ip_change
+  screenshot
 }
 
 model ProctoringEvent {

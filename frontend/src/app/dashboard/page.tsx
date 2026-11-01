@@ -83,7 +83,7 @@ function DashboardContent() {
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [openMenuExamId, setOpenMenuExamId] = useState<string | null>(null);
-  const [confirmModal, setConfirmModal] = useState<{ type: "delete" | "archive" | "restore"; exam: ExamItem } | null>(null);
+  const [confirmModal, setConfirmModal] = useState<{ type: "delete" | "archive" | "restore" | "duplicate"; exam: ExamItem } | null>(null);
   const [liveCountdown, setLiveCountdown] = useState<number>(1440);
   const [examsList, setExamsList] = useState<ExamItem[]>([]);
   const [loadingExams, setLoadingExams] = useState(true);
@@ -1401,6 +1401,15 @@ function DashboardContent() {
                               >
                                 Detail
                               </Link>
+                              <button
+                                type="button"
+                                className="action-btn-outline"
+                                style={{ height: "32px", padding: "0 8px", fontSize: "12px" }}
+                                title="Duplikat Ujian"
+                                onClick={() => setConfirmModal({ type: "duplicate", exam })}
+                              >
+                                📋
+                              </button>
                             </div>
                           </td>
                         </tr>
@@ -1463,6 +1472,8 @@ function DashboardContent() {
                   ? "Hapus ujian?"
                   : confirmModal.type === "archive"
                   ? "Arsipkan ujian?"
+                  : confirmModal.type === "duplicate"
+                  ? "Duplikat ujian?"
                   : "Pulihkan ujian?"}
               </h3>
               <p
@@ -1477,6 +1488,8 @@ function DashboardContent() {
                   ? `Ujian "${confirmModal.exam.title}" akan dihapus permanen. Tindakan ini tidak bisa dibatalkan.`
                   : confirmModal.type === "archive"
                   ? `Ujian "${confirmModal.exam.title}" akan dipindahkan ke arsip.`
+                  : confirmModal.type === "duplicate"
+                  ? `Salinan baru dari ujian "${confirmModal.exam.title}" beserta seluruh butir soalnya akan dibuat berstatus draft.`
                   : `Ujian "${confirmModal.exam.title}" akan dipulihkan ke status draft.`}
               </p>
               <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
@@ -1525,6 +1538,16 @@ function DashboardContent() {
                       } else {
                         showToast(res.error?.message || "Gagal memulihkan ujian");
                       }
+                    } else if (type === "duplicate") {
+                      const res = await apiFetch<any>(`/api/exams/${exam.id}/duplicate`, {
+                        method: "POST",
+                      });
+                      if (res.success && res.data?.exam) {
+                        showToast(`Ujian berhasil diduplikasi: "${res.data.exam.title}"`);
+                        fetchExams();
+                      } else {
+                        showToast(res.error?.message || "Gagal menduplikasi ujian");
+                      }
                     }
                     setConfirmModal(null);
                   }}
@@ -1533,6 +1556,8 @@ function DashboardContent() {
                     ? "Ya, hapus"
                     : confirmModal.type === "archive"
                     ? "Ya, arsipkan"
+                    : confirmModal.type === "duplicate"
+                    ? "Ya, duplikat"
                     : "Ya, pulihkan"}
                 </button>
               </div>
@@ -1680,7 +1705,7 @@ function ExamCard({
   isMenuOpen: boolean;
   onToggleMenu: (id: string) => void;
   onCopyCode: (code: string) => void;
-  onActionConfirm: (type: "delete" | "archive" | "restore", exam: ExamItem) => void;
+  onActionConfirm: (type: "delete" | "archive" | "restore" | "duplicate", exam: ExamItem) => void;
 }) {
   const isArchived = exam.status === "archived";
   const showAccessCode = exam.status === "active" || exam.status === "scheduled";
@@ -1728,9 +1753,12 @@ function ExamCard({
                 type="button"
                 className="user-menu-item"
                 role="menuitem"
-                onClick={() => onToggleMenu(exam.id)}
+                onClick={() => {
+                  onToggleMenu(exam.id);
+                  onActionConfirm("duplicate", exam);
+                }}
               >
-                Duplikat
+                📋 Duplikat
               </button>
               {exam.status === "archived" ? (
                 <button

@@ -48,9 +48,6 @@ export async function GET(req: NextRequest) {
       return errorResponse("EXAM_NOT_FOUND", "Kode ujian tidak ditemukan", 404);
     }
 
-    if (exam.status === "draft") {
-      return errorResponse("EXAM_NOT_STARTED", "Ujian belum dibuka oleh pengawas", 409);
-    }
 
     if (exam.status === "ended" || exam.status === "archived") {
       return errorResponse("EXAM_ENDED", "Ujian telah berakhir", 410);

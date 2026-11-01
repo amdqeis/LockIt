@@ -7,6 +7,8 @@ import { apiFetch } from "@/lib/apiClient";
 import DashboardShell from "@/app/components/DashboardShell";
 import { SkeletonBase, MotionFade } from "@/app/components/skeleton";
 import { getStoredQuestionBanks, getStoredQuestions, QuestionBank } from "@/lib/questionBank";
+import { io } from "socket.io-client";
+import { useTeacherAuth } from "@/contexts/AuthContext";
 
 type ExamStatus = "draft" | "active" | "ended" | "archived";
 
@@ -28,6 +30,7 @@ function ExamDetailPage() {
   const router = useRouter();
   const params = useParams();
   const examId = (params?.id as string) || "";
+  const { accessToken } = useTeacherAuth();
   const [exam, setExam] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [confirmType, setConfirmType] = useState<string | null>(null);
@@ -40,6 +43,13 @@ function ExamDetailPage() {
   const [attaching, setAttaching] = useState(false);
   const [previewQuestions, setPreviewQuestions] = useState<any[]>([]);
   const [loadingPreview, setLoadingPreview] = useState(false);
+
+  // Ruang Tunggu (Waiting Room) state
+  const [students, setStudents] = useState<any[]>([]);
+  const [loadingStudents, setLoadingStudents] = useState(false);
+  const [kickModalStudent, setKickModalStudent] = useState<any | null>(null);
+  const [kickReasonInput, setKickReasonInput] = useState("Bukan murid kelas ini");
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   useEffect(() => {
     setAllBanks(getStoredQuestionBanks());
@@ -96,6 +106,142 @@ function ExamDetailPage() {
   useEffect(() => {
     fetchExamDetail();
   }, [fetchExamDetail]);
+
+  const fetchStudents = useCallback(async () => {
+    if (!examId) return;
+    try {
+      const res = await apiFetch<any>(`/api/exams/${examId}/students?pageSize=200`);
+      if (res.success && Array.isArray(res.data?.students)) {
+        setStudents(res.data.students);
+      }
+    } catch {
+      // ignore
+    }
+  }, [examId]);
+
+  useEffect(() => {
+    fetchStudents();
+    const interval = setInterval(fetchStudents, 4000);
+    return () => clearInterval(interval);
+  }, [fetchStudents]);
+
+  useEffect(() => {
+    if (!examId || !accessToken) return;
+    const socket = io("/teacher-dashboard", {
+      auth: { token: accessToken },
+      transports: ["websocket", "polling"],
+    });
+
+    socket.on("connect", () => {
+      socket.emit("join_exam_dashboard", { examId });
+    });
+
+    socket.on("student_joined_waiting", () => {
+      fetchStudents();
+    });
+
+    socket.on("student_status_changed", () => {
+      fetchStudents();
+    });
+
+    socket.on("student_presence", () => {
+      fetchStudents();
+    });
+
+    socket.on("student_accepted", () => {
+      fetchStudents();
+    });
+
+    socket.on("student_kicked", () => {
+      fetchStudents();
+    });
+
+    return () => {
+      socket.emit("leave_exam_dashboard", { examId });
+      socket.disconnect();
+    };
+  }, [examId, accessToken, fetchStudents]);
+
+  const handleAcceptStudent = async (sid: string) => {
+    setActionLoading(sid);
+    try {
+      const res = await apiFetch<any>(`/api/exams/${examId}/students/${sid}/accept`, {
+        method: "POST",
+      });
+      if (res.success) {
+        showToast("success", "Siswa berhasil disetujui masuk ujian");
+        fetchStudents();
+      } else {
+        showToast("error", res.error?.message || "Gagal menyetujui siswa");
+      }
+    } catch {
+      showToast("error", "Terjadi kesalahan jaringan");
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleAcceptAll = async () => {
+    setActionLoading("accept-all");
+    try {
+      const res = await apiFetch<any>(`/api/exams/${examId}/students/accept-all`, {
+        method: "POST",
+      });
+      if (res.success) {
+        showToast("success", `Berhasil menyetujui ${res.data?.acceptedCount ?? "semua"} siswa`);
+        fetchStudents();
+      } else {
+        showToast("error", res.error?.message || "Gagal menyetujui semua siswa");
+      }
+    } catch {
+      showToast("error", "Terjadi kesalahan jaringan");
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleStartStudent = async (sid: string) => {
+    setActionLoading(sid);
+    try {
+      const res = await apiFetch<any>(`/api/exams/${examId}/students/${sid}/start`, {
+        method: "POST",
+      });
+      if (res.success) {
+        showToast("success", res.data?.message || "Siswa berhasil dimulai ujiannya");
+        fetchExamDetail();
+        fetchStudents();
+      } else {
+        showToast("error", res.error?.message || "Gagal memulai ujian peserta");
+      }
+    } catch {
+      showToast("error", "Terjadi kesalahan jaringan");
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleKickStudent = async () => {
+    if (!kickModalStudent) return;
+    const sid = kickModalStudent.id;
+    setActionLoading(sid);
+    try {
+      const res = await apiFetch<any>(`/api/exams/${examId}/students/${sid}/kick`, {
+        method: "POST",
+        body: JSON.stringify({ reason: kickReasonInput || "Bukan murid kelas ini" }),
+      });
+      if (res.success) {
+        showToast("success", `Siswa ${kickModalStudent.name} dikeluarkan`);
+        setKickModalStudent(null);
+        fetchStudents();
+      } else {
+        showToast("error", res.error?.message || "Gagal mengeluarkan siswa");
+      }
+    } catch {
+      showToast("error", "Terjadi kesalahan jaringan");
+    } finally {
+      setActionLoading(null);
+    }
+  };
 
   const handleCopy = () => {
     if (!exam) return;
@@ -186,13 +332,19 @@ function ExamDetailPage() {
         }
 
         setConfirmType(null);
-        const res = await apiFetch<any>(`/api/exams/${exam.id}/status`, {
-          method: "PUT",
-          body: JSON.stringify({ status: "active" }),
+        let res = await apiFetch<any>(`/api/exams/${exam.id}/start`, {
+          method: "POST",
         });
+        if (!res.success) {
+          res = await apiFetch<any>(`/api/exams/${exam.id}/status`, {
+            method: "PUT",
+            body: JSON.stringify({ status: "active" }),
+          });
+        }
         if (res.success) {
-          showToast("success", "Ujian berhasil dimulai!");
+          showToast("success", "Ujian berhasil dimulai! Semua peserta yang diterima kini dapat mengerjakan.");
           fetchExamDetail();
+          fetchStudents();
         } else {
           showToast("error", res.error?.message || "Gagal memulai ujian (pastikan ujian memiliki soal)");
         }
@@ -232,6 +384,19 @@ function ExamDetailPage() {
         } else {
           showToast("error", res.error?.message || "Gagal memperbarui kode akses");
         }
+      } else if (type === "duplicate") {
+        setConfirmType(null);
+        const res = await apiFetch<any>(`/api/exams/${exam.id}/duplicate`, {
+          method: "POST",
+        });
+        if (res.success && res.data?.exam?.id) {
+          showToast("success", `Ujian berhasil diduplikasi sebagai "${res.data.exam.title}"!`);
+          setTimeout(() => {
+            router.push(`/dashboard/exams/${res.data.exam.id}`);
+          }, 1000);
+        } else {
+          showToast("error", res.error?.message || "Gagal menduplikasi ujian");
+        }
       }
     } catch {
       showToast("error", "Terjadi kesalahan jaringan.");
@@ -260,6 +425,11 @@ function ExamDetailPage() {
 
   const sc = STATUS_COLORS[exam.status as ExamStatus] || STATUS_COLORS.draft;
 
+  const waitingCount = students.filter(s => s.status === "waiting").length;
+  const acceptedCount = students.filter(s => s.status === "accepted").length;
+  const activeCount = students.filter(s => s.status === "active").length;
+  const kickedCount = students.filter(s => s.status === "kicked").length;
+
   const actionButtons: Record<ExamStatus, React.ReactNode> = {
     draft: (
       <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
@@ -269,6 +439,9 @@ function ExamDetailPage() {
         <Link href={`/dashboard/exams/${exam.id}/edit`} className="btn btn-secondary btn-md">
           ✏️ Edit Ujian
         </Link>
+        <button className="btn btn-secondary btn-md" onClick={() => setConfirmType("duplicate")}>
+          📋 Duplikat
+        </button>
         {exam.questionCount === 0 && (
           <button
             className="btn btn-secondary btn-md"
@@ -290,9 +463,21 @@ function ExamDetailPage() {
     ),
     active: (
       <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
+        {(waitingCount > 0 || acceptedCount > 0) && (
+          <button
+            className="btn btn-primary btn-md"
+            onClick={() => setConfirmType("start")}
+            style={{ background: "#16A34A", boxShadow: "0 2px 6px rgba(22, 163, 74, 0.3)" }}
+          >
+            🚀 Mulai Ujian untuk Peserta Baru ({waitingCount + acceptedCount})
+          </button>
+        )}
         <Link href={`/dashboard/exams/${exam.id}/monitor`} className="btn btn-primary btn-md">
           📊 Monitor Live
         </Link>
+        <button className="btn btn-secondary btn-md" onClick={() => setConfirmType("duplicate")}>
+          📋 Duplikat
+        </button>
         <button className="btn btn-danger btn-md" onClick={() => setConfirmType("end")}>
           ⛔ Akhiri Ujian
         </button>
@@ -303,6 +488,9 @@ function ExamDetailPage() {
         <Link href={`/dashboard/exams/${exam.id}/results`} className="btn btn-primary btn-md">
           🏆 Lihat Hasil
         </Link>
+        <button className="btn btn-secondary btn-md" onClick={() => setConfirmType("duplicate")}>
+          📋 Duplikat
+        </button>
         <button className="btn btn-secondary btn-md" onClick={() => showToast("success", "File CSV berhasil didownload")}>
           📥 Export CSV
         </button>
@@ -316,6 +504,9 @@ function ExamDetailPage() {
         <Link href={`/dashboard/exams/${exam.id}/results`} className="btn btn-secondary btn-md">
           🏆 Lihat Hasil
         </Link>
+        <button className="btn btn-secondary btn-md" onClick={() => setConfirmType("duplicate")}>
+          📋 Duplikat
+        </button>
       </div>
     ),
   };
@@ -444,6 +635,328 @@ function ExamDetailPage() {
               <div style={{ fontSize: "13px", fontWeight: 600, color: "#9CA3AF", marginBottom: "16px", textTransform: "uppercase", letterSpacing: "0.06em" }}>Aksi Ujian</div>
               {actionButtons[exam.status as ExamStatus]}
             </div>
+
+            {/* Ruang Tunggu Peserta (Waiting Room) */}
+            <div style={{ background: "white", borderRadius: "16px", border: "1px solid #E9ECF0", overflow: "hidden", boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
+              <div style={{
+                padding: "20px 24px",
+                borderBottom: "1px solid #F1F5F9",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                flexWrap: "wrap",
+                gap: "12px",
+                background: "#FAFBFD"
+              }}>
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    <h2 style={{ fontSize: "16px", fontWeight: 700, color: "#111827", margin: 0 }}>
+                      🚪 Ruang Tunggu Peserta (Waiting Room)
+                    </h2>
+                    <span style={{ fontSize: "12px", background: "#EFF6FF", color: "#1D4ED8", padding: "2px 8px", borderRadius: "100px", fontWeight: 600 }}>
+                      {students.length} Total
+                    </span>
+                  </div>
+                  <div style={{ color: "#6B7280", fontSize: "13px", marginTop: "4px" }}>
+                    Peserta menunggu persetujuan guru sebelum ujian dimulai. Anda dapat menerima satu per satu atau sekaligus.
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                  <button
+                    onClick={() => fetchStudents()}
+                    style={{
+                      background: "white", border: "1px solid #D1D5DB", color: "#374151",
+                      padding: "6px 12px", borderRadius: "8px", fontSize: "12px", fontWeight: 500,
+                      cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px"
+                    }}
+                  >
+                    🔄 Refresh
+                  </button>
+                  {waitingCount > 0 && (
+                    <button
+                      onClick={handleAcceptAll}
+                      disabled={actionLoading === "accept-all"}
+                      style={{
+                        background: "#16A34A", color: "white", border: "none",
+                        padding: "7px 14px", borderRadius: "8px", fontSize: "12px", fontWeight: 600,
+                        cursor: actionLoading === "accept-all" ? "wait" : "pointer",
+                        display: "inline-flex", alignItems: "center", gap: "6px",
+                        boxShadow: "0 1px 3px rgba(22, 163, 74, 0.25)"
+                      }}
+                    >
+                      {actionLoading === "accept-all" ? "Memproses..." : `✅ Terima Semua (${waitingCount})`}
+                    </button>
+                  )}
+                  {(exam.status === "draft" || waitingCount > 0 || acceptedCount > 0) && (
+                    <button
+                      onClick={() => setConfirmType("start")}
+                      style={{
+                        background: "#16A34A", color: "white", border: "none",
+                        padding: "7px 18px", borderRadius: "8px", fontSize: "13px", fontWeight: 700,
+                        cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px",
+                        boxShadow: "0 2px 8px rgba(22, 163, 74, 0.35)"
+                      }}
+                    >
+                      🚀 Mulai Ujian Sekarang ({acceptedCount > 0 ? `${acceptedCount} Siswa Siap` : `${students.filter(s => s.status !== "kicked").length} Peserta`})
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Status Counters */}
+              <div style={{
+                display: "flex", gap: "10px", padding: "12px 24px",
+                borderBottom: "1px solid #F1F5F9", background: "white", flexWrap: "wrap", fontSize: "12px"
+              }}>
+                <span style={{ color: "#B45309", fontWeight: 600, background: "#FFFBEB", padding: "4px 10px", borderRadius: "6px", border: "1px solid #FDE68A" }}>
+                  ⏳ Menunggu: {waitingCount}
+                </span>
+                <span style={{ color: "#15803D", fontWeight: 600, background: "#F0FDF4", padding: "4px 10px", borderRadius: "6px", border: "1px solid #BBF7D0" }}>
+                  ✅ Diterima: {acceptedCount}
+                </span>
+                {kickedCount > 0 && (
+                  <span style={{ color: "#B91C1C", fontWeight: 600, background: "#FEF2F2", padding: "4px 10px", borderRadius: "6px", border: "1px solid #FECACA" }}>
+                    🚫 Dikeluarkan: {kickedCount}
+                  </span>
+                )}
+              </div>
+
+              {/* Action Banner saat ada siswa yang sudah diterima di lobby */}
+              {acceptedCount > 0 && (
+                <div style={{
+                  padding: "14px 24px",
+                  background: "#F0FDF4",
+                  borderBottom: "1px solid #BBF7D0",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  flexWrap: "wrap",
+                  gap: "12px",
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    <span style={{ fontSize: "22px" }}>🎉</span>
+                    <div>
+                      <div style={{ fontSize: "13px", fontWeight: 700, color: "#166534" }}>
+                        Ada {acceptedCount} siswa yang telah diterima di lobby dan siap mengerjakan!
+                      </div>
+                      <div style={{ fontSize: "12px", color: "#15803D", marginTop: "2px" }}>
+                        Klik tombol di sebelah kanan untuk memperbolehkan mereka serentak mulai mengerjakan soal.
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setConfirmType("start")}
+                    style={{
+                      background: "#16A34A",
+                      color: "white",
+                      border: "none",
+                      padding: "8px 20px",
+                      borderRadius: "8px",
+                      fontSize: "13px",
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      boxShadow: "0 2px 8px rgba(22, 163, 74, 0.35)",
+                    }}
+                  >
+                    🚀 Mulai Ujian untuk {acceptedCount} Siswa
+                  </button>
+                </div>
+              )}
+
+              {/* List of Students */}
+              <div style={{ maxHeight: "400px", overflowY: "auto" }}>
+                {students.length === 0 ? (
+                  <div style={{ padding: "36px 24px", textAlign: "center", color: "#6B7280" }}>
+                    <div style={{ fontSize: "32px", marginBottom: "8px" }}>👥</div>
+                    <div style={{ fontWeight: 600, color: "#111827", fontSize: "14px" }}>Belum Ada Siswa di Ruang Tunggu</div>
+                    <div style={{ fontSize: "13px", color: "#9CA3AF", marginTop: "4px" }}>
+                      Siswa akan muncul di sini secara real-time setelah memasukkan kode akses <strong>{exam.accessCode}</strong>.
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column" }}>
+                    {students.map((s: any, idx: number) => {
+                      const isWaiting = s.status === "waiting";
+                      const isAccepted = s.status === "accepted";
+                      const isKicked = s.status === "kicked";
+                      const isActive = s.status === "active";
+                      const isSubmitted = s.status === "submitted";
+
+                      return (
+                        <div
+                          key={s.id || idx}
+                          style={{
+                            padding: "14px 20px",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: "12px",
+                            borderBottom: idx < students.length - 1 ? "1px solid #F3F4F6" : "none",
+                            background: isWaiting ? "#FFFDF5" : isKicked ? "#FFF5F5" : "white",
+                            transition: "background 0.15s ease"
+                          }}
+                        >
+                          <div style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0 }}>
+                            <div style={{
+                              width: "36px", height: "36px", borderRadius: "50%",
+                              background: isKicked ? "#FEE2E2" : isAccepted || isActive ? "#DCFCE7" : "#FEF3C7",
+                              color: isKicked ? "#DC2626" : isAccepted || isActive ? "#16A34A" : "#D97706",
+                              display: "flex", alignItems: "center", justifyContent: "center",
+                              fontWeight: 700, fontSize: "13px", flexShrink: 0
+                            }}>
+                              {(s.name || "??").substring(0, 2).toUpperCase()}
+                            </div>
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                <span style={{ fontWeight: 600, fontSize: "14px", color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                  {s.name}
+                                </span>
+                                {s.ipAddress && (
+                                  <span style={{ fontSize: "11px", color: "#6B7280", background: "#F3F4F6", padding: "1px 6px", borderRadius: "4px" }}>
+                                    🌐 {s.ipAddress}
+                                  </span>
+                                )}
+                              </div>
+                              <div style={{ fontSize: "12px", color: "#6B7280", marginTop: "2px" }}>
+                                NISN: <span style={{ fontFamily: "monospace", color: "#374151" }}>{s.nisn}</span>
+                                {s.kickReason && (
+                                  <span style={{ color: "#DC2626", marginLeft: "8px" }}>
+                                    (Alasan: {s.kickReason})
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
+                            {/* Status Tag */}
+                            {isWaiting && (
+                              <span style={{ fontSize: "11px", fontWeight: 600, background: "#FEF3C7", color: "#92400E", padding: "3px 8px", borderRadius: "6px" }}>
+                                ⏳ Menunggu
+                              </span>
+                            )}
+                            {isAccepted && (
+                              <span style={{ fontSize: "11px", fontWeight: 600, background: "#DCFCE7", color: "#166534", padding: "3px 8px", borderRadius: "6px" }}>
+                                ✅ Diterima
+                              </span>
+                            )}
+                            {isActive && (
+                              <span style={{ fontSize: "11px", fontWeight: 600, background: "#DCFCE7", color: "#166534", padding: "3px 8px", borderRadius: "6px" }}>
+                                🟢 Mengerjakan
+                              </span>
+                            )}
+                            {isSubmitted && (
+                              <span style={{ fontSize: "11px", fontWeight: 600, background: "#E0F2FE", color: "#0369A1", padding: "3px 8px", borderRadius: "6px" }}>
+                                🏁 Selesai
+                              </span>
+                            )}
+                            {isKicked && (
+                              <span style={{ fontSize: "11px", fontWeight: 600, background: "#FEE2E2", color: "#991B1B", padding: "3px 8px", borderRadius: "6px" }}>
+                                🚫 Dikeluarkan
+                              </span>
+                            )}
+
+                            {/* Action Buttons */}
+                            {isWaiting && (
+                              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                                <button
+                                  onClick={() => handleAcceptStudent(s.id)}
+                                  disabled={actionLoading === s.id}
+                                  style={{
+                                    background: "#16A34A", color: "white", border: "none",
+                                    padding: "5px 12px", borderRadius: "6px", fontSize: "12px", fontWeight: 600,
+                                    cursor: actionLoading === s.id ? "wait" : "pointer"
+                                  }}
+                                >
+                                  {actionLoading === s.id ? "..." : "Terima"}
+                                </button>
+                                <button
+                                  onClick={() => handleStartStudent(s.id)}
+                                  disabled={actionLoading === s.id}
+                                  style={{
+                                    background: "#1B76BF", color: "white", border: "none",
+                                    padding: "5px 12px", borderRadius: "6px", fontSize: "12px", fontWeight: 700,
+                                    cursor: actionLoading === s.id ? "wait" : "pointer",
+                                    display: "inline-flex", alignItems: "center", gap: "4px",
+                                    boxShadow: "0 1px 3px rgba(27, 118, 191, 0.25)"
+                                  }}
+                                >
+                                  {actionLoading === s.id ? "..." : "🚀 Mulai"}
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setKickModalStudent(s);
+                                    setKickReasonInput("Bukan murid kelas ini");
+                                  }}
+                                  disabled={actionLoading === s.id}
+                                  style={{
+                                    background: "white", color: "#DC2626", border: "1px solid #FECACA",
+                                    padding: "5px 10px", borderRadius: "6px", fontSize: "12px", fontWeight: 500,
+                                    cursor: "pointer"
+                                  }}
+                                >
+                                  Keluarkan
+                                </button>
+                              </div>
+                            )}
+
+                            {isAccepted && (
+                              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                                <button
+                                  onClick={() => handleStartStudent(s.id)}
+                                  disabled={actionLoading === s.id}
+                                  style={{
+                                    background: "#16A34A", color: "white", border: "none",
+                                    padding: "6px 14px", borderRadius: "6px", fontSize: "12px", fontWeight: 700,
+                                    cursor: actionLoading === s.id ? "wait" : "pointer",
+                                    display: "inline-flex", alignItems: "center", gap: "4px",
+                                    boxShadow: "0 1px 3px rgba(22, 163, 74, 0.25)"
+                                  }}
+                                >
+                                  {actionLoading === s.id ? "..." : "🚀 Mulai Ujian"}
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setKickModalStudent(s);
+                                    setKickReasonInput("Bukan murid kelas ini");
+                                  }}
+                                  disabled={actionLoading === s.id}
+                                  style={{
+                                    background: "white", color: "#DC2626", border: "1px solid #FECACA",
+                                    padding: "5px 10px", borderRadius: "6px", fontSize: "12px", fontWeight: 500,
+                                    cursor: "pointer"
+                                  }}
+                                >
+                                  Keluarkan
+                                </button>
+                              </div>
+                            )}
+
+                            {isKicked && (
+                              <button
+                                onClick={() => handleAcceptStudent(s.id)}
+                                disabled={actionLoading === s.id}
+                                style={{
+                                  background: "#F0FDF4", color: "#16A34A", border: "1px solid #BBF7D0",
+                                  padding: "5px 10px", borderRadius: "6px", fontSize: "12px", fontWeight: 500,
+                                  cursor: "pointer"
+                                }}
+                              >
+                                Terima Kembali
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
 
           {/* Right Column */}
@@ -532,6 +1045,7 @@ function ExamDetailPage() {
                  confirmType === "delete" ? "Hapus Ujian?" :
                  confirmType === "regen" ? "Generate Ulang Kode?" :
                  confirmType === "attach-bank" ? "Kaitkan Bank Soal ke Ujian" :
+                 confirmType === "duplicate" ? "Duplikat Ujian?" :
                  "Preview Soal Ujian"}
               </span>
               <button onClick={() => setConfirmType(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: "18px" }}>✕</button>
@@ -559,6 +1073,12 @@ function ExamDetailPage() {
               {confirmType === "regen" && (
                 <p style={{ color: "#6B7280", lineHeight: 1.7, fontSize: "15px" }}>
                   Kode lama akan tidak valid. Peserta yang belum join perlu menggunakan kode baru. Lanjutkan?
+                </p>
+              )}
+
+              {confirmType === "duplicate" && (
+                <p style={{ color: "#6B7280", lineHeight: 1.7, fontSize: "15px" }}>
+                  Salinan baru dari ujian <strong>&ldquo;{exam.title}&rdquo;</strong> beserta seluruh butir soalnya akan dibuat berstatus draft dengan kode akses baru. Lanjutkan?
                 </p>
               )}
 
@@ -691,9 +1211,86 @@ function ExamDetailPage() {
                   className={`btn ${confirmType === "end" || confirmType === "delete" ? "btn-danger" : "btn-primary"} btn-md`}
                   onClick={handleModalConfirm}
                 >
-                  {confirmType === "start" ? "Mulai Sekarang" : confirmType === "end" ? "Akhiri Ujian" : confirmType === "delete" ? "Hapus Permanen" : "Ya, Generate Ulang"}
+                  {confirmType === "start" ? "Mulai Sekarang" : confirmType === "end" ? "Akhiri Ujian" : confirmType === "delete" ? "Hapus Permanen" : confirmType === "duplicate" ? "Ya, Duplikat Ujian" : "Ya, Generate Ulang"}
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Kick Confirmation Modal */}
+      {kickModalStudent && (
+        <div style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1100,
+          display: "flex", alignItems: "center", justifyContent: "center", padding: "24px"
+        }} onClick={() => setKickModalStudent(null)}>
+          <div style={{
+            background: "white", borderRadius: "16px", maxWidth: "460px", width: "100%",
+            boxShadow: "0 20px 60px rgba(0,0,0,0.2)", overflow: "hidden"
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ padding: "20px 24px", borderBottom: "1px solid #F3F4F6", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span style={{ fontSize: "17px", fontWeight: 700, color: "#111827" }}>
+                Keluarkan Siswa dari Ujian?
+              </span>
+              <button onClick={() => setKickModalStudent(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: "18px" }}>✕</button>
+            </div>
+
+            <div style={{ padding: "20px 24px" }}>
+              <p style={{ color: "#4B5563", fontSize: "14px", lineHeight: 1.6, marginBottom: "16px" }}>
+                Anda akan mengeluarkan <strong>{kickModalStudent.name}</strong> (NISN: {kickModalStudent.nisn}) dari ruang tunggu. Siswa tidak akan dapat mengakses soal ujian ini.
+              </p>
+
+              <label style={{ fontSize: "12px", fontWeight: 600, color: "#374151", textTransform: "uppercase", letterSpacing: "0.05em", display: "block", marginBottom: "8px" }}>
+                Alasan Pengeluaran:
+              </label>
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "14px" }}>
+                {[
+                  "Bukan murid kelas ini",
+                  "Nama / NISN tidak terdaftar",
+                  "Mencoba masuk di luar jadwal",
+                ].map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => setKickReasonInput(preset)}
+                    style={{
+                      textAlign: "left", padding: "8px 12px", borderRadius: "8px",
+                      border: kickReasonInput === preset ? "2px solid #EF4444" : "1px solid #E5E7EB",
+                      background: kickReasonInput === preset ? "#FEF2F2" : "#F9FAFB",
+                      color: kickReasonInput === preset ? "#991B1B" : "#374151",
+                      fontSize: "13px", cursor: "pointer", fontWeight: kickReasonInput === preset ? 600 : 400
+                    }}
+                  >
+                    {preset}
+                  </button>
+                ))}
+              </div>
+
+              <input
+                type="text"
+                value={kickReasonInput}
+                onChange={(e) => setKickReasonInput(e.target.value)}
+                placeholder="Atau ketik alasan lain..."
+                style={{
+                  width: "100%", padding: "10px 12px", borderRadius: "8px",
+                  border: "1px solid #D1D5DB", fontSize: "13px", outline: "none",
+                  boxSizing: "border-box"
+                }}
+              />
+            </div>
+
+            <div style={{ padding: "16px 24px", borderTop: "1px solid #F3F4F6", display: "flex", justifyContent: "flex-end", gap: "10px", background: "#FAFBFD" }}>
+              <button onClick={() => setKickModalStudent(null)} className="btn btn-secondary btn-md">
+                Batal
+              </button>
+              <button
+                disabled={actionLoading === kickModalStudent.id}
+                className="btn btn-danger btn-md"
+                onClick={handleKickStudent}
+              >
+                {actionLoading === kickModalStudent.id ? "Mengeluarkan..." : "Ya, Keluarkan Siswa"}
+              </button>
             </div>
           </div>
         </div>

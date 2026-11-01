@@ -52,7 +52,7 @@ export default function JoinPage() {
       setError("Ujian sudah selesai.");
       return;
     }
-    router.push("/join/identity");
+    router.push(`/join/identity?code=${encodeURIComponent(code)}`);
   };
 
   const handleResumeSession = () => {

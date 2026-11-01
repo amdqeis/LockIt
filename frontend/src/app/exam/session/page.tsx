@@ -479,15 +479,17 @@ export default function ExamSessionPage() {
   const [flagged, setFlagged] = useState<Set<number>>(new Set());
   const [timeLeft, setTimeLeft] = useState(90 * 60);
   const [autoSaveStatus, setAutoSaveStatus] = useState<AutoSaveStatus>("saved");
-  const [showFullscreenPrompt, setShowFullscreenPrompt] = useState(true);
-  const [submitModal, setSubmitModal] = useState(false);
+  const [submitStep, setSubmitStep] = useState<0 | 1 | 2>(0);
   const [isLocked, setIsLocked] = useState(false);
+  const [screenshotLockReason, setScreenshotLockReason] = useState<string | null>(null);
   const [studentProfile, setStudentProfile] = useState<{ name: string; nisn: string } | null>(null);
   const [warningBanner, setWarningBanner] = useState<string | null>(null);
   const [timeExpiredOverlay, setTimeExpiredOverlay] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [activePanel, setActivePanel] = useState<SidePanel>(null);
+  const [currentDateStr, setCurrentDateStr] = useState<string>("");
   const saveTimeoutRef = useRef<Record<string, NodeJS.Timeout>>({});
+  const pillNavRef = useRef<HTMLDivElement>(null);
   const activityLog = useRef<{ time: string; action: string; detail: string }[]>([]);
 
   const togglePanel = (panel: SidePanel) =>
@@ -511,12 +513,49 @@ export default function ExamSessionPage() {
   const isQuestionAnswered = (q: Question) =>
     q.type === "multi_select" ? (multiAnswers[q.id]?.size ?? 0) > 0 : !!answers[q.id];
 
+  useEffect(() => {
+    setCurrentDateStr(new Date().toLocaleDateString("id-ID", { weekday: "long", year: "numeric", month: "long", day: "numeric" }));
+  }, []);
+
+  // Auto-request fullscreen saat halaman sesi dimuat
+  useEffect(() => {
+    const requestFs = async () => {
+      try {
+        if (document.fullscreenElement) return;
+        await document.documentElement.requestFullscreen();
+      } catch {
+        sendProctoringEvent("fullscreen_denied");
+      }
+    };
+    requestFs();
+  }, []);
+
+  // Auto-scroll pill nav mobile ke nomor soal yang aktif
+  useEffect(() => {
+    if (!isMobile || !pillNavRef.current) return;
+    const activeBtn = pillNavRef.current.children[currentQ] as HTMLElement;
+    if (activeBtn) {
+      activeBtn.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+    }
+  }, [currentQ, isMobile]);
+
   // Fase A: Load exam session from backend
   useEffect(() => {
     let isSubscribed = true;
     const loadSession = async () => {
       try {
         const res = await fetchExamSession();
+        if (!res.success) {
+          if (res.error?.code === "ALREADY_SUBMITTED") {
+            sessionStorage.setItem("exam_already_submitted", "true");
+            window.location.href = "/";
+            return;
+          }
+          if (res.error?.code === "EXAM_NOT_STARTED") {
+            window.location.href = "/exam/lobby";
+            return;
+          }
+        }
         if (res.success && res.data && isSubscribed) {
           const { student, exam, questions: beQuestions, answers: beAnswers, serverTime } = res.data;
           if (Array.isArray(beQuestions) && beQuestions.length > 0) {
@@ -554,12 +593,19 @@ export default function ExamSessionPage() {
           }
           if (Array.isArray(beAnswers) && beAnswers.length > 0) {
             const restored: Record<string, string> = {};
+            const restoredMulti: Record<string, Set<string>> = {};
             beAnswers.forEach((ans) => {
               if (ans.selectedOption) {
-                restored[ans.questionId] = ans.selectedOption.toLowerCase();
+                if (ans.selectedOption.includes(",")) {
+                  const parts = ans.selectedOption.split(",").map((s: string) => s.toLowerCase().trim());
+                  restoredMulti[ans.questionId] = new Set(parts);
+                } else {
+                  restored[ans.questionId] = ans.selectedOption.toLowerCase();
+                }
               }
             });
             setAnswers((prev) => ({ ...prev, ...restored }));
+            setMultiAnswers((prev) => ({ ...prev, ...restoredMulti }));
           }
         }
       } catch {
@@ -575,30 +621,35 @@ export default function ExamSessionPage() {
 
   // Timer tick & auto-submit on expiry
   useEffect(() => {
-    if (showFullscreenPrompt || isLocked || submitted) return;
+    if (isLocked || submitted) return;
     if (timeLeft <= 0) {
       setTimeExpiredOverlay(true);
       clearSessionHint();
       submitStudentExam().finally(() => {
+        sessionStorage.setItem("exam_just_submitted", "true");
+        sessionStorage.setItem("exam_submitted_title", examMeta?.title || "Ujian");
         setTimeout(() => {
-          window.location.href = "/exam/done";
+          window.location.href = "/";
         }, 2500);
       });
       return;
     }
     const t = setInterval(() => setTimeLeft((s) => s - 1), 1000);
     return () => clearInterval(t);
-  }, [timeLeft, showFullscreenPrompt, isLocked, submitted]);
+  }, [timeLeft, isLocked, submitted]);
 
   // Periodic heartbeat (15s)
   useEffect(() => {
-    if (showFullscreenPrompt || submitted) return;
+    if (submitted) return;
     const interval = setInterval(async () => {
       try {
         const res = await sendStudentHeartbeat();
         if (res.success && res.data) {
           if (res.data.isLocked) {
             setIsLocked(true);
+          } else {
+            setIsLocked(false);
+            setScreenshotLockReason(null);
           }
           if (!res.data.isExamActive) {
             setTimeExpiredOverlay(true);
@@ -609,16 +660,15 @@ export default function ExamSessionPage() {
       }
     }, 15000);
     return () => clearInterval(interval);
-  }, [showFullscreenPrompt, submitted]);
+  }, [submitted]);
 
   // Browser-only proctoring event listeners
   useEffect(() => {
-    if (showFullscreenPrompt || submitted) return;
+    if (submitted) return;
 
     const handleVisibilityChange = () => {
       if (document.hidden) {
         sendProctoringEvent("tab_switch");
-        setWarningBanner("Peringatan: Berpindah tab dicatat oleh sistem!");
       }
     };
 
@@ -629,16 +679,61 @@ export default function ExamSessionPage() {
     const handleCopy = (e: ClipboardEvent) => {
       e.preventDefault();
       sendProctoringEvent("copy_attempt");
-      setWarningBanner("Tindakan menyalin dilarang selama ujian!");
     };
 
     const handlePaste = (e: ClipboardEvent) => {
       e.preventDefault();
       sendProctoringEvent("paste_attempt");
-      setWarningBanner("Tindakan menempelkan teks dilarang!");
+    };
+
+    const triggerScreenshotViolation = (trigger: string, details?: Record<string, any>) => {
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText("");
+        }
+      } catch {
+        // ignore clipboard error
+      }
+      sendProctoringEvent("screenshot", { trigger, ...details });
+      setIsLocked(true);
+      setScreenshotLockReason("Percobaan screenshot terdeteksi. Sesi ujian dikunci sementara demi keamanan.");
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      // 1. Tombol PrintScreen / Snapshot
+      const isPrintScreen =
+        e.key === "PrintScreen" ||
+        e.code === "PrintScreen" ||
+        e.keyCode === 44 ||
+        e.key === "Snapshot" ||
+        e.code === "Snapshot";
+
+      // 2. Windows Snipping Tool: Win/Ctrl + Shift + S
+      const isWindowsSnipping =
+        (e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === "S" || e.key === "s");
+
+      // 3. macOS Screenshot: Cmd + Shift + 3/4/5/6
+      const isMacScreenshot =
+        e.metaKey && e.shiftKey && ["3", "4", "5", "6"].includes(e.key);
+
+      // 4. Print dialog / Save PDF attempt: Ctrl/Cmd + P
+      const isPrintAttempt =
+        (e.ctrlKey || e.metaKey) && (e.key === "P" || e.key === "p");
+
+      if (isPrintScreen || isWindowsSnipping || isMacScreenshot || isPrintAttempt) {
+        e.preventDefault();
+        e.stopPropagation();
+        const trigger = isPrintScreen
+          ? "PrintScreen key"
+          : isWindowsSnipping
+          ? "Windows Snipping Tool (Ctrl/Win+Shift+S)"
+          : isMacScreenshot
+          ? `macOS Screenshot (Cmd+Shift+${e.key})`
+          : "Print / Save PDF attempt (Ctrl/Cmd+P)";
+        triggerScreenshotViolation(trigger, { key: e.key, code: e.code });
+        return;
+      }
+
       const isF12 = e.key === "F12";
       const isDevTools =
         (e.ctrlKey || e.metaKey) && e.shiftKey && ["I", "i", "J", "j", "C", "c"].includes(e.key);
@@ -647,8 +742,25 @@ export default function ExamSessionPage() {
       if (isF12 || isDevTools || isViewSource) {
         e.preventDefault();
         sendProctoringEvent("devtools", { key: e.key });
-        setWarningBanner("Membuka developer tools dilarang!");
       }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (
+        e.key === "PrintScreen" ||
+        e.code === "PrintScreen" ||
+        e.keyCode === 44 ||
+        e.key === "Snapshot" ||
+        e.code === "Snapshot"
+      ) {
+        e.preventDefault();
+        triggerScreenshotViolation("PrintScreen key (keyup)", { key: e.key, code: e.code });
+      }
+    };
+
+    const handleBeforePrint = (e: Event) => {
+      e.preventDefault();
+      triggerScreenshotViolation("window.beforeprint event");
     };
 
     const handleContextMenu = (e: MouseEvent) => {
@@ -659,7 +771,6 @@ export default function ExamSessionPage() {
     const handleFullscreenChange = () => {
       if (!document.fullscreenElement) {
         sendProctoringEvent("fullscreen_exit");
-        setWarningBanner("Anda keluar dari mode layar penuh. Segera kembali ke layar penuh.");
       }
     };
 
@@ -668,6 +779,8 @@ export default function ExamSessionPage() {
     document.addEventListener("copy", handleCopy);
     document.addEventListener("paste", handlePaste);
     document.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    window.addEventListener("beforeprint", handleBeforePrint);
     document.addEventListener("contextmenu", handleContextMenu);
     document.addEventListener("fullscreenchange", handleFullscreenChange);
 
@@ -677,10 +790,12 @@ export default function ExamSessionPage() {
       document.removeEventListener("copy", handleCopy);
       document.removeEventListener("paste", handlePaste);
       document.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+      window.removeEventListener("beforeprint", handleBeforePrint);
       document.removeEventListener("contextmenu", handleContextMenu);
       document.removeEventListener("fullscreenchange", handleFullscreenChange);
     };
-  }, [showFullscreenPrompt, submitted]);
+  }, [submitted]);
 
   // Handle single choice answer (with debounce auto-save)
   const handleSingleAnswer = (qId: string, optId: string) => {
@@ -710,15 +825,58 @@ export default function ExamSessionPage() {
       const current = new Set(prev[qId] ?? []);
       if (current.has(optId)) current.delete(optId);
       else current.add(optId);
-      return { ...prev, [qId]: current };
+      const next = { ...prev, [qId]: current };
+
+      const selectedArr = Array.from(next[qId]).map(s => s.toUpperCase()).sort().join(",");
+      setAutoSaveStatus("saving");
+      if (saveTimeoutRef.current[qId]) clearTimeout(saveTimeoutRef.current[qId]);
+      saveTimeoutRef.current[qId] = setTimeout(async () => {
+        try {
+          const res = await saveStudentAnswer(qId, selectedArr);
+          setAutoSaveStatus(res.success ? "saved" : "failed");
+        } catch {
+          setAutoSaveStatus("failed");
+        }
+      }, 600);
+
+      return next;
     });
+  };
+
+  const handleClearAnswer = (qId: string) => {
+    if (question.type === "multi_select") {
+      setMultiAnswers((prev) => ({ ...prev, [qId]: new Set() }));
+    } else {
+      setAnswers((a) => {
+        const next = { ...a };
+        delete next[qId];
+        return next;
+      });
+    }
     setAutoSaveStatus("saving");
-    setTimeout(() => setAutoSaveStatus("saved"), 600);
+    if (saveTimeoutRef.current[qId]) clearTimeout(saveTimeoutRef.current[qId]);
+    saveTimeoutRef.current[qId] = setTimeout(async () => {
+      try {
+        const res = await saveStudentAnswer(qId, "");
+        setAutoSaveStatus(res.success ? "saved" : "failed");
+      } catch {
+        setAutoSaveStatus("failed");
+      }
+    }, 300);
+  };
+
+  const handleOpenSubmit = () => {
+    const unanswered = totalQ - answeredCount;
+    if (unanswered > 0) {
+      setSubmitStep(1);
+    } else {
+      setSubmitStep(2);
+    }
   };
 
   const handleSubmit = async () => {
     setSubmitted(true);
-    setSubmitModal(false);
+    setSubmitStep(0);
     try {
       if (typeof window !== "undefined") {
         const summaryPayload = JSON.stringify({
@@ -734,10 +892,12 @@ export default function ExamSessionPage() {
     try {
       await submitStudentExam();
     } catch {
-      // Continue to done page
+      // Continue to home
     }
+    sessionStorage.setItem("exam_just_submitted", "true");
+    sessionStorage.setItem("exam_submitted_title", examMeta?.title || "Ujian");
     clearSessionHint();
-    window.location.href = "/exam/done";
+    window.location.href = "/";
   };
 
   const formatTime = (s: number) => {
@@ -753,14 +913,6 @@ export default function ExamSessionPage() {
   const timerBorder = isVeryNearEnd ? "#FFC5C5" : isNearEnd ? "#FCD34D" : "#C8E6F5";
   const timerColor  = isVeryNearEnd ? "#DC2626" : isNearEnd ? "#B45309" : "#29ABE2";
 
-  useEffect(() => {
-    if (showFullscreenPrompt) return;
-    const t = setTimeout(() => {
-      setWarningBanner("Mohon perhatikan aturan ujian. Tidak diperbolehkan membuka tab lain.");
-    }, 10000);
-    return () => clearTimeout(t);
-  }, [showFullscreenPrompt]);
-
   const toggleFlag = (idx: number) => {
     setFlagged(prev => {
       const next = new Set(prev);
@@ -769,53 +921,19 @@ export default function ExamSessionPage() {
     });
   };
 
-  // ===================== FULLSCREEN PROMPT =====================
-  if (showFullscreenPrompt) {
-    return (
-      <div style={{
-        minHeight: "100vh",
-        background: "linear-gradient(135deg, #0369a1 0%, #29ABE2 100%)",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        padding: isMobile ? "16px" : "24px"
-      }}>
-        <div style={{
-          width: "100%", maxWidth: "480px", textAlign: "center",
-          background: "rgba(255,255,255,0.1)", backdropFilter: "blur(20px)",
-          border: "1.5px solid rgba(255,255,255,0.2)",
-          borderRadius: "6px", padding: isMobile ? "32px 20px" : "48px 40px", color: "white"
-        }}>
-          <div style={{ fontSize: isMobile ? "44px" : "56px", marginBottom: "16px" }}>🖥️</div>
-          <h1 style={{ fontSize: isMobile ? "20px" : "24px", fontWeight: 700, marginBottom: "10px", fontFamily: "Poppins, sans-serif" }}>
-            Masuk ke Mode Ujian
-          </h1>
-          <p style={{ color: "rgba(255,255,255,0.75)", marginBottom: "24px", lineHeight: 1.7, fontSize: "14px" }}>
-            Ujian ini sebaiknya dikerjakan dalam mode layar penuh. Keluar dari layar penuh akan dicatat sebagai pelanggaran.
-          </p>
-          <button
-            style={{ width: "100%", padding: "14px", borderRadius: "6px", background: "white", color: "#0EA5E9", border: "none", fontWeight: 700, fontSize: "15px", cursor: "pointer", marginBottom: "12px", fontFamily: "Poppins, sans-serif" }}
-            onClick={() => { document.documentElement.requestFullscreen?.().catch(() => {}); setShowFullscreenPrompt(false); }}
-          >🖥️ Masuk Layar Penuh &amp; Mulai</button>
-          <button
-            style={{ background: "none", border: "none", color: "rgba(255,255,255,0.5)", cursor: "pointer", fontSize: "13px", fontFamily: "Poppins, sans-serif" }}
-            onClick={() => setShowFullscreenPrompt(false)}
-          >Lanjutkan tanpa layar penuh</button>
-        </div>
-      </div>
-    );
-  }
-
   // ===================== LOCKED =====================
   if (isLocked) {
     return (
       <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,0.92)", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", textAlign: "center", padding: "24px", color: "white" }}>
-        <div style={{ fontSize: "72px", marginBottom: "20px" }}>🔒</div>
+        <div style={{ fontSize: "72px", marginBottom: "20px" }}>{screenshotLockReason ? "📸" : "🔒"}</div>
         <h1 style={{ fontSize: isMobile ? "22px" : "26px", fontWeight: 700, marginBottom: "10px", fontFamily: "Poppins, sans-serif" }}>Ujianmu Sementara Dikunci</h1>
-        <p style={{ color: "rgba(255,255,255,0.65)", maxWidth: "360px", lineHeight: 1.7, fontSize: "14px" }}>Pengawas sedang meninjau aktivitasmu. Tunggu hingga pengawas membuka kunci.</p>
+        <p style={{ color: "rgba(255,255,255,0.75)", maxWidth: "420px", lineHeight: 1.7, fontSize: "14px" }}>
+          {screenshotLockReason ?? "Pengawas sedang meninjau aktivitasmu. Tunggu hingga pengawas membuka kunci."}
+        </p>
         <div style={{ marginTop: "20px", display: "inline-flex", alignItems: "center", gap: "8px", padding: "8px 16px", borderRadius: "100px", background: "rgba(22,163,74,0.2)", color: "#4ade80", fontSize: "13px" }}>
           <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#4ade80", display: "inline-block" }} />
           Terhubung ke server
         </div>
-        <button style={{ marginTop: "28px", background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)", color: "white", padding: "8px 20px", borderRadius: "6px", cursor: "pointer", fontSize: "13px" }} onClick={() => setIsLocked(false)}>[Demo] Unlock</button>
       </div>
     );
   }
@@ -867,13 +985,6 @@ export default function ExamSessionPage() {
   const isMulti = question.type === "multi_select";
   const isLatexQ = question.type === "latex" || hasLatex(question.text);
   const selectedMulti = multiAnswers[question.id] ?? new Set<string>();
-
-  // Mobile: pill nav range (top bar on mobile only)
-  const VISIBLE_PILLS = 7;
-  const half = Math.floor(VISIBLE_PILLS / 2);
-  let startIdx = Math.max(0, currentQ - half);
-  const endIdx = Math.min(totalQ - 1, startIdx + VISIBLE_PILLS - 1);
-  if (endIdx - startIdx < VISIBLE_PILLS - 1) startIdx = Math.max(0, endIdx - VISIBLE_PILLS + 1);
 
   return (
     <div style={{ minHeight: "100vh", background: "#EDF6FC", display: "flex", flexDirection: "column", fontFamily: "Poppins, sans-serif" }}>
@@ -1084,7 +1195,7 @@ export default function ExamSessionPage() {
                 {[
                   { icon: "👨‍🏫", label: "Pengawas",       value: examMeta.teacher || "Pengawas Ujian" },
                   { icon: "🏫", label: "Kelas",           value: examMeta.class || "Peserta Ujian" },
-                  { icon: "📅", label: "Tanggal",         value: new Date().toLocaleDateString("id-ID", { weekday: "long", year: "numeric", month: "long", day: "numeric" }) },
+                  { icon: "📅", label: "Tanggal",         value: currentDateStr || "Hari ini" },
                   { icon: "⏱️", label: "Durasi",          value: `${Math.round((examMeta.duration || 5400) / 60)} menit` },
                   { icon: "📝", label: "Jumlah Soal",     value: `${totalQ} soal` },
                 ].map(r => (
@@ -1202,7 +1313,7 @@ export default function ExamSessionPage() {
                 <div style={{ background: "#FFF5F5", borderRadius: "6px", padding: "14px", border: "1px solid #FECACA" }}>
                   <div style={{ fontSize: "12px", fontWeight: 700, color: "#7F1D1D", marginBottom: "8px" }}>Zona Berbahaya</div>
                   <button
-                    onClick={() => { setActivePanel(null); setSubmitModal(true); }}
+                    onClick={() => { setActivePanel(null); handleOpenSubmit(); }}
                     style={{ width: "100%", padding: "10px", borderRadius: "6px", border: "1.5px solid #FCA5A5", background: "#FEF2F2", color: "#DC2626", fontWeight: 600, fontSize: "13px", cursor: "pointer", transition: "all 0.15s", fontFamily: "Poppins, sans-serif" }}
                   >🚨 Kumpulkan Ujian Sekarang</button>
                 </div>
@@ -1292,13 +1403,21 @@ export default function ExamSessionPage() {
 
           {/* Mobile: pill navigator bar */}
           {isMobile && (
-            <div style={{ background: "white", borderBottom: "1.5px solid #E2EEF5", padding: "8px 12px", display: "flex", alignItems: "center", gap: "6px", overflowX: "auto", scrollbarWidth: "none" }}>
-              {startIdx > 0 && (
-                <button onClick={() => setCurrentQ(startIdx - 1)} style={{ background: "none", border: "none", cursor: "pointer", color: "#B0C9D8", fontSize: "16px", padding: "2px", flexShrink: 0 }}>‹</button>
-              )}
-              {Array.from({ length: endIdx - startIdx + 1 }, (_, i) => {
-                const qIdx = startIdx + i;
-                const q = questionsList[qIdx];
+            <div
+              ref={pillNavRef}
+              style={{
+                background: "white",
+                borderBottom: "1.5px solid #E2EEF5",
+                padding: "8px 12px",
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                overflowX: "auto",
+                scrollbarWidth: "none",
+                WebkitOverflowScrolling: "touch",
+              }}
+            >
+              {questionsList.map((q, qIdx) => {
                 const isCurrent = qIdx === currentQ;
                 const isAnswered = isQuestionAnswered(q);
                 const isFlagged = flagged.has(qIdx);
@@ -1318,9 +1437,6 @@ export default function ExamSessionPage() {
                   </button>
                 );
               })}
-              {endIdx < totalQ - 1 && (
-                <button onClick={() => setCurrentQ(endIdx + 1)} style={{ background: "none", border: "none", cursor: "pointer", color: "#B0C9D8", fontSize: "16px", padding: "2px", flexShrink: 0 }}>›</button>
-              )}
             </div>
           )}
 
@@ -1485,6 +1601,37 @@ export default function ExamSessionPage() {
                   );
                 })}
               </div>
+
+              {/* Tombol Clear Jawaban — tampil hanya jika ada pilihan */}
+              {isQuestionAnswered(question) && (
+                <button
+                  onClick={() => handleClearAnswer(question.id)}
+                  style={{
+                    marginTop: "12px",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    padding: "7px 14px",
+                    borderRadius: "6px",
+                    border: "1.5px solid #FCA5A5",
+                    background: "#FFF5F5",
+                    color: "#DC2626",
+                    cursor: "pointer",
+                    fontWeight: 500,
+                    fontSize: "12px",
+                    transition: "all 0.15s",
+                    fontFamily: "Poppins, sans-serif",
+                    alignSelf: "flex-start",
+                  }}
+                  title="Hapus pilihan jawaban untuk soal ini"
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                  </svg>
+                  Hapus Pilihan
+                </button>
+              )}
             </div>
             )}
 
@@ -1609,7 +1756,7 @@ export default function ExamSessionPage() {
                 >Selanjutnya →</button>
               ) : (
                 <button
-                  onClick={() => setSubmitModal(true)}
+                  onClick={handleOpenSubmit}
                   style={{ padding: "10px 32px", borderRadius: "999px", border: "none", background: "#10B981", color: "white", cursor: "pointer", fontWeight: 700, fontSize: "14px", boxShadow: "0 4px 12px rgba(16,185,129,0.28), 0 1px 3px rgba(16,185,129,0.16)", display: "flex", alignItems: "center", gap: "6px", transition: "all 0.15s", fontFamily: "Poppins, sans-serif" }}
                 >✅ Kumpulkan</button>
               )}
@@ -1640,7 +1787,7 @@ export default function ExamSessionPage() {
             >Selanjutnya →</button>
           ) : (
             <button
-              onClick={() => setSubmitModal(true)}
+              onClick={handleOpenSubmit}
               style={{ flex: 1, padding: "11px 0", borderRadius: "6px", border: "none", background: "#10B981", color: "white", cursor: "pointer", fontWeight: 700, fontSize: "13px", boxShadow: "0 3px 10px rgba(16,185,129,0.26), 0 1px 3px rgba(16,185,129,0.14)", transition: "all 0.15s", fontFamily: "Poppins, sans-serif" }}
             >✅ Kumpulkan</button>
           )}
@@ -1651,34 +1798,97 @@ export default function ExamSessionPage() {
         </div>
       )}
 
-      {/* Demo controls */}
-      <div style={{ position: "fixed", top: isMobile ? "60px" : "62px", right: "10px", display: "flex", flexDirection: "column", gap: "4px", zIndex: 200 }}>
-        <button style={{ background: "rgba(0,0,0,0.6)", color: "white", border: "none", padding: "4px 8px", borderRadius: "6px", fontSize: "10px", cursor: "pointer" }} onClick={() => setIsLocked(true)}>[Demo] Lock</button>
-        <button style={{ background: "rgba(0,0,0,0.6)", color: "white", border: "none", padding: "4px 8px", borderRadius: "6px", fontSize: "10px", cursor: "pointer" }} onClick={() => setSubmitModal(true)}>[Demo] Submit</button>
-        <button style={{ background: "rgba(0,0,0,0.6)", color: "white", border: "none", padding: "4px 8px", borderRadius: "6px", fontSize: "10px", cursor: "pointer" }} onClick={() => setWarningBanner("Demo: Pengawas mengirim peringatan ini!")}>[Demo] Warning</button>
-      </div>
-
-      {/* Submit Modal */}
-      {submitModal && (
-        <div className="modal-overlay" onClick={() => setSubmitModal(false)}>
+      {/* Submit Step 1 — Warning: Masih ada soal belum dijawab */}
+      {submitStep === 1 && (
+        <div className="modal-overlay" onClick={() => setSubmitStep(0)}>
           <div className="modal modal-sm" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <div className="modal-title">Kumpulkan Ujian?</div>
-              <button className="modal-close" onClick={() => setSubmitModal(false)}>×</button>
+              <div className="modal-title" style={{ color: "#D97706", display: "flex", alignItems: "center", gap: "6px" }}>
+                <span>⚠️</span> Perhatian Belum Semua Terisi
+              </div>
+              <button className="modal-close" onClick={() => setSubmitStep(0)}>×</button>
+            </div>
+            <div className="modal-body">
+              <div style={{ textAlign: "center", padding: "8px 0 16px" }}>
+                <div style={{ fontSize: "44px", marginBottom: "12px" }}>⚠️</div>
+                <p style={{ color: "#92400E", fontWeight: 700, fontSize: "15px", marginBottom: "6px" }}>
+                  {totalQ - answeredCount} soal belum dikonfirmasi!
+                </p>
+                <p style={{ color: "#6E8EA0", fontSize: "13px", lineHeight: 1.6, marginBottom: "14px" }}>
+                  Kamu belum menjawab <strong style={{ color: "#D97706" }}>{totalQ - answeredCount}</strong> dari <strong>{totalQ}</strong> butir soal. Klik nomor soal di bawah untuk langsung menuju soal tersebut:
+                </p>
+                {/* Daftar nomor soal belum dijawab */}
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", justifyContent: "center", maxHeight: "140px", overflowY: "auto", padding: "4px" }}>
+                  {questionsList
+                    .map((q, idx) => ({ q, idx }))
+                    .filter(({ q }) => !isQuestionAnswered(q))
+                    .map(({ idx }) => (
+                      <button
+                        key={idx}
+                        onClick={() => { setSubmitStep(0); setCurrentQ(idx); }}
+                        style={{
+                          width: "32px", height: "32px", borderRadius: "6px",
+                          border: "1.5px solid #D97706", background: "#FFFBEB",
+                          color: "#92400E", fontWeight: 700, fontSize: "12px", cursor: "pointer",
+                          transition: "all 0.15s",
+                        }}
+                        title={`Buka Soal No. ${idx + 1}`}
+                      >
+                        {idx + 1}
+                      </button>
+                    ))}
+                </div>
+              </div>
+            </div>
+            <div className="modal-footer" style={{ display: "flex", justifyContent: "space-between", gap: "8px" }}>
+              <button className="btn btn-secondary btn-md" onClick={() => setSubmitStep(0)}>
+                Kembali Isi Soal
+              </button>
+              <button
+                className="btn btn-md"
+                style={{ background: "#D97706", color: "white", fontWeight: 600 }}
+                onClick={() => setSubmitStep(2)}
+              >
+                Tetap Lanjut →
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Submit Step 2 — Konfirmasi Akhir (2x Konfirmasi) */}
+      {submitStep === 2 && (
+        <div className="modal-overlay" onClick={() => setSubmitStep(0)}>
+          <div className="modal modal-sm" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-title">Konfirmasi Akhir Pengumpulan</div>
+              <button className="modal-close" onClick={() => setSubmitStep(0)}>×</button>
             </div>
             <div className="modal-body">
               <div style={{ textAlign: "center", padding: "8px 0 16px" }}>
                 <div style={{ fontSize: "44px", marginBottom: "14px" }}>📝</div>
-                <p style={{ color: "#6E8EA0", lineHeight: 1.7, marginBottom: "14px", fontSize: "14px" }}>
-                  Kamu telah menjawab <strong style={{ color: "#29ABE2" }}>{answeredCount}</strong> dari <strong>{totalQ}</strong> soal.
-                  {totalQ - answeredCount > 0 && (<span> <strong style={{ color: "#E05050" }}>{totalQ - answeredCount}</strong> soal belum dijawab.</span>)}
+                <p style={{ color: "#1C303D", fontWeight: 700, fontSize: "15px", marginBottom: "8px" }}>
+                  Yakin ingin mengumpulkan ujian ini sekarang?
                 </p>
-                <p style={{ fontSize: "12px", color: "#9CA3AF" }}>Setelah dikumpulkan, kamu tidak bisa mengubah jawaban.</p>
+                <p style={{ color: "#6E8EA0", fontSize: "13px", lineHeight: 1.6 }}>
+                  Kamu telah menjawab <strong style={{ color: "#29ABE2" }}>{answeredCount}</strong> dari <strong>{totalQ}</strong> soal.
+                </p>
+                <p style={{ marginTop: "10px", fontSize: "12px", color: "#DC2626", fontWeight: 600, background: "#FEF2F2", padding: "8px 12px", borderRadius: "6px", border: "1px solid #FECACA" }}>
+                  ⚠️ Perhatian: Setelah dikumpulkan, kamu tidak dapat lagi mengakses ujian ini.
+                </p>
               </div>
             </div>
-            <div className="modal-footer">
-              <button className="btn btn-secondary btn-md" onClick={() => setSubmitModal(false)}>Batal</button>
-              <button className="btn btn-md" style={{ background: "#10B981", color: "white" }} onClick={handleSubmit}>✅ Ya, Kumpulkan</button>
+            <div className="modal-footer" style={{ display: "flex", justifyContent: "space-between", gap: "8px" }}>
+              <button className="btn btn-secondary btn-md" onClick={() => setSubmitStep(0)}>
+                Batal
+              </button>
+              <button
+                className="btn btn-md"
+                style={{ background: "#10B981", color: "white", fontWeight: 700 }}
+                onClick={handleSubmit}
+              >
+                ✅ Ya, Kumpulkan Sekarang
+              </button>
             </div>
           </div>
         </div>

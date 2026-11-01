@@ -17,6 +17,8 @@ const eventTypeEnum = z.enum([
   "devtools",
   "reconnect",
   "heartbeat_lost",
+  "ip_change",
+  "screenshot",
 ]);
 
 const proctoringEventSchema = z.object({
@@ -72,8 +74,8 @@ export async function POST(req: NextRequest) {
 
     // 2. Atomic increment violation count — cegah race condition
     const policy = (exam.violationPolicy as any) || {};
-    const maxViolations = policy.max_violations || 5;
-    const policyAction = policy.action || "warning";
+    const maxViolations = policy.max_violations || 3;
+    const policyAction = policy.action || "lock";
 
     // CRIT-03: Gunakan atomic increment Prisma, bukan read-then-write
     const updatedStudent = await prisma.student.update({
@@ -113,6 +115,16 @@ export async function POST(req: NextRequest) {
             metadata: event.metadata,
           },
         });
+
+        if (eventType === "screenshot") {
+          io.of("/teacher-dashboard").to(`exam:${exam.id}`).emit("screenshot_detected", {
+            studentId: student.id,
+            name: student.name,
+            nisn: student.nisn,
+            timestamp: event.timestamp.toISOString(),
+            violationCount: updatedStudent.violationCount,
+          });
+        }
       } catch (socketErr) {
         console.error("Socket emit failed on proctoring event:", socketErr);
       }

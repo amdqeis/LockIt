@@ -97,8 +97,33 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         },
       });
 
+      // Update semua siswa yang ada di lobby (status: "waiting" atau "accepted") menjadi "active"
+      await prisma.student.updateMany({
+        where: { examId: id, status: { in: ["waiting", "accepted"] } },
+        data: { status: "active" },
+      });
+
+      const io = (globalThis as any).io;
+      if (io) {
+        try {
+          io.of("/student-session").to(`exam:${id}`).emit("exam_started", {
+            examId: id,
+            startTime: startTime.toISOString(),
+            endTime: endTime.toISOString(),
+            durationMinutes: exam.durationMinutes,
+          });
+          io.of("/teacher-dashboard").to(`exam:${id}`).emit("exam_started", {
+            examId: id,
+            startTime: startTime.toISOString(),
+            endTime: endTime.toISOString(),
+          });
+        } catch (socketErr) {
+          console.error("Socket emit exam_started failed in status transition:", socketErr);
+        }
+      }
+
       // Schedule auto-end timer
-      scheduleExamAutoEnd(updated.id, endTime, (globalThis as any).io);
+      scheduleExamAutoEnd(updated.id, endTime, io);
 
       return successResponse({
         exam: updated,

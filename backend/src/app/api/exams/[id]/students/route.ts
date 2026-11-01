@@ -33,6 +33,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
           status: true,
           isLocked: true,
           violationCount: true,
+          ipAddress: true,
+          acceptedAt: true,
+          kickedAt: true,
+          kickReason: true,
           joinedAt: true,
           submittedAt: true,
           _count: {

@@ -40,6 +40,14 @@ export async function GET(req: NextRequest) {
       return errorResponse("ALREADY_SUBMITTED", "Ujian telah selesai dikumpulkan", 403);
     }
 
+    if (student.status === "waiting" || student.status === "accepted") {
+      return errorResponse("EXAM_NOT_STARTED", "Ujian belum dimulai oleh pengawas", 403);
+    }
+
+    if (student.status === "kicked") {
+      return errorResponse("STUDENT_KICKED", `Kamu telah dikeluarkan dari ujian ini: ${student.kickReason || "oleh pengawas"}`, 403);
+    }
+
     // Fetch questions
     let questions = await prisma.question.findMany({
       where: { examId: exam.id },

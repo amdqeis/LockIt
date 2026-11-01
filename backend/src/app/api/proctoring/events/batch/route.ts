@@ -17,6 +17,8 @@ const eventTypeEnum = z.enum([
   "devtools",
   "reconnect",
   "heartbeat_lost",
+  "ip_change",
+  "screenshot",
 ]);
 
 const batchEventSchema = z.object({
@@ -75,8 +77,8 @@ export async function POST(req: NextRequest) {
 
     // CRIT-03 (batch): Atomic increment — sama seperti single event endpoint
     const policy = (exam.violationPolicy as any) || {};
-    const maxViolations = policy.max_violations || 5;
-    const policyAction = policy.action || "warning";
+    const maxViolations = policy.max_violations || 3;
+    const policyAction = policy.action || "lock";
 
     const updatedStudent = await prisma.student.update({
       where: { id: student.id },
@@ -108,6 +110,35 @@ export async function POST(req: NextRequest) {
           isLocked: updatedStudent.isLocked,
           eventsCount: events.length,
         });
+
+        // Emit detail untuk event kritis (screenshot & ip_change)
+        for (const ev of events) {
+          if (ev.eventType === "screenshot" || ev.eventType === "ip_change") {
+            io.of("/teacher-dashboard").to(`exam:${exam.id}`).emit("student_violation", {
+              studentId: student.id,
+              name: student.name,
+              nisn: student.nisn,
+              violationCount: updatedStudent.violationCount,
+              isLocked: updatedStudent.isLocked,
+              event: {
+                eventType: ev.eventType,
+                timestamp: ev.timestamp || new Date().toISOString(),
+                durationMs: ev.durationMs,
+                metadata: ev.metadata,
+              },
+            });
+
+            if (ev.eventType === "screenshot") {
+              io.of("/teacher-dashboard").to(`exam:${exam.id}`).emit("screenshot_detected", {
+                studentId: student.id,
+                name: student.name,
+                nisn: student.nisn,
+                timestamp: ev.timestamp || new Date().toISOString(),
+                violationCount: updatedStudent.violationCount,
+              });
+            }
+          }
+        }
       } catch (socketErr) {
         console.error("Socket emit failed on batch events:", socketErr);
       }

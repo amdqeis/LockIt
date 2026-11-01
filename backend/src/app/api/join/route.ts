@@ -59,10 +59,6 @@ export async function POST(req: NextRequest) {
       return errorResponse("EXAM_NOT_FOUND", "Ujian dengan kode akses tersebut tidak ditemukan", 404);
     }
 
-    if (exam.status === "draft") {
-      return errorResponse("EXAM_NOT_STARTED", "Ujian belum dibuka oleh dosen/guru pengawas", 400);
-    }
-
     if (exam.status === "ended" || exam.status === "archived") {
       return errorResponse("EXAM_ENDED", "Ujian telah berakhir", 400);
     }
@@ -91,9 +87,8 @@ export async function POST(req: NextRequest) {
         return errorResponse("ALREADY_SUBMITTED", "NISN ini telah menyelesaikan dan mengumpulkan ujian", 403);
       }
 
-      // HIGH-04: Pastikan ujian masih aktif sebelum mengizinkan reconnect
-      if (exam.status !== "active") {
-        return errorResponse("EXAM_NOT_ACTIVE", "Ujian sudah berakhir, sesi tidak dapat dilanjutkan", 403);
+      if (student.status === "kicked") {
+        return errorResponse("STUDENT_KICKED", `Kamu telah dikeluarkan dari ujian ini: ${student.kickReason || "oleh pengawas"}`, 403);
       }
 
       // Reconnect scenario
@@ -105,20 +100,19 @@ export async function POST(req: NextRequest) {
         nisn: student.nisn,
       });
 
+      const ipChanged = !!previousIp && previousIp !== clientIp;
+
       student = await prisma.student.update({
         where: { id: student.id },
         data: {
           name,           // Selalu update nama saat reconnect (D-07)
-          // LOW-04: Simpan hash token, bukan token asli
           sessionTokenHash: hashStudentToken(freshToken),
-          status: "active",
           ipAddress: clientIp,
           userAgent,
         },
       });
 
-      // HIGH-07: Catat reconnect event SELALU (bukan hanya saat IP berubah)
-      const ipChanged = !!previousIp && previousIp !== clientIp;
+      // Catat reconnect event
       await prisma.proctoringEvent.create({
         data: {
           studentId: student.id,
@@ -132,17 +126,73 @@ export async function POST(req: NextRequest) {
           },
         },
       });
+
+      // Jika IP berubah, hitung sebagai pelanggaran (Item 8)
+      if (ipChanged) {
+        const policy = (exam.violationPolicy as any) || {};
+        const maxViolations = policy.max_violations || 3;
+        const policyAction = policy.action || "lock";
+
+        const updatedStudent = await prisma.student.update({
+          where: { id: student.id },
+          data: { violationCount: { increment: 1 } },
+        });
+
+        const shouldLock =
+          updatedStudent.violationCount >= maxViolations &&
+          policyAction === "lock" &&
+          !updatedStudent.isLocked;
+
+        if (shouldLock) {
+          await prisma.student.update({
+            where: { id: student.id },
+            data: { isLocked: true },
+          });
+        }
+
+        // Catat proctoring event khusus ip_change
+        await prisma.proctoringEvent.create({
+          data: {
+            studentId: student.id,
+            examId: exam.id,
+            eventType: "ip_change",
+            metadata: {
+              oldIp: previousIp,
+              newIp: clientIp,
+            },
+          },
+        });
+
+        const io = (globalThis as any).io;
+        if (io) {
+          try {
+            io.of("/teacher-dashboard").to(`exam:${exam.id}`).emit("student_violation", {
+              studentId: student.id,
+              name: student.name,
+              nisn: student.nisn,
+              violationCount: updatedStudent.violationCount,
+              isLocked: shouldLock ? true : updatedStudent.isLocked,
+              event: {
+                eventType: "ip_change",
+                timestamp: new Date().toISOString(),
+                metadata: { oldIp: previousIp, newIp: clientIp },
+              },
+            });
+          } catch (socketErr) {
+            console.error("Socket emit failed on ip_change:", socketErr);
+          }
+        }
+      }
     } else {
-      // New student joining
+      // New student joining — status awal waiting (Item 11)
       const dummyId = crypto.randomUUID();
-      log.info("New student joining", { nisn, examId: exam.id });
+      log.info("New student joining to waiting room", { nisn, examId: exam.id });
       freshToken = generateStudentSessionToken({
         studentId: dummyId,
         examId: exam.id,
         nisn,
       });
 
-      // LOW-04: Simpan hash token, bukan token asli
       const freshTokenHash = hashStudentToken(freshToken);
 
       student = await prisma.student.create({
@@ -152,14 +202,40 @@ export async function POST(req: NextRequest) {
           name,
           nisn,
           sessionTokenHash: freshTokenHash,
-          status: "active",
+          status: "waiting",
           ipAddress: clientIp,
           userAgent,
         },
       });
+
+      const io = (globalThis as any).io;
+      if (io) {
+        try {
+          io.of("/teacher-dashboard").to(`exam:${exam.id}`).emit("student_joined_waiting", {
+            studentId: student.id,
+            name: student.name,
+            nisn: student.nisn,
+            status: student.status,
+            joinedAt: student.joinedAt.toISOString(),
+          });
+
+          io.of("/student-session").to(`exam:${exam.id}`).emit("student_joined_lobby", {
+            studentId: student.id,
+            name: student.name,
+            nisn: student.nisn.length > 3 ? student.nisn.slice(0, 3) + "*******" : "*******",
+            status: student.status,
+            joinedAt: student.joinedAt.toISOString(),
+          });
+        } catch (socketErr) {
+          console.error("Socket emit failed on student_joined_waiting:", socketErr);
+        }
+      }
     }
 
+    const nextStep = student.status === "active" ? "session" : "waiting_room";
+
     const response = successResponse({
+      nextStep,
       student: {
         id: student.id,
         name: student.name,
@@ -172,6 +248,7 @@ export async function POST(req: NextRequest) {
         title: exam.title,
         description: exam.description,
         durationMinutes: exam.durationMinutes,
+        status: exam.status,
         startTime: exam.startTime,
         endTime: exam.endTime,
         serverTime: new Date().toISOString(),

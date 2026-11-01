@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { apiFetch } from "@/lib/apiClient";
 import { SkeletonBase, SkeletonTable } from "@/app/components/skeleton";
+import { io } from "socket.io-client";
+import { useTeacherAuth } from "@/contexts/AuthContext";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type ViolationKey =
@@ -16,9 +18,11 @@ type ViolationKey =
   | "window_blur"
   | "devtools"
   | "devtools_open"
-  | "right_click";
+  | "right_click"
+  | "ip_change"
+  | "screenshot";
 
-type StudentStatus = "online" | "offline" | "blocked" | "submitted";
+type StudentStatus = "online" | "offline" | "blocked" | "submitted" | "kicked";
 type ViewMode = "grid" | "list";
 
 interface StudentFeedItem {
@@ -43,16 +47,21 @@ const VIOLATION_CONFIG: Record<string, { label: string; color: string; ring: str
   devtools:        { label: "Buka DevTools",       shortLabel: "DevTools",   color: "#0F172A", ring: "#020617", icon: "🔧" },
   devtools_open:   { label: "Buka DevTools",       shortLabel: "DevTools",   color: "#0F172A", ring: "#020617", icon: "🔧" },
   right_click:     { label: "Klik Kanan",          shortLabel: "RightClick", color: "#6B7280", ring: "#4B5563", icon: "🖱️" },
+  ip_change:       { label: "Perubahan IP",        shortLabel: "IP Ganti",   color: "#DC2626", ring: "#991B1B", icon: "🌐" },
+  screenshot:      { label: "Screenshot / PrintScreen", shortLabel: "Screenshot", color: "#E11D48", ring: "#BE123C", icon: "📸" },
 };
 
 const VIOLATION_PRIORITY: ViolationKey[] = [
-  "tab_switch", "devtools", "devtools_open", "copy_attempt", "copy_paste", "paste_attempt", "fullscreen_exit", "window_blur", "right_click"
+  "screenshot", "ip_change", "tab_switch", "devtools", "devtools_open", "copy_attempt", "copy_paste", "paste_attempt", "fullscreen_exit", "window_blur", "right_click"
 ];
 
 const FILTER_OPTIONS = [
   { value: "all",             label: "Semua" },
   { value: "blocked",         label: "🔒 Diblokir" },
+  { value: "kicked",          label: "🚫 Dikeluarkan" },
   { value: "offline",         label: "⚫ Offline" },
+  { value: "screenshot",      label: "📸 Screenshot" },
+  { value: "ip_change",       label: "🌐 Ganti IP" },
   { value: "tab_switch",      label: "🔁 Ganti Tab" },
   { value: "fullscreen_exit", label: "⛶ Keluar Fullscreen" },
   { value: "copy_attempt",    label: "📋 Copy-Paste" },
@@ -96,6 +105,7 @@ const STATUS_STYLE: Record<StudentStatus, { bg: string; color: string; label: st
   offline:   { bg: "#F3F4F6", color: "#6B7280", label: "Offline",    dot: "#9CA3AF" },
   blocked:   { bg: "#FEE2E2", color: "#DC2626", label: "Diblokir 🔒", dot: "#DC2626" },
   submitted: { bg: "#E0F4FD", color: "#0369A1", label: "Selesai ✓",  dot: "#29ABE2" },
+  kicked:    { bg: "#FEF2F2", color: "#991B1B", label: "Dikeluarkan 🚫", dot: "#EF4444" },
 };
 
 // ─── Avatar ───────────────────────────────────────────────────────────────────
@@ -490,6 +500,16 @@ function DetailPanel({
                         <div style={{ fontSize: 11, color: "#8A8F99" }}>
                           {new Date(evt.timestamp).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
                         </div>
+                        {evt.eventType === "ip_change" && evt.metadata && (
+                          <div style={{ fontSize: 11, color: "#DC2626", marginTop: 3, background: "#FEF2F2", padding: "2px 6px", borderRadius: 4, fontFamily: "monospace" }}>
+                            🌐 {evt.metadata.oldIp || "?"} ➔ {evt.metadata.newIp || "?"}
+                          </div>
+                        )}
+                        {evt.eventType === "screenshot" && evt.metadata && (
+                          <div style={{ fontSize: 11, color: "#E11D48", marginTop: 3, background: "#FFF1F2", padding: "2px 6px", borderRadius: 4 }}>
+                            📸 {evt.metadata.trigger || evt.metadata.key || "PrintScreen"}
+                          </div>
+                        )}
                       </div>
                       <span style={{
                         fontSize: 10, fontWeight: 600, padding: "1px 7px", borderRadius: 99,
@@ -547,10 +567,783 @@ function DetailPanel({
   );
 }
 
+// ─── Interfaces & Components for Lobby & Real-Time Logging ───────────────────
+interface LobbyStudentItem {
+  id: string;
+  name: string;
+  nisn: string;
+  status: "waiting" | "accepted";
+  joinedAt: string;
+  acceptedAt?: string | null;
+  ipAddress?: string | null;
+}
+
+interface LiveProctoringEvent {
+  id?: string;
+  studentId: string;
+  studentName: string;
+  nisn?: string;
+  eventType: ViolationKey | string;
+  timestamp: string;
+  durationMs?: number;
+  metadata?: Record<string, any>;
+}
+
+// ─── Lobby Approval Modal (Pop-Up di Proctoring) ──────────────────────────────
+function LobbyApprovalModal({
+  examId,
+  isOpen,
+  onClose,
+  lobbyStudents,
+  onRefresh,
+}: {
+  examId: string;
+  isOpen: boolean;
+  onClose: () => void;
+  lobbyStudents: LobbyStudentItem[];
+  onRefresh: () => void;
+}) {
+  const [tab, setTab] = useState<"all" | "waiting" | "accepted">("all");
+  const [loadingAction, setLoadingAction] = useState<string | null>(null);
+
+  if (!isOpen) return null;
+
+  const waitingList = lobbyStudents.filter((s) => s.status === "waiting");
+  const acceptedList = lobbyStudents.filter((s) => s.status === "accepted");
+
+  const displayedList =
+    tab === "waiting"
+      ? waitingList
+      : tab === "accepted"
+      ? acceptedList
+      : lobbyStudents;
+
+  const handleAcceptOne = async (sid: string) => {
+    setLoadingAction(sid);
+    try {
+      const res = await apiFetch<any>(`/api/exams/${examId}/students/${sid}/accept`, {
+        method: "POST",
+      });
+      if (res.success) {
+        onRefresh();
+      } else {
+        alert(res.error?.message || "Gagal menerima peserta");
+      }
+    } catch {
+      alert("Terjadi kesalahan jaringan");
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
+  const handleStartOne = async (sid: string) => {
+    setLoadingAction(`start-${sid}`);
+    try {
+      const res = await apiFetch<any>(`/api/exams/${examId}/students/${sid}/start`, {
+        method: "POST",
+      });
+      if (res.success) {
+        onRefresh();
+      } else {
+        alert(res.error?.message || "Gagal memulai ujian peserta");
+      }
+    } catch {
+      alert("Terjadi kesalahan jaringan");
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
+  const handleAcceptAll = async () => {
+    setLoadingAction("accept-all");
+    try {
+      const res = await apiFetch<any>(`/api/exams/${examId}/students/accept-all`, {
+        method: "POST",
+      });
+      if (res.success) {
+        onRefresh();
+      } else {
+        alert(res.error?.message || "Gagal menerima semua peserta");
+      }
+    } catch {
+      alert("Terjadi kesalahan jaringan");
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
+  const handleStartAll = async () => {
+    if (!confirm(`Mulai ujian sekarang untuk seluruh ${lobbyStudents.length} peserta di ruang tunggu?`)) {
+      return;
+    }
+    setLoadingAction("start-all");
+    try {
+      const res = await apiFetch<any>(`/api/exams/${examId}/start`, {
+        method: "POST",
+      });
+      if (res.success) {
+        onRefresh();
+        onClose();
+      } else {
+        alert(res.error?.message || "Gagal memulai ujian massal");
+      }
+    } catch {
+      alert("Terjadi kesalahan jaringan");
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 500,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "16px",
+      }}
+      onClick={onClose}
+    >
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          background: "rgba(15, 23, 42, 0.45)",
+          backdropFilter: "blur(4px)",
+        }}
+      />
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          position: "relative",
+          width: "100%",
+          maxWidth: "700px",
+          maxHeight: "88vh",
+          background: "white",
+          borderRadius: "14px",
+          boxShadow: "0 20px 60px rgba(15, 24, 40, 0.22)",
+          display: "flex",
+          flexDirection: "column",
+          zIndex: 1,
+          overflow: "hidden",
+          animation: "scaleUp 0.18s ease-out",
+        }}
+      >
+        {/* Modal Header */}
+        <div
+          style={{
+            padding: "18px 24px",
+            borderBottom: "1px solid #E2E8F0",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            background: "#F8FAFC",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <div
+              style={{
+                width: "36px",
+                height: "36px",
+                borderRadius: "10px",
+                background: "#E0F2FE",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: "18px",
+              }}
+            >
+              👥
+            </div>
+            <div>
+              <div style={{ fontSize: "16px", fontWeight: 700, color: "#0F172A", display: "flex", alignItems: "center", gap: "8px" }}>
+                <span>Persetujuan Lobby Peserta</span>
+                {waitingList.length > 0 && (
+                  <span
+                    style={{
+                      background: "#FEF3C7",
+                      color: "#D97706",
+                      fontSize: "11px",
+                      fontWeight: 700,
+                      padding: "2px 8px",
+                      borderRadius: "99px",
+                      border: "1px solid #FCD34D",
+                    }}
+                  >
+                    {waitingList.length} Menunggu
+                  </span>
+                )}
+              </div>
+              <div style={{ fontSize: "12px", color: "#64748B" }}>
+                Peserta yang sedang berada di ruang tunggu ujian
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            style={{
+              background: "#EDF2F7",
+              border: "none",
+              borderRadius: "8px",
+              width: "32px",
+              height: "32px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+              fontSize: "16px",
+              color: "#64748B",
+            }}
+            aria-label="Tutup"
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Global Action Bar */}
+        <div
+          style={{
+            padding: "12px 24px",
+            background: "#FFFFFF",
+            borderBottom: "1px solid #F1F5F9",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: "10px",
+          }}
+        >
+          {/* Tabs */}
+          <div style={{ display: "flex", gap: "6px" }}>
+            <button
+              onClick={() => setTab("all")}
+              style={{
+                padding: "6px 12px",
+                borderRadius: "8px",
+                border: "none",
+                fontSize: "12px",
+                fontWeight: 600,
+                cursor: "pointer",
+                background: tab === "all" ? "#0F172A" : "#F1F5F9",
+                color: tab === "all" ? "white" : "#64748B",
+              }}
+            >
+              Semua ({lobbyStudents.length})
+            </button>
+            <button
+              onClick={() => setTab("waiting")}
+              style={{
+                padding: "6px 12px",
+                borderRadius: "8px",
+                border: "none",
+                fontSize: "12px",
+                fontWeight: 600,
+                cursor: "pointer",
+                background: tab === "waiting" ? "#D97706" : "#F1F5F9",
+                color: tab === "waiting" ? "white" : "#64748B",
+              }}
+            >
+              Menunggu ({waitingList.length})
+            </button>
+            <button
+              onClick={() => setTab("accepted")}
+              style={{
+                padding: "6px 12px",
+                borderRadius: "8px",
+                border: "none",
+                fontSize: "12px",
+                fontWeight: 600,
+                cursor: "pointer",
+                background: tab === "accepted" ? "#16A34A" : "#F1F5F9",
+                color: tab === "accepted" ? "white" : "#64748B",
+              }}
+            >
+              Diterima ({acceptedList.length})
+            </button>
+          </div>
+
+          {/* Quick Bulk Buttons */}
+          <div style={{ display: "flex", gap: "8px" }}>
+            {waitingList.length > 0 && (
+              <button
+                onClick={handleAcceptAll}
+                disabled={loadingAction === "accept-all"}
+                style={{
+                  padding: "7px 14px",
+                  borderRadius: "8px",
+                  border: "1px solid #BBF7D0",
+                  background: "#F0FDF4",
+                  color: "#15803D",
+                  fontSize: "12px",
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  opacity: loadingAction === "accept-all" ? 0.6 : 1,
+                }}
+              >
+                {loadingAction === "accept-all" ? "Memproses..." : "✅ Terima Semua"}
+              </button>
+            )}
+            {lobbyStudents.length > 0 && (
+              <button
+                onClick={handleStartAll}
+                disabled={loadingAction === "start-all"}
+                style={{
+                  padding: "7px 14px",
+                  borderRadius: "8px",
+                  border: "none",
+                  background: "linear-gradient(135deg, #1D4ED8, #2563EB)",
+                  color: "white",
+                  fontSize: "12px",
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  boxShadow: "0 2px 8px rgba(37,99,235,0.25)",
+                  opacity: loadingAction === "start-all" ? 0.6 : 1,
+                }}
+              >
+                {loadingAction === "start-all" ? "Memulai..." : "🚀 Mulai Ujian Semua"}
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Student List Body */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "16px 24px" }}>
+          {displayedList.length === 0 ? (
+            <div
+              style={{
+                textAlign: "center",
+                padding: "48px 16px",
+                color: "#64748B",
+              }}
+            >
+              <div style={{ fontSize: "36px", marginBottom: "12px" }}>🎉</div>
+              <div style={{ fontSize: "15px", fontWeight: 700, color: "#1E293B" }}>
+                Tidak ada peserta pada daftar ini
+              </div>
+              <div style={{ fontSize: "13px", color: "#94A3B8", marginTop: "4px" }}>
+                Semua peserta telah diproses atau belum ada yang bergabung ke lobby.
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+              {displayedList.map((stu) => {
+                const isWaiting = stu.status === "waiting";
+                const isAccepting = loadingAction === stu.id;
+                const isStarting = loadingAction === `start-${stu.id}`;
+
+                return (
+                  <div
+                    key={stu.id}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      padding: "12px 16px",
+                      borderRadius: "10px",
+                      border: "1px solid #E2E8F0",
+                      background: isWaiting ? "#FFFBEB" : "#F8FAFC",
+                      gap: "12px",
+                    }}
+                  >
+                    {/* Left: Avatar + Info */}
+                    <div style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0 }}>
+                      <div
+                        style={{
+                          width: "38px",
+                          height: "38px",
+                          borderRadius: "50%",
+                          background: isWaiting
+                            ? "linear-gradient(135deg, #F59E0B, #D97706)"
+                            : "linear-gradient(135deg, #10B981, #059669)",
+                          color: "white",
+                          fontWeight: 700,
+                          fontSize: "14px",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          flexShrink: 0,
+                        }}
+                      >
+                        {getInitials(stu.name)}
+                      </div>
+                      <div style={{ minWidth: 0 }}>
+                        <div
+                          style={{
+                            fontSize: "14px",
+                            fontWeight: 700,
+                            color: "#1E293B",
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                          }}
+                        >
+                          {stu.name}
+                        </div>
+                        <div style={{ fontSize: "11px", color: "#64748B", display: "flex", alignItems: "center", gap: "6px" }}>
+                          <span>NISN: {stu.nisn}</span>
+                          <span>·</span>
+                          <span>{new Date(stu.joinedAt).toLocaleTimeString("id-ID")}</span>
+                          {stu.ipAddress && (
+                            <>
+                              <span>·</span>
+                              <span style={{ fontFamily: "monospace", fontSize: "10px" }}>{stu.ipAddress}</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Right: Status badge & Actions */}
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
+                      <span
+                        style={{
+                          fontSize: "11px",
+                          fontWeight: 700,
+                          padding: "3px 8px",
+                          borderRadius: "99px",
+                          background: isWaiting ? "#FEF3C7" : "#DCFCE7",
+                          color: isWaiting ? "#B45309" : "#15803D",
+                          border: `1px solid ${isWaiting ? "#FCD34D" : "#86EFAC"}`,
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {isWaiting ? "🟡 Menunggu" : "🟢 Diterima"}
+                      </span>
+
+                      {isWaiting && (
+                        <button
+                          onClick={() => handleAcceptOne(stu.id)}
+                          disabled={isAccepting || isStarting}
+                          style={{
+                            padding: "6px 10px",
+                            borderRadius: "6px",
+                            border: "1px solid #86EFAC",
+                            background: "#F0FDF4",
+                            color: "#15803D",
+                            fontSize: "11px",
+                            fontWeight: 700,
+                            cursor: "pointer",
+                            opacity: isAccepting ? 0.6 : 1,
+                          }}
+                        >
+                          {isAccepting ? "..." : "✅ Terima"}
+                        </button>
+                      )}
+
+                      <button
+                        onClick={() => handleStartOne(stu.id)}
+                        disabled={isAccepting || isStarting}
+                        style={{
+                          padding: "6px 12px",
+                          borderRadius: "6px",
+                          border: "none",
+                          background: isWaiting
+                            ? "linear-gradient(135deg, #0284C7, #0369A1)"
+                            : "linear-gradient(135deg, #10B981, #047857)",
+                          color: "white",
+                          fontSize: "11px",
+                          fontWeight: 700,
+                          cursor: "pointer",
+                          opacity: isStarting ? 0.6 : 1,
+                          boxShadow: "0 1px 4px rgba(0,0,0,0.1)",
+                        }}
+                      >
+                        {isStarting ? "..." : isWaiting ? "🚀 Terima & Mulai" : "🚀 Mulai Ujian"}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Modal Footer */}
+        <div
+          style={{
+            padding: "12px 24px",
+            borderTop: "1px solid #E2E8F0",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            background: "#F8FAFC",
+            fontSize: "12px",
+            color: "#64748B",
+          }}
+        >
+          <span>
+            {waitingList.length > 0
+              ? `${waitingList.length} peserta belum disetujui`
+              : "Semua peserta di lobby telah disetujui"}
+          </span>
+          <button
+            onClick={onClose}
+            style={{
+              padding: "6px 14px",
+              borderRadius: "6px",
+              border: "1px solid #CBD5E1",
+              background: "white",
+              color: "#334155",
+              fontSize: "12px",
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            Sembunyikan Pop-Up
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Live Proctoring Drawer (Feed Log Real-Time) ──────────────────────────────
+function LiveProctoringDrawer({
+  isOpen,
+  onClose,
+  events,
+  onSelectStudent,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  events: LiveProctoringEvent[];
+  onSelectStudent: (studentId: string) => void;
+}) {
+  const [filterType, setFilterType] = useState<string>("all");
+
+  if (!isOpen) return null;
+
+  const filtered = events.filter((ev) => {
+    if (filterType === "all") return true;
+    return ev.eventType === filterType;
+  });
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 450,
+        display: "flex",
+        justifyContent: "flex-end",
+      }}
+      onClick={onClose}
+    >
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          background: "rgba(15, 24, 40, 0.35)",
+          backdropFilter: "blur(2px)",
+        }}
+      />
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          position: "relative",
+          width: 440,
+          maxWidth: "92vw",
+          background: "white",
+          boxShadow: "-8px 0 48px rgba(15,24,40,0.18)",
+          display: "flex",
+          flexDirection: "column",
+          zIndex: 1,
+          animation: "slideIn 0.22s ease",
+        }}
+      >
+        {/* Header */}
+        <div
+          style={{
+            padding: "16px 20px",
+            borderBottom: "1px solid #E2E8F0",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            background: "#F8FAFC",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 18 }}>📜</span>
+            <div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A" }}>
+                Log Pelanggaran Proctoring
+              </div>
+              <div style={{ fontSize: 11, color: "#64748B" }}>
+                Perekaman aktivitas real-time peserta ujian
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            style={{
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              fontSize: 20,
+              color: "#64748B",
+              padding: 4,
+            }}
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Filter Chips */}
+        <div
+          style={{
+            padding: "10px 16px",
+            background: "white",
+            borderBottom: "1px solid #F1F5F9",
+            display: "flex",
+            gap: 6,
+            overflowX: "auto",
+            scrollbarWidth: "none",
+          }}
+        >
+          {[
+            { key: "all", label: "Semua" },
+            { key: "screenshot", label: "📸 Screenshot" },
+            { key: "ip_change", label: "🌐 Ganti IP" },
+            { key: "tab_switch", label: "🔁 Tab" },
+            { key: "fullscreen_exit", label: "⛶ Fullscreen" },
+            { key: "copy_attempt", label: "📋 Copy" },
+            { key: "devtools", label: "🔧 DevTools" },
+          ].map((f) => (
+            <button
+              key={f.key}
+              onClick={() => setFilterType(f.key)}
+              style={{
+                padding: "4px 10px",
+                borderRadius: 99,
+                fontSize: 11,
+                fontWeight: 600,
+                border: "none",
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+                background: filterType === f.key ? "#0F172A" : "#F1F5F9",
+                color: filterType === f.key ? "white" : "#64748B",
+              }}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Events Feed */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "16px" }}>
+          {filtered.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "40px 16px", color: "#94A3B8" }}>
+              <div style={{ fontSize: 32, marginBottom: 8 }}>🛡️</div>
+              <div style={{ fontSize: 14, fontWeight: 600 }}>Belum ada log pelanggaran</div>
+              <div style={{ fontSize: 12 }}>Aktivitas pelanggaran peserta akan muncul di sini secara langsung.</div>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {filtered.map((ev, idx) => {
+                const cfg = VIOLATION_CONFIG[ev.eventType as ViolationKey] || {
+                  label: ev.eventType,
+                  icon: "⚠️",
+                  color: "#DC2626",
+                };
+
+                return (
+                  <div
+                    key={ev.id || idx}
+                    onClick={() => {
+                      if (ev.studentId) onSelectStudent(ev.studentId);
+                    }}
+                    style={{
+                      padding: "10px 14px",
+                      borderRadius: 10,
+                      border: `1px solid ${cfg.color}25`,
+                      background: `${cfg.color}08`,
+                      cursor: "pointer",
+                      transition: "transform 0.12s ease",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <span style={{ fontSize: 15 }}>{cfg.icon}</span>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: cfg.color }}>
+                          {cfg.label}
+                        </span>
+                      </div>
+                      <span style={{ fontSize: 11, color: "#64748B", fontFamily: "monospace" }}>
+                        {new Date(ev.timestamp).toLocaleTimeString("id-ID", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                          second: "2-digit",
+                        })}
+                      </span>
+                    </div>
+
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#1E293B", marginBottom: 2 }}>
+                      {ev.studentName || "Peserta"}
+                      {ev.nisn ? ` (NISN: ${ev.nisn})` : ""}
+                    </div>
+
+                    {/* Metadata details */}
+                    {ev.eventType === "ip_change" && ev.metadata && (
+                      <div
+                        style={{
+                          marginTop: 4,
+                          fontSize: 11,
+                          color: "#DC2626",
+                          background: "#FEE2E2",
+                          padding: "3px 8px",
+                          borderRadius: 6,
+                          fontFamily: "monospace",
+                        }}
+                      >
+                        🌐 IP Lama: <strong>{ev.metadata.oldIp || "?"}</strong> ➔ IP Baru: <strong>{ev.metadata.newIp || "?"}</strong>
+                      </div>
+                    )}
+
+                    {ev.eventType === "screenshot" && ev.metadata && (
+                      <div
+                        style={{
+                          marginTop: 4,
+                          fontSize: 11,
+                          color: "#E11D48",
+                          background: "#FFE4E6",
+                          padding: "3px 8px",
+                          borderRadius: 6,
+                        }}
+                      >
+                        📸 Metode: <strong>{ev.metadata.trigger || ev.metadata.key || "PrintScreen"}</strong>
+                      </div>
+                    )}
+
+                    {ev.durationMs ? (
+                      <div style={{ marginTop: 4, fontSize: 11, color: "#64748B" }}>
+                        Durasi di luar: {(ev.durationMs / 1000).toFixed(1)}s
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 function MonitorPageContent() {
   const params = useParams();
   const examId = (params?.id as string) ?? "";
+  const { accessToken } = useTeacherAuth();
   const [exam, setExam] = useState({
     id: examId,
     title: "Monitoring Ujian",
@@ -574,6 +1367,20 @@ function MonitorPageContent() {
   const [filterOpen, setFilterOpen] = useState(false);
   const filterRef = useRef<HTMLDivElement>(null);
 
+  // Lobby modal & real-time logging state
+  const [lobbyStudents, setLobbyStudents] = useState<LobbyStudentItem[]>([]);
+  const [lobbyModalOpen, setLobbyModalOpen] = useState(false);
+  const [hasAutoOpenedLobby, setHasAutoOpenedLobby] = useState(false);
+  const [eventsLog, setEventsLog] = useState<LiveProctoringEvent[]>([]);
+  const [logDrawerOpen, setLogDrawerOpen] = useState(false);
+  const [urgentToast, setUrgentToast] = useState<{
+    id: string;
+    type: "screenshot" | "ip_change" | "violation";
+    title: string;
+    desc: string;
+    studentId: string;
+  } | null>(null);
+
   // Countdown
   useEffect(() => {
     if (secondsLeft <= 0) return;
@@ -593,7 +1400,7 @@ function MonitorPageContent() {
       let eventsByStudent: Record<string, ViolationKey[]> = {};
 
       if (dashRes.success && dashRes.data) {
-        const { exam: beExam, serverTime, recentEvents } = dashRes.data;
+        const { exam: beExam, serverTime, recentEvents, lobbyStudents: beLobby } = dashRes.data;
         if (beExam) {
           setExam((prev) => ({
             ...prev,
@@ -618,7 +1425,17 @@ function MonitorPageContent() {
           }
         }
 
+        if (Array.isArray(beLobby)) {
+          setLobbyStudents(beLobby);
+          const waitingCount = beLobby.filter((s: any) => s.status === "waiting").length;
+          if (waitingCount > 0 && !hasAutoOpenedLobby) {
+            setLobbyModalOpen(true);
+            setHasAutoOpenedLobby(true);
+          }
+        }
+
         if (Array.isArray(recentEvents)) {
+          setEventsLog(recentEvents);
           recentEvents.forEach((ev: any) => {
             if (ev.studentId && ev.eventType) {
               if (!eventsByStudent[ev.studentId]) eventsByStudent[ev.studentId] = [];
@@ -634,7 +1451,8 @@ function MonitorPageContent() {
         const mapped: StudentFeedItem[] = stuRes.data.students.map((s: any) => {
           const activeFlags = eventsByStudent[s.id] || [];
           let status: StudentStatus = "offline";
-          if (s.isLocked) status = "blocked";
+          if (s.status === "kicked") status = "kicked";
+          else if (s.isLocked) status = "blocked";
           else if (s.status === "active") status = "online";
           else if (s.status === "submitted") status = "submitted";
 
@@ -658,13 +1476,92 @@ function MonitorPageContent() {
     } finally {
       setLoading(false);
     }
-  }, [examId]);
+  }, [examId, hasAutoOpenedLobby]);
 
   useEffect(() => {
     fetchDashboardData();
-    const interval = setInterval(fetchDashboardData, 10000);
+    const interval = setInterval(fetchDashboardData, 8000);
     return () => clearInterval(interval);
   }, [fetchDashboardData]);
+
+  // Real-time Socket.IO connection
+  useEffect(() => {
+    if (!examId || !accessToken) return;
+    const socket = io("/teacher-dashboard", {
+      auth: { token: accessToken },
+      transports: ["websocket", "polling"],
+    });
+
+    socket.on("connect", () => {
+      socket.emit("join_exam_dashboard", { examId });
+    });
+
+    socket.on("student_joined_waiting", () => {
+      fetchDashboardData();
+      setLobbyModalOpen(true);
+    });
+
+    socket.on("student_violation", (data: any) => {
+      fetchDashboardData();
+      const newEvt: LiveProctoringEvent = {
+        id: data.event?.id || String(Date.now()),
+        studentId: data.studentId,
+        studentName: data.name,
+        nisn: data.nisn,
+        eventType: data.event?.eventType || "violation",
+        timestamp: data.event?.timestamp || new Date().toISOString(),
+        durationMs: data.event?.durationMs,
+        metadata: data.event?.metadata,
+      };
+      setEventsLog((prev) => [newEvt, ...prev.slice(0, 99)]);
+
+      if (newEvt.eventType === "screenshot") {
+        setUrgentToast({
+          id: String(Date.now()),
+          type: "screenshot",
+          title: "📸 Percobaan Screenshot Terdeteksi!",
+          desc: `${data.name} (NISN: ${data.nisn}) mencoba melakukan tangkapan layar.`,
+          studentId: data.studentId,
+        });
+        setTimeout(() => setUrgentToast(null), 7000);
+      } else if (newEvt.eventType === "ip_change") {
+        const oldIp = data.event?.metadata?.oldIp || "?";
+        const newIp = data.event?.metadata?.newIp || "?";
+        setUrgentToast({
+          id: String(Date.now()),
+          type: "ip_change",
+          title: "🌐 Perubahan Alamat IP Terdeteksi!",
+          desc: `${data.name} beralih IP dari ${oldIp} ke ${newIp}.`,
+          studentId: data.studentId,
+        });
+        setTimeout(() => setUrgentToast(null), 7000);
+      }
+    });
+
+    socket.on("screenshot_detected", (data: any) => {
+      setUrgentToast({
+        id: String(Date.now()),
+        type: "screenshot",
+        title: "📸 Percobaan Screenshot Terdeteksi!",
+        desc: `${data.name} (NISN: ${data.nisn}) mencoba mengambil tangkapan layar.`,
+        studentId: data.studentId,
+      });
+      setTimeout(() => setUrgentToast(null), 7000);
+    });
+
+    socket.on("student_status_changed", () => {
+      fetchDashboardData();
+    });
+
+    socket.on("student_presence", () => {
+      fetchDashboardData();
+    });
+
+    return () => {
+      socket.emit("leave_exam_dashboard", { examId });
+      socket.disconnect();
+    };
+  }, [examId, accessToken, fetchDashboardData]);
 
   // Close dropdown outside
   useEffect(() => {
@@ -689,6 +1586,7 @@ function MonitorPageContent() {
   const blockedCount = students.filter(s => s.status === "blocked").length;
   const offlineCount = students.filter(s => s.status === "offline").length;
   const onlineCount = students.filter(s => s.status === "online").length;
+  const waitingLobbyCount = lobbyStudents.filter(s => s.status === "waiting").length;
   const isTimeCritical = secondsLeft <= 5 * 60;
   const isTimeUp = secondsLeft <= 0;
 
@@ -712,7 +1610,83 @@ function MonitorPageContent() {
           <h1 style={{ fontSize: 15, fontWeight: 700, color: "#1F2430", margin: 0, lineHeight: 1.1 }}>Proctoring – Live Feed</h1>
           <div style={{ fontSize: 11, color: "#8A8F99", marginTop: 1 }}>{exam.title}</div>
         </div>
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 14 }}>
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
+          {/* Ruang Tunggu / Lobby Button with popup trigger */}
+          <button
+            onClick={() => setLobbyModalOpen(true)}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              background: waitingLobbyCount > 0 ? "#FEF3C7" : "#F1F5F9",
+              border: waitingLobbyCount > 0 ? "1.5px solid #FCD34D" : "1px solid #CBD5E1",
+              borderRadius: 8,
+              padding: "5px 12px",
+              cursor: "pointer",
+              fontFamily: "var(--font-family)",
+              color: waitingLobbyCount > 0 ? "#B45309" : "#334155",
+              fontWeight: 700,
+              fontSize: 12,
+              boxShadow: waitingLobbyCount > 0 ? "0 2px 8px rgba(217,119,6,0.18)" : "none",
+            }}
+          >
+            <span>👥 Lobby</span>
+            {lobbyStudents.length > 0 && (
+              <span
+                style={{
+                  background: waitingLobbyCount > 0 ? "#D97706" : "#64748B",
+                  color: "white",
+                  fontSize: 10,
+                  fontWeight: 700,
+                  borderRadius: 99,
+                  padding: "0 6px",
+                  lineHeight: "16px",
+                }}
+              >
+                {waitingLobbyCount > 0 ? `${waitingLobbyCount} Menunggu` : `${lobbyStudents.length} Peserta`}
+              </span>
+            )}
+            {waitingLobbyCount > 0 && (
+              <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#D97706" }} className="live-pulse" />
+            )}
+          </button>
+
+          {/* Log Pelanggaran Drawer Trigger */}
+          <button
+            onClick={() => setLogDrawerOpen(true)}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              background: "#F8FAFC",
+              border: "1px solid #CBD5E1",
+              borderRadius: 8,
+              padding: "5px 12px",
+              cursor: "pointer",
+              fontFamily: "var(--font-family)",
+              color: "#1E293B",
+              fontWeight: 700,
+              fontSize: 12,
+            }}
+          >
+            <span>📜 Log Proctoring</span>
+            {eventsLog.length > 0 && (
+              <span
+                style={{
+                  background: "#0F172A",
+                  color: "white",
+                  fontSize: 10,
+                  fontWeight: 700,
+                  borderRadius: 99,
+                  padding: "0 6px",
+                  lineHeight: "16px",
+                }}
+              >
+                {eventsLog.length}
+              </span>
+            )}
+          </button>
+
           {/* Blocked alert */}
           {blockedCount > 0 && (
             <button onClick={() => setFilter("blocked")} style={{
@@ -810,7 +1784,7 @@ function MonitorPageContent() {
 
         {/* Violation legend buttons */}
         <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-          {["tab_switch", "fullscreen_exit", "copy_attempt", "window_blur", "devtools", "right_click"].map((key) => {
+          {["screenshot", "ip_change", "tab_switch", "fullscreen_exit", "copy_attempt", "window_blur", "devtools", "right_click"].map((key) => {
             const cfg = VIOLATION_CONFIG[key];
             if (!cfg) return null;
             const count = countByViolation(key as ViolationKey);
@@ -1033,6 +2007,86 @@ function MonitorPageContent() {
           onClose={() => setSelectedStudent(null)}
           onActionDone={fetchDashboardData}
         />
+      )}
+
+      {/* Lobby Approval Pop-Up Modal */}
+      <LobbyApprovalModal
+        examId={examId}
+        isOpen={lobbyModalOpen}
+        onClose={() => setLobbyModalOpen(false)}
+        lobbyStudents={lobbyStudents}
+        onRefresh={fetchDashboardData}
+      />
+
+      {/* Live Proctoring Event Log Drawer */}
+      <LiveProctoringDrawer
+        isOpen={logDrawerOpen}
+        onClose={() => setLogDrawerOpen(false)}
+        events={eventsLog}
+        onSelectStudent={(sid) => {
+          const stu = students.find((s) => s.studentId === sid);
+          if (stu) {
+            setSelectedStudent(stu);
+            setLogDrawerOpen(false);
+          }
+        }}
+      />
+
+      {/* Urgent Violation Toast (Screenshot & IP Change) */}
+      {urgentToast && (
+        <div
+          style={{
+            position: "fixed",
+            top: 56,
+            right: 24,
+            zIndex: 600,
+            background: urgentToast.type === "screenshot" ? "#FFF1F2" : "#FEF2F2",
+            border: `2px solid ${urgentToast.type === "screenshot" ? "#E11D48" : "#DC2626"}`,
+            borderRadius: 12,
+            padding: "14px 18px",
+            boxShadow: "0 10px 30px rgba(0,0,0,0.18)",
+            maxWidth: 380,
+            animation: "slideIn 0.2s ease",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 800, color: urgentToast.type === "screenshot" ? "#BE123C" : "#991B1B" }}>
+                {urgentToast.title}
+              </div>
+              <div style={{ fontSize: 12, color: "#1F2430", marginTop: 4, lineHeight: 1.4 }}>
+                {urgentToast.desc}
+              </div>
+            </div>
+            <button
+              onClick={() => setUrgentToast(null)}
+              style={{ background: "none", border: "none", cursor: "pointer", fontSize: 16, color: "#64748B" }}
+            >
+              ✕
+            </button>
+          </div>
+          <div style={{ marginTop: 8, display: "flex", justifyContent: "flex-end", gap: 8 }}>
+            <button
+              onClick={() => {
+                const stu = students.find((s) => s.studentId === urgentToast.studentId);
+                if (stu) setSelectedStudent(stu);
+                setUrgentToast(null);
+              }}
+              style={{
+                padding: "4px 10px",
+                background: urgentToast.type === "screenshot" ? "#E11D48" : "#DC2626",
+                color: "white",
+                border: "none",
+                borderRadius: 6,
+                fontSize: 11,
+                fontWeight: 700,
+                cursor: "pointer",
+              }}
+            >
+              Periksa Peserta →
+            </button>
+          </div>
+        </div>
       )}
 
       <div aria-live="polite" aria-atomic="true" style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0,0,0,0)", whiteSpace: "nowrap" }} />

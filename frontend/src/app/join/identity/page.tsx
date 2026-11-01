@@ -102,7 +102,12 @@ function IdentityFormInner() {
         if (typeof window !== "undefined") {
           sessionStorage.setItem("eduquas_student_session", JSON.stringify(res.data));
         }
-        router.push("/exam/session");
+        // Jika reconnect saat ujian sudah active dan siswa sudah active -> langsung ke lembar ujian
+        if (res.data.student?.status === "active" && res.data.nextStep === "session") {
+          router.push("/exam/session");
+        } else {
+          router.push("/exam/lobby");
+        }
         return;
       }
 
@@ -128,7 +133,7 @@ function IdentityFormInner() {
         });
         sessionStorage.setItem("eduquas_student_session", fallbackData);
       }
-      router.push("/exam/session");
+      router.push("/exam/lobby");
     } finally {
       setLoading(false);
     }
@@ -300,7 +305,7 @@ function IdentityFormInner() {
                 transition: "background-color 150ms ease",
               }}
             >
-              {loading ? "Memverifikasi..." : "Mulai Ujian →"}
+              {loading ? "Memverifikasi..." : "Masuk ke Ruang Tunggu →"}
             </button>
           </form>
         </div>
