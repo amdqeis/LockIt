@@ -490,6 +490,9 @@ export default function ExamSessionPage() {
   const [submitStep, setSubmitStep] = useState<0 | 1 | 2>(0);
   const [isLocked, setIsLocked] = useState(false);
   const [screenshotLockReason, setScreenshotLockReason] = useState<string | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(true);
+  const [showFullscreenGate, setShowFullscreenGate] = useState(false);
+  const [hasEnteredFullscreenBefore, setHasEnteredFullscreenBefore] = useState(false);
   const [studentProfile, setStudentProfile] = useState<{ name: string; nisn: string } | null>(null);
   const [warningBanner, setWarningBanner] = useState<string | null>(null);
   const [timeExpiredOverlay, setTimeExpiredOverlay] = useState(false);
@@ -525,17 +528,68 @@ export default function ExamSessionPage() {
     setCurrentDateStr(new Date().toLocaleDateString("id-ID", { weekday: "long", year: "numeric", month: "long", day: "numeric" }));
   }, []);
 
-  // Auto-request fullscreen saat halaman sesi dimuat
-  useEffect(() => {
-    const requestFs = async () => {
-      try {
-        if (document.fullscreenElement) return;
+  // Fullscreen Management: permintaan fullscreen dengan fallback user gesture & pengawasan status
+  const enterFullscreen = useCallback(async () => {
+    try {
+      if (!document.fullscreenElement) {
         await document.documentElement.requestFullscreen();
-      } catch {
-        sendProctoringEvent("fullscreen_denied");
+      }
+      setIsFullscreen(true);
+      setShowFullscreenGate(false);
+      setHasEnteredFullscreenBefore(true);
+    } catch (err) {
+      console.warn("Fullscreen request rejected or requires user gesture:", err);
+      setIsFullscreen(false);
+      setShowFullscreenGate(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const checkFs = () => {
+      const active = !!document.fullscreenElement;
+      setIsFullscreen(active);
+      return active;
+    };
+
+    const initialFs = checkFs();
+
+    if (!initialFs) {
+      // Coba request fullscreen (berhasil jika browser memperbolehkan atau jika ada transient gesture)
+      document.documentElement
+        .requestFullscreen()
+        .then(() => {
+          setIsFullscreen(true);
+          setShowFullscreenGate(false);
+          setHasEnteredFullscreenBefore(true);
+        })
+        .catch(() => {
+          // Browser menolak request otomatis tanpa gesture user — tampilkan Fullscreen Gate
+          setIsFullscreen(false);
+          setShowFullscreenGate(true);
+        });
+    } else {
+      setHasEnteredFullscreenBefore(true);
+    }
+
+    const onFsChange = () => {
+      const active = !!document.fullscreenElement;
+      setIsFullscreen(active);
+      if (!active) {
+        // Keluar dari fullscreen tercatat sebagai pelanggaran
+        sendProctoringEvent("fullscreen_exit");
+        setShowFullscreenGate(true);
+      } else {
+        setShowFullscreenGate(false);
+        setHasEnteredFullscreenBefore(true);
       }
     };
-    requestFs();
+
+    document.addEventListener("fullscreenchange", onFsChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", onFsChange);
+    };
   }, []);
 
   // Auto-scroll pill nav mobile ke nomor soal yang aktif
@@ -727,26 +781,6 @@ export default function ExamSessionPage() {
   useEffect(() => {
     if (submitted) return;
 
-    const handleVisibilityChange = () => {
-      if (document.hidden) {
-        sendProctoringEvent("tab_switch");
-      }
-    };
-
-    const handleBlur = () => {
-      sendProctoringEvent("window_blur");
-    };
-
-    const handleCopy = (e: ClipboardEvent) => {
-      e.preventDefault();
-      sendProctoringEvent("copy_attempt");
-    };
-
-    const handlePaste = (e: ClipboardEvent) => {
-      e.preventDefault();
-      sendProctoringEvent("paste_attempt");
-    };
-
     const triggerScreenshotViolation = (trigger: string, details?: Record<string, any>) => {
       try {
         if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -757,66 +791,157 @@ export default function ExamSessionPage() {
       }
       sendProctoringEvent("screenshot", { trigger, ...details });
       setIsLocked(true);
-      setScreenshotLockReason("Percobaan screenshot terdeteksi. Sesi ujian dikunci sementara demi keamanan.");
+      setScreenshotLockReason(`Percobaan tangkapan layar (screenshot) terdeteksi (${trigger}). Sesi ujian dikunci sementara demi keamanan.`);
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        sendProctoringEvent("tab_switch");
+      }
+    };
+
+    const handleBlur = () => {
+      sendProctoringEvent("window_blur");
+      // Purge clipboard saat kehilangan fokus agar screenshot OS tidak tersimpan
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText("");
+        }
+      } catch {}
+    };
+
+    const handleFocus = async () => {
+      // Purge clipboard saat kembali fokus
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText("");
+        }
+      } catch {}
+
+      // Deteksi jika pengguna baru saja mengambil screenshot via tool eksternal OS
+      if (navigator.clipboard && navigator.clipboard.read) {
+        try {
+          const items = await navigator.clipboard.read();
+          for (const item of items) {
+            if (item.types.some((t) => t.startsWith("image/"))) {
+              triggerScreenshotViolation("Tangkapan layar terdeteksi pada clipboard sistem");
+              break;
+            }
+          }
+        } catch {
+          // Izin clipboard mungkin diblokir browser, abaikan
+        }
+      }
+    };
+
+    const handleCopy = (e: ClipboardEvent) => {
+      e.preventDefault();
+      sendProctoringEvent("copy_attempt");
+    };
+
+    const handlePaste = (e: ClipboardEvent) => {
+      e.preventDefault();
+      const items = e.clipboardData?.items;
+      let hasImage = false;
+      if (items) {
+        for (let i = 0; i < items.length; i++) {
+          if (items[i].type.startsWith("image/")) {
+            hasImage = true;
+            break;
+          }
+        }
+      }
+      if (hasImage) {
+        triggerScreenshotViolation("Percobaan menempelkan (paste) gambar screenshot");
+      } else {
+        sendProctoringEvent("paste_attempt");
+      }
+    };
+
+    const isPrintScreenKey = (e: KeyboardEvent) => {
+      const k = (e.key || "").toLowerCase();
+      const c = (e.code || "").toLowerCase();
+      const w = e.which || e.keyCode || 0;
+      return (
+        k === "printscreen" ||
+        k === "snapshot" ||
+        k === "print" ||
+        c === "printscreen" ||
+        c === "snapshot" ||
+        w === 44 ||
+        w === 42
+      );
+    };
+
+    const checkScreenshotKeys = (e: KeyboardEvent, phase: "keydown" | "keyup"): boolean => {
+      // 1. Tombol PrintScreen / Snapshot (Linux, Windows, Web standards)
+      if (isPrintScreenKey(e)) {
+        e.preventDefault();
+        e.stopPropagation();
+        triggerScreenshotViolation(`Tombol PrintScreen (${phase})`, { key: e.key, code: e.code, which: e.which });
+        return true;
+      }
+
+      // 2. Windows Snipping Tool: Win/Ctrl/Alt + Shift + S
+      if (
+        (e.metaKey || e.ctrlKey || e.altKey) &&
+        e.shiftKey &&
+        ((e.key || "").toLowerCase() === "s" || e.code === "KeyS")
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        triggerScreenshotViolation(`Windows Snipping Tool (Win/Ctrl+Shift+S) (${phase})`, { key: e.key, code: e.code });
+        return true;
+      }
+
+      // 3. macOS Screenshot: Cmd + Shift + 3/4/5/6
+      const isMacNum = ["3", "4", "5", "6"].includes(e.key);
+      const isMacDigitCode = ["digit3", "digit4", "digit5", "digit6", "numpad3", "numpad4", "numpad5", "numpad6"].includes(
+        (e.code || "").toLowerCase()
+      );
+      if (e.metaKey && e.shiftKey && (isMacNum || isMacDigitCode)) {
+        e.preventDefault();
+        e.stopPropagation();
+        triggerScreenshotViolation(`macOS Screenshot (Cmd+Shift+${e.key || e.code}) (${phase})`, { key: e.key, code: e.code });
+        return true;
+      }
+
+      // 4. Print dialog / Save PDF attempt: Ctrl/Cmd + P
+      if ((e.ctrlKey || e.metaKey) && ((e.key || "").toLowerCase() === "p" || e.code === "KeyP")) {
+        e.preventDefault();
+        e.stopPropagation();
+        triggerScreenshotViolation(`Print / Save PDF (Ctrl/Cmd+P) (${phase})`, { key: e.key, code: e.code });
+        return true;
+      }
+
+      // 5. Windows Game Bar / Capture: Win + G
+      if ((e.metaKey || e.ctrlKey) && ((e.key || "").toLowerCase() === "g" || e.code === "KeyG")) {
+        e.preventDefault();
+        e.stopPropagation();
+        triggerScreenshotViolation(`Screen Recorder / Game Bar (Win+G) (${phase})`, { key: e.key, code: e.code });
+        return true;
+      }
+
+      return false;
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      // 1. Tombol PrintScreen / Snapshot
-      const isPrintScreen =
-        e.key === "PrintScreen" ||
-        e.code === "PrintScreen" ||
-        e.keyCode === 44 ||
-        e.key === "Snapshot" ||
-        e.code === "Snapshot";
+      if (checkScreenshotKeys(e, "keydown")) return;
 
-      // 2. Windows Snipping Tool: Win/Ctrl + Shift + S
-      const isWindowsSnipping =
-        (e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === "S" || e.key === "s");
-
-      // 3. macOS Screenshot: Cmd + Shift + 3/4/5/6
-      const isMacScreenshot =
-        e.metaKey && e.shiftKey && ["3", "4", "5", "6"].includes(e.key);
-
-      // 4. Print dialog / Save PDF attempt: Ctrl/Cmd + P
-      const isPrintAttempt =
-        (e.ctrlKey || e.metaKey) && (e.key === "P" || e.key === "p");
-
-      if (isPrintScreen || isWindowsSnipping || isMacScreenshot || isPrintAttempt) {
-        e.preventDefault();
-        e.stopPropagation();
-        const trigger = isPrintScreen
-          ? "PrintScreen key"
-          : isWindowsSnipping
-          ? "Windows Snipping Tool (Ctrl/Win+Shift+S)"
-          : isMacScreenshot
-          ? `macOS Screenshot (Cmd+Shift+${e.key})`
-          : "Print / Save PDF attempt (Ctrl/Cmd+P)";
-        triggerScreenshotViolation(trigger, { key: e.key, code: e.code });
-        return;
-      }
-
-      const isF12 = e.key === "F12";
+      const isF12 = e.key === "F12" || e.code === "F12" || e.keyCode === 123;
       const isDevTools =
         (e.ctrlKey || e.metaKey) && e.shiftKey && ["I", "i", "J", "j", "C", "c"].includes(e.key);
       const isViewSource = (e.ctrlKey || e.metaKey) && ["U", "u"].includes(e.key);
 
       if (isF12 || isDevTools || isViewSource) {
         e.preventDefault();
-        sendProctoringEvent("devtools", { key: e.key });
+        e.stopPropagation();
+        sendProctoringEvent("devtools", { key: e.key, code: e.code });
       }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      if (
-        e.key === "PrintScreen" ||
-        e.code === "PrintScreen" ||
-        e.keyCode === 44 ||
-        e.key === "Snapshot" ||
-        e.code === "Snapshot"
-      ) {
-        e.preventDefault();
-        triggerScreenshotViolation("PrintScreen key (keyup)", { key: e.key, code: e.code });
-      }
+      checkScreenshotKeys(e, "keyup");
     };
 
     const handleBeforePrint = (e: Event) => {
@@ -829,32 +954,32 @@ export default function ExamSessionPage() {
       sendProctoringEvent("right_click");
     };
 
-    const handleFullscreenChange = () => {
-      if (!document.fullscreenElement) {
-        sendProctoringEvent("fullscreen_exit");
-      }
-    };
+    const captureOptions = { capture: true, passive: false };
 
-    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("focus", handleFocus);
     window.addEventListener("blur", handleBlur);
-    document.addEventListener("copy", handleCopy);
-    document.addEventListener("paste", handlePaste);
-    document.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("keyup", handleKeyUp);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    document.addEventListener("copy", handleCopy, captureOptions);
+    document.addEventListener("paste", handlePaste, captureOptions);
+    window.addEventListener("keydown", handleKeyDown, captureOptions);
+    document.addEventListener("keydown", handleKeyDown, captureOptions);
+    window.addEventListener("keyup", handleKeyUp, captureOptions);
+    document.addEventListener("keyup", handleKeyUp, captureOptions);
     window.addEventListener("beforeprint", handleBeforePrint);
-    document.addEventListener("contextmenu", handleContextMenu);
-    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    document.addEventListener("contextmenu", handleContextMenu, captureOptions);
 
     return () => {
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("focus", handleFocus);
       window.removeEventListener("blur", handleBlur);
-      document.removeEventListener("copy", handleCopy);
-      document.removeEventListener("paste", handlePaste);
-      document.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("keyup", handleKeyUp);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      document.removeEventListener("copy", handleCopy, captureOptions);
+      document.removeEventListener("paste", handlePaste, captureOptions);
+      window.removeEventListener("keydown", handleKeyDown, captureOptions);
+      document.removeEventListener("keydown", handleKeyDown, captureOptions);
+      window.removeEventListener("keyup", handleKeyUp, captureOptions);
+      document.removeEventListener("keyup", handleKeyUp, captureOptions);
       window.removeEventListener("beforeprint", handleBeforePrint);
-      document.removeEventListener("contextmenu", handleContextMenu);
-      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+      document.removeEventListener("contextmenu", handleContextMenu, captureOptions);
     };
   }, [submitted]);
 
@@ -1006,6 +1131,107 @@ export default function ExamSessionPage() {
         <div style={{ fontSize: "64px", marginBottom: "20px" }}>⏰</div>
         <h1 style={{ fontSize: "28px", fontWeight: 700, marginBottom: "10px", fontFamily: "Poppins, sans-serif" }}>Waktu Habis!</h1>
         <p style={{ color: "rgba(255,255,255,0.85)", lineHeight: 1.7 }}>Semua jawabanmu telah tersimpan dan dikumpulkan otomatis.</p>
+      </div>
+    );
+  }
+
+  // ===================== FULLSCREEN GATE =====================
+  if (showFullscreenGate || !isFullscreen) {
+    return (
+      <div
+        style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 9999,
+          background: "linear-gradient(135deg, #0F172A 0%, #1E293B 100%)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexDirection: "column",
+          textAlign: "center",
+          padding: "24px",
+          color: "white",
+        }}
+      >
+        <div
+          style={{
+            width: "76px",
+            height: "76px",
+            borderRadius: "50%",
+            background: "rgba(41, 171, 226, 0.15)",
+            border: "2px solid #29ABE2",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: "36px",
+            marginBottom: "20px",
+            boxShadow: "0 0 24px rgba(41, 171, 226, 0.25)",
+          }}
+        >
+          ⛶
+        </div>
+        <h1
+          style={{
+            fontSize: isMobile ? "22px" : "28px",
+            fontWeight: 800,
+            marginBottom: "12px",
+            fontFamily: "Poppins, sans-serif",
+            letterSpacing: "-0.5px",
+          }}
+        >
+          {hasEnteredFullscreenBefore
+            ? "⚠️ Mode Layar Penuh Terputus!"
+            : "Mode Layar Penuh Diperlukan"}
+        </h1>
+        <p
+          style={{
+            color: "rgba(255, 255, 255, 0.82)",
+            maxWidth: "480px",
+            lineHeight: 1.7,
+            fontSize: "14px",
+            marginBottom: "28px",
+          }}
+        >
+          {hasEnteredFullscreenBefore
+            ? "Kamu telah keluar dari mode layar penuh. Keluar dari layar penuh tercatat sebagai pelanggaran proctoring. Klik tombol di bawah untuk kembali ke mode layar penuh dan melanjutkan pengerjaan soal."
+            : "Untuk menjaga integritas dan ketertiban ujian, seluruh pengerjaan soal wajib dilakukan dalam mode layar penuh (fullscreen). Klik tombol di bawah untuk memulai."}
+        </p>
+        <button
+          onClick={enterFullscreen}
+          style={{
+            padding: "14px 32px",
+            background: "#29ABE2",
+            color: "white",
+            border: "none",
+            borderRadius: "8px",
+            fontWeight: 700,
+            fontSize: "15px",
+            cursor: "pointer",
+            boxShadow: "0 4px 18px rgba(41, 171, 226, 0.45)",
+            display: "flex",
+            alignItems: "center",
+            gap: "10px",
+            transition: "all 0.15s ease",
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = "#1D8AB8")}
+          onMouseLeave={(e) => (e.currentTarget.style.background = "#29ABE2")}
+        >
+          <span style={{ fontSize: "18px" }}>⛶</span>
+          <span>
+            {hasEnteredFullscreenBefore
+              ? "Kembali ke Layar Penuh"
+              : "Masuk Layar Penuh & Mulai Ujian"}
+          </span>
+        </button>
+        <div
+          style={{
+            marginTop: "24px",
+            fontSize: "12px",
+            color: "rgba(255, 255, 255, 0.5)",
+          }}
+        >
+          Sistem LockIt Proctoring • Seluruh aktivitas diawasi secara otomatis
+        </div>
       </div>
     );
   }

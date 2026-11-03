@@ -339,10 +339,38 @@ export default function ExamLobbyPage() {
           <p style={{ fontSize: "14px", color: T.textSecondary, margin: "0 0 20px 0" }}>
             Pengawas telah menekan tombol Mulai Ujian. Mengalihkan ke lembar soal...
           </p>
+          <button
+            onClick={async () => {
+              try {
+                if (!document.fullscreenElement) {
+                  await document.documentElement.requestFullscreen();
+                }
+              } catch {}
+              router.replace("/exam/session");
+            }}
+            style={{
+              padding: "12px 28px",
+              background: T.primary,
+              color: "white",
+              border: "none",
+              borderRadius: "8px",
+              fontWeight: 700,
+              fontSize: "14px",
+              cursor: "pointer",
+              boxShadow: "0 4px 14px rgba(27, 118, 191, 0.35)",
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              marginBottom: "18px",
+            }}
+          >
+            <span>⛶</span>
+            <span>Masuk Layar Penuh Sekarang</span>
+          </button>
           <div
             style={{
-              width: "40px",
-              height: "40px",
+              width: "36px",
+              height: "36px",
               border: `3px solid ${T.primaryLight}`,
               borderTopColor: T.primary,
               borderRadius: "50%",
