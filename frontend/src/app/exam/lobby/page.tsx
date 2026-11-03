@@ -81,6 +81,10 @@ export default function ExamLobbyPage() {
           return;
         }
       } else {
+        if (res.error?.code === "ALREADY_SUBMITTED" || res.error?.code === "EXAM_ALREADY_SUBMITTED") {
+          router.replace("/exam/done");
+          return;
+        }
         if (res.error?.code === "UNAUTHORIZED" || res.error?.code === "TOKEN_EXPIRED") {
           setConnectionStatus("offline");
           setError("Sesi tidak ditemukan atau telah kedaluwarsa. Silakan masukkan kode ujian kembali.");

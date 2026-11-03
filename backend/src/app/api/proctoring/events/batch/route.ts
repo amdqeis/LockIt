@@ -75,20 +75,54 @@ export async function POST(req: NextRequest) {
       })),
     });
 
-    // CRIT-03 (batch): Atomic increment — sama seperti single event endpoint
+    // Helper: evaluate if event counts as violation under exam policy
     const policy = (exam.violationPolicy as any) || {};
     const maxViolations = policy.max_violations || 3;
     const policyAction = policy.action || "lock";
 
-    const updatedStudent = await prisma.student.update({
-      where: { id: student.id },
-      data: {
-        violationCount: { increment: events.length },
-      },
-    });
+    const isViolation = (eventType: string) => {
+      switch (eventType) {
+        case "copy_attempt":
+        case "paste_attempt":
+          return policy.detect_copy_paste !== false;
+        case "right_click":
+          return policy.detect_right_click !== false;
+        case "devtools":
+          return policy.detect_devtools !== false;
+        case "tab_switch":
+        case "window_blur":
+          return policy.detect_tab_switch !== false;
+        case "fullscreen_exit":
+        case "fullscreen_denied":
+          return policy.detect_fullscreen_exit !== false;
+        case "screenshot":
+          return policy.detect_screenshot !== false;
+        case "ip_change":
+          return policy.detect_ip_change !== false;
+        case "reconnect":
+        case "heartbeat_lost":
+        default:
+          return false;
+      }
+    };
+
+    const qualifyingViolationsCount = events.filter((ev) => isViolation(ev.eventType)).length;
+    const hasScreenshotViolation = events.some((ev) => ev.eventType === "screenshot") && policy.detect_screenshot !== false;
+
+    const updatedStudent = qualifyingViolationsCount > 0
+      ? await prisma.student.update({
+          where: { id: student.id },
+          data: {
+            violationCount: { increment: qualifyingViolationsCount },
+          },
+        })
+      : await prisma.student.findUniqueOrThrow({
+          where: { id: student.id },
+        });
 
     const shouldLock =
-      updatedStudent.violationCount >= maxViolations && policyAction === "lock" && !updatedStudent.isLocked;
+      (hasScreenshotViolation || (updatedStudent.violationCount >= maxViolations && policyAction === "lock")) &&
+      !updatedStudent.isLocked;
 
     if (shouldLock) {
       await prisma.student.update({

@@ -53,51 +53,58 @@ export async function POST(req: NextRequest) {
           },
         });
 
-        // Increment violation count
+        // Increment violation count if policy enables IP change detection
         const policy = (exam.violationPolicy as any) || {};
-        const maxViolations = policy.max_violations || 3;
-        const policyAction = policy.action || "lock";
+        if (policy.detect_ip_change !== false) {
+          const maxViolations = policy.max_violations || 3;
+          const policyAction = policy.action || "lock";
 
-        const updatedStudent = await prisma.student.update({
-          where: { id: student.id },
-          data: {
-            ipAddress: clientIp,
-            violationCount: { increment: 1 },
-          },
-        });
+          const updatedStudent = await prisma.student.update({
+            where: { id: student.id },
+            data: {
+              ipAddress: clientIp,
+              violationCount: { increment: 1 },
+            },
+          });
 
-        const shouldLock =
-          updatedStudent.violationCount >= maxViolations &&
-          policyAction === "lock" &&
-          !updatedStudent.isLocked;
+          const shouldLock =
+            updatedStudent.violationCount >= maxViolations &&
+            policyAction === "lock" &&
+            !updatedStudent.isLocked;
 
-        if (shouldLock) {
+          if (shouldLock) {
+            await prisma.student.update({
+              where: { id: student.id },
+              data: { isLocked: true },
+            });
+            currentIsLocked = true;
+          }
+
+          // Emit student_violation ke dashboard guru
+          const io = (globalThis as any).io;
+          if (io) {
+            try {
+              io.of("/teacher-dashboard").to(`exam:${exam.id}`).emit("student_violation", {
+                studentId: student.id,
+                name: student.name,
+                nisn: student.nisn,
+                violationCount: updatedStudent.violationCount,
+                isLocked: currentIsLocked,
+                event: {
+                  eventType: "ip_change",
+                  timestamp: now.toISOString(),
+                  metadata: { oldIp: previousIp, newIp: clientIp, detectedVia: "heartbeat" },
+                },
+              });
+            } catch (socketErr) {
+              console.error("Socket emit failed on heartbeat ip_change:", socketErr);
+            }
+          }
+        } else {
           await prisma.student.update({
             where: { id: student.id },
-            data: { isLocked: true },
+            data: { ipAddress: clientIp },
           });
-          currentIsLocked = true;
-        }
-
-        // Emit student_violation ke dashboard guru
-        const io = (globalThis as any).io;
-        if (io) {
-          try {
-            io.of("/teacher-dashboard").to(`exam:${exam.id}`).emit("student_violation", {
-              studentId: student.id,
-              name: student.name,
-              nisn: student.nisn,
-              violationCount: updatedStudent.violationCount,
-              isLocked: currentIsLocked,
-              event: {
-                eventType: "ip_change",
-                timestamp: now.toISOString(),
-                metadata: { oldIp: previousIp, newIp: clientIp, detectedVia: "heartbeat" },
-              },
-            });
-          } catch (socketErr) {
-            console.error("Socket emit failed on heartbeat ip_change:", socketErr);
-          }
         }
       } else if (!student.ipAddress) {
         await prisma.student.update({
@@ -130,12 +137,25 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Cek pesan peringatan belum dibaca dari guru (Item 9b)
+    const latestWarning = await prisma.warning.findFirst({
+      where: { studentId: student.id, isRead: false },
+      orderBy: { sentAt: "desc" },
+    });
+
     return successResponse({
       studentId: student.id,
       status: student.status,
       isLocked: currentIsLocked,
       isExamActive,
       serverTime: now.toISOString(),
+      warning: latestWarning
+        ? {
+            id: latestWarning.id,
+            message: latestWarning.message,
+            sentAt: latestWarning.sentAt.toISOString(),
+          }
+        : null,
     });
   } catch (err: any) {
     if (err instanceof AppError) {

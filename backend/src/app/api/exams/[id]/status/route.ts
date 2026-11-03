@@ -49,20 +49,20 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       // If exam doesn't have questions yet but questions payload was provided, populate them
       if (questionCount === 0 && Array.isArray(parsed.data.questions) && parsed.data.questions.length > 0) {
         await prisma.$transaction(async (tx) => {
-          for (let idx = 0; idx < parsed.data.questions!.length; idx++) {
-            const norm = normalizeQuestionForDb(parsed.data.questions![idx], idx);
-            await tx.question.create({
-              data: {
-                examId: id,
-                orderIndex: norm.orderIndex,
-                questionText: norm.questionText,
-                imageUrl: norm.imageUrl,
-                options: norm.options as any,
-                correctAnswer: norm.correctAnswer,
-                points: norm.points,
-              },
-            });
-          }
+          const questionData = parsed.data.questions!.map((q, idx) => {
+            const norm = normalizeQuestionForDb(q, idx);
+            return {
+              examId: id,
+              orderIndex: norm.orderIndex,
+              questionText: norm.questionText,
+              imageUrl: norm.imageUrl,
+              type: norm.type || "single_choice",
+              options: norm.options as any,
+              correctAnswer: norm.correctAnswer,
+              points: norm.points,
+            };
+          });
+          await tx.question.createMany({ data: questionData });
 
           if (parsed.data.bankId) {
             const currentSettings = (typeof exam.settings === "object" && exam.settings !== null ? exam.settings : {}) as any;

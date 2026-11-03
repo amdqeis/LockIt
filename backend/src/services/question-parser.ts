@@ -13,6 +13,7 @@ export interface ParsedQuestion {
   orderIndex: number;
   questionText: string;
   imageUrl?: string | null;
+  type?: string;
   options: ParsedOption[];
   correctAnswer: string;
   points: number;
@@ -193,7 +194,7 @@ export function normalizeQuestionForDb(q: any, idx: number): ParsedQuestion {
   const imageUrl = q.imageUrl || q.image || null;
 
   let rawOptions = Array.isArray(q.options) ? q.options : [];
-  let detectedCorrect = "";
+  const detectedCorrects: string[] = [];
 
   const options: ParsedOption[] = rawOptions.map((opt: any, optIdx: number) => {
     const letter = String.fromCharCode(65 + optIdx);
@@ -208,46 +209,62 @@ export function normalizeQuestionForDb(q: any, idx: number): ParsedQuestion {
     const optImage = typeof opt === "object" ? (opt.imageUrl || opt.image || opt["@_image"] || null) : null;
     const isCorrect = opt.isCorrect === true || opt["@_correct"] === "true" || opt["@_correct"] === true;
 
-    if (isCorrect && !detectedCorrect) {
-      detectedCorrect = label;
+    if (isCorrect) {
+      detectedCorrects.push(label);
     }
 
     return {
+      id: label,
       label,
       text: optText.toString(),
       imageUrl: optImage,
     };
   });
 
-  let finalCorrectAnswer = detectedCorrect;
-  if (!finalCorrectAnswer) {
-    if (typeof q.correctAnswer === "string" && q.correctAnswer.trim()) {
-      const target = q.correctAnswer.trim().toUpperCase();
+  const rawType = (q.type || "").toString().toLowerCase();
+  const hasMultipleAnswers =
+    (Array.isArray(q.correctAnswers) && q.correctAnswers.length > 1) ||
+    detectedCorrects.length > 1 ||
+    (typeof q.correctAnswer === "string" && q.correctAnswer.includes(","));
+  const isMulti = rawType === "multi_select" || rawType === "multiselect" || rawType === "multiple" || hasMultipleAnswers;
+  const type = isMulti ? "multi_select" : (rawType === "latex" ? "latex" : "single_choice");
+
+  let finalCorrectAnswer = "";
+  if (Array.isArray(q.correctAnswers) && q.correctAnswers.length > 0) {
+    const mapped = q.correctAnswers.map((ca: any) => {
+      const target = String(ca).trim().toUpperCase();
       const matched = options.find((o, oIdx) => {
         const rawOpt = rawOptions[oIdx];
         const rawId = rawOpt?.id?.toString()?.toUpperCase();
         return o.label === target || rawId === target;
       });
-      finalCorrectAnswer = matched ? matched.label : (options[0]?.label || "A");
-    } else if (Array.isArray(q.correctAnswers) && q.correctAnswers.length > 0) {
-      const firstTarget = String(q.correctAnswers[0]).trim().toUpperCase();
+      return matched ? matched.label : target;
+    });
+    finalCorrectAnswer = Array.from(new Set(mapped)).sort().join(",");
+  } else if (detectedCorrects.length > 0) {
+    finalCorrectAnswer = Array.from(new Set(detectedCorrects)).sort().join(",");
+  } else if (typeof q.correctAnswer === "string" && q.correctAnswer.trim()) {
+    const parts = q.correctAnswer.split(",").map((s: string) => s.trim().toUpperCase()).filter(Boolean);
+    const mapped = parts.map((target: string) => {
       const matched = options.find((o, oIdx) => {
         const rawOpt = rawOptions[oIdx];
         const rawId = rawOpt?.id?.toString()?.toUpperCase();
-        return o.label === firstTarget || rawId === firstTarget;
+        return o.label === target || rawId === target;
       });
-      finalCorrectAnswer = matched ? matched.label : (options[0]?.label || "A");
-    } else if (options.length > 0) {
-      finalCorrectAnswer = options[0].label;
-    } else {
-      finalCorrectAnswer = "A";
-    }
+      return matched ? matched.label : target;
+    });
+    finalCorrectAnswer = Array.from(new Set(mapped)).sort().join(",");
+  } else if (options.length > 0) {
+    finalCorrectAnswer = options[0].label;
+  } else {
+    finalCorrectAnswer = "A";
   }
 
   return {
     orderIndex,
     questionText: text,
     imageUrl,
+    type,
     options,
     correctAnswer: finalCorrectAnswer,
     points,

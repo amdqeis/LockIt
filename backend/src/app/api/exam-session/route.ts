@@ -48,35 +48,49 @@ export async function GET(req: NextRequest) {
       return errorResponse("STUDENT_KICKED", `Kamu telah dikeluarkan dari ujian ini: ${student.kickReason || "oleh pengawas"}`, 403);
     }
 
-    // Fetch questions
-    let questions = await prisma.question.findMany({
-      where: { examId: exam.id },
-      orderBy: { orderIndex: "asc" },
-      select: {
-        id: true,
-        orderIndex: true,
-        questionText: true,
-        imageUrl: true,
-        options: true,
-        points: true,
-        // correctAnswer is intentionally excluded for security
-      },
-    });
+    // Parallel fetch: questions and student answers concurrently
+    const [fetchedQuestions, answers] = await Promise.all([
+      prisma.question.findMany({
+        where: { examId: exam.id },
+        orderBy: { orderIndex: "asc" },
+        select: {
+          id: true,
+          orderIndex: true,
+          type: true,
+          questionText: true,
+          imageUrl: true,
+          options: true,
+          points: true,
+          // correctAnswer is intentionally excluded for security
+        },
+      }),
+      prisma.answer.findMany({
+        where: { studentId: student.id },
+        select: {
+          questionId: true,
+          selectedOption: true,
+          updatedAt: true,
+        },
+      }),
+    ]);
+
+    let questions = fetchedQuestions;
 
     const settings = (exam.settings as any) || {};
     if (settings.randomize_questions) {
       questions = pseudoRandomShuffle(questions, student.nisn, exam.id);
     }
-
-    // Fetch existing answers of this student
-    const answers = await prisma.answer.findMany({
-      where: { studentId: student.id },
-      select: {
-        questionId: true,
-        selectedOption: true,
-        updatedAt: true,
-      },
-    });
+    if (settings.randomize_choices) {
+      questions = questions.map((q) => {
+        if (Array.isArray(q.options) && q.options.length > 1) {
+          return {
+            ...q,
+            options: pseudoRandomShuffle(q.options as any[], student.nisn, `${exam.id}-${q.id}`),
+          };
+        }
+        return q;
+      });
+    }
 
     return successResponse({
       student: {

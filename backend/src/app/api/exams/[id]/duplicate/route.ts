@@ -46,19 +46,17 @@ export async function POST(
       });
 
       if (Array.isArray(sourceExam.questions) && sourceExam.questions.length > 0) {
-        for (const q of sourceExam.questions) {
-          await tx.question.create({
-            data: {
-              examId: newExam.id,
-              orderIndex: q.orderIndex,
-              questionText: q.questionText,
-              imageUrl: q.imageUrl,
-              options: q.options as any,
-              correctAnswer: q.correctAnswer,
-              points: q.points,
-            },
-          });
-        }
+        const questionData = sourceExam.questions.map((q) => ({
+          examId: newExam.id,
+          orderIndex: q.orderIndex,
+          questionText: q.questionText,
+          imageUrl: q.imageUrl,
+          type: (q as any).type || "single_choice",
+          options: q.options as any,
+          correctAnswer: q.correctAnswer,
+          points: q.points,
+        }));
+        await tx.question.createMany({ data: questionData });
       }
 
       return tx.exam.findUnique({

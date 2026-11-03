@@ -76,6 +76,9 @@ export interface ActiveSessionCheck {
 export interface InactiveSessionCheck {
   isActive: false;
   reason: "no_session" | "submitted" | "exam_ended" | "exam_not_started" | "time_expired" | "error";
+  studentName?: string;
+  studentNisn?: string;
+  examTitle?: string;
 }
 
 export type SessionCheckResult = ActiveSessionCheck | InactiveSessionCheck;
@@ -168,6 +171,7 @@ export interface ExamSessionData {
     accessCode?: string;
     settings?: {
       randomize_questions?: boolean;
+      randomize_choices?: boolean;
       allow_backtrack?: boolean;
       show_result?: boolean;
     };
@@ -234,9 +238,22 @@ export async function sendStudentHeartbeat() {
     isLocked: boolean;
     isExamActive: boolean;
     serverTime: string;
+    warning?: { id: string; message: string; sentAt: string } | null;
   }>("/api/exam-session/heartbeat", {
     method: "POST",
   });
+}
+
+/**
+ * Mark student warning as read
+ */
+export async function markStudentWarningAsRead(warningId: string) {
+  return apiFetch<{ warningId: string; isRead: boolean }>(
+    `/api/exam-session/warning/${warningId}/read`,
+    {
+      method: "POST",
+    }
+  );
 }
 
 /**

@@ -68,6 +68,7 @@ async function main() {
       endTime,
       settings: {
         randomize_questions: true,
+        randomize_choices: true,
         allow_backtrack: true,
         show_result: true,
       },
@@ -323,6 +324,7 @@ async function main() {
       endTime: pastEnd,
       settings: {
         randomize_questions: true,
+        randomize_choices: true,
         allow_backtrack: true,
         show_result: true,
       },

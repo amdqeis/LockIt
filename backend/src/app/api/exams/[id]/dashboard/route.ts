@@ -25,12 +25,81 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       return errorResponse("NOT_FOUND", "Ujian tidak ditemukan", 404);
     }
 
-    // Aggregate student counts by status
-    const studentStatusCounts = await prisma.student.groupBy({
-      by: ["status"],
-      where: { examId: id },
-      _count: { id: true },
-    });
+    // Parallelize all 6 independent dashboard queries to eliminate sequential latency
+    const [
+      studentStatusCounts,
+      totalViolationsResult,
+      lockedCount,
+      recentEvents,
+      recentWarnings,
+      lobbyStudents,
+    ] = await Promise.all([
+      // 1. Aggregate student counts by status
+      prisma.student.groupBy({
+        by: ["status"],
+        where: { examId: id },
+        _count: { id: true },
+      }),
+      // 2. Total violations count across all students
+      prisma.student.aggregate({
+        where: { examId: id },
+        _sum: { violationCount: true },
+      }),
+      // 3. Locked students count
+      prisma.student.count({
+        where: {
+          examId: id,
+          isLocked: true,
+        },
+      }),
+      // 4. Recent 50 proctoring events
+      prisma.proctoringEvent.findMany({
+        where: { examId: id },
+        orderBy: { timestamp: "desc" },
+        take: 50,
+        include: {
+          student: {
+            select: {
+              id: true,
+              name: true,
+              nisn: true,
+            },
+          },
+        },
+      }),
+      // 5. Recent 5 warnings
+      prisma.warning.findMany({
+        where: { examId: id },
+        orderBy: { sentAt: "desc" },
+        take: 5,
+        include: {
+          student: {
+            select: {
+              id: true,
+              name: true,
+              nisn: true,
+            },
+          },
+        },
+      }),
+      // 6. Peserta yang sedang berada di lobby (waiting atau accepted)
+      prisma.student.findMany({
+        where: {
+          examId: id,
+          status: { in: ["waiting", "accepted"] },
+        },
+        orderBy: { joinedAt: "asc" },
+        select: {
+          id: true,
+          name: true,
+          nisn: true,
+          status: true,
+          joinedAt: true,
+          acceptedAt: true,
+          ipAddress: true,
+        },
+      }),
+    ]);
 
     let onlineCount = 0;
     let disconnectedCount = 0;
@@ -46,70 +115,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       else if (group.status === "accepted") acceptedCount = group._count.id;
     }
 
-    // Total violations count across all students
-    const totalViolationsResult = await prisma.student.aggregate({
-      where: { examId: id },
-      _sum: { violationCount: true },
-    });
     const totalViolations = totalViolationsResult._sum.violationCount || 0;
-
-    // Locked students count
-    const lockedCount = await prisma.student.count({
-      where: {
-        examId: id,
-        isLocked: true,
-      },
-    });
-
-    // Recent 50 proctoring events
-    const recentEvents = await prisma.proctoringEvent.findMany({
-      where: { examId: id },
-      orderBy: { timestamp: "desc" },
-      take: 50,
-      include: {
-        student: {
-          select: {
-            id: true,
-            name: true,
-            nisn: true,
-          },
-        },
-      },
-    });
-
-    // Recent 5 warnings
-    const recentWarnings = await prisma.warning.findMany({
-      where: { examId: id },
-      orderBy: { sentAt: "desc" },
-      take: 5,
-      include: {
-        student: {
-          select: {
-            id: true,
-            name: true,
-            nisn: true,
-          },
-        },
-      },
-    });
-
-    // Peserta yang sedang berada di lobby (waiting atau accepted)
-    const lobbyStudents = await prisma.student.findMany({
-      where: {
-        examId: id,
-        status: { in: ["waiting", "accepted"] },
-      },
-      orderBy: { joinedAt: "asc" },
-      select: {
-        id: true,
-        name: true,
-        nisn: true,
-        status: true,
-        joinedAt: true,
-        acceptedAt: true,
-        ipAddress: true,
-      },
-    });
 
     return successResponse({
       exam: {

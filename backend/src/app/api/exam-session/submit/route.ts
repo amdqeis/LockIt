@@ -55,8 +55,9 @@ export async function POST(req: NextRequest) {
       submittedAt: now.toISOString(),
     });
 
-    // Clear student session cookie
-    response.cookies.delete("studentSession");
+    // Pertahankan cookie studentSession agar request berikutnya (dan halaman /exam/done)
+    // dapat mendeteksi via JWT bahwa siswa sudah menyelesaikan ujian ini (status: submitted)
+    // dan menolak akses ulang ke pengerjaan soal.
 
     return response;
   } catch (err: any) {

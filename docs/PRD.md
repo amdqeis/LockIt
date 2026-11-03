@@ -520,7 +520,8 @@ Field `settings` di tabel EXAMS menyimpan konfigurasi tampilan dan perilaku ujia
 ```json
 {
   "question_display_mode": "one_by_one",
-  "randomize_questions": false,
+  "randomize_questions": true,
+  "randomize_choices": true,
   "auto_save_interval_seconds": 30,
   "allow_back_navigation": true,
   "show_question_numbers": true
@@ -529,7 +530,8 @@ Field `settings` di tabel EXAMS menyimpan konfigurasi tampilan dan perilaku ujia
 
 **Fields:**
 - `question_display_mode`: `"one_by_one"` (navigasi prev/next) atau `"all_at_once"` (scroll). Default: `"one_by_one"`
-- `randomize_questions`: `true/false`. Jika true, urutan soal diacak per peserta. Default: `false`
+- `randomize_questions`: `true/false`. Jika true, urutan soal diacak per peserta. Default: `true`
+- `randomize_choices`: `true/false`. Jika true, urutan pilihan jawaban diacak per peserta. Default: `true`
 - `auto_save_interval_seconds`: interval auto-save dalam detik. Default: `30`. Min: `10`, Max: `120`
 - `allow_back_navigation`: `true/false`. Jika false, peserta tidak bisa kembali ke soal sebelumnya (hanya berlaku di mode `one_by_one`). Default: `true`
 - `show_question_numbers`: `true/false`. Default: `true`

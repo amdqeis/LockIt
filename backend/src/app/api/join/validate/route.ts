@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { verifyStudentSessionToken } from "@/lib/auth";
 import { successResponse, errorResponse } from "@/lib/response";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 import { createRequestLogger } from "@/lib/logger";
@@ -56,6 +57,29 @@ export async function GET(req: NextRequest) {
     const now = new Date();
     if (exam.endTime && now > exam.endTime) {
       return errorResponse("EXAM_TIME_EXPIRED", "Waktu ujian telah berakhir", 410);
+    }
+
+    // Deteksi jika token/perangkat ini telah menyelesaikan ujian ini
+    const cookieToken = req.cookies.get("studentSession")?.value;
+    const headerToken = req.headers.get("x-student-session");
+    const existingToken = cookieToken || headerToken;
+
+    if (existingToken) {
+      const existingPayload = verifyStudentSessionToken(existingToken);
+      if (existingPayload && existingPayload.examId === exam.id) {
+        const studentFromToken = await prisma.student.findUnique({
+          where: { id: existingPayload.studentId },
+          select: { status: true },
+        });
+
+        if (studentFromToken && studentFromToken.status === "submitted") {
+          return errorResponse(
+            "ALREADY_SUBMITTED",
+            "Anda sudah menyelesaikan dan mengumpulkan ujian ini.",
+            403
+          );
+        }
+      }
     }
 
     log.info("Validate code success", { examId: exam.id, status: exam.status });

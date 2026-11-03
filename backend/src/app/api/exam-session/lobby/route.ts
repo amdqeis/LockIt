@@ -9,25 +9,27 @@ export async function GET(req: NextRequest) {
     const { student } = await authenticateStudent(req);
     const exam = student.exam;
 
-    const questionCount = await prisma.question.count({
-      where: { examId: exam.id },
-    });
-
-    // Ambil seluruh peserta ujian ini yang belum di-kick
-    const allStudents = await prisma.student.findMany({
-      where: {
-        examId: exam.id,
-        status: { notIn: ["kicked"] },
-      },
-      orderBy: { joinedAt: "asc" },
-      select: {
-        id: true,
-        name: true,
-        nisn: true,
-        status: true,
-        joinedAt: true,
-      },
-    });
+    // Parallel fetch: question count & participant list concurrently
+    const [questionCount, allStudents] = await Promise.all([
+      prisma.question.count({
+        where: { examId: exam.id },
+      }),
+      // Ambil seluruh peserta ujian ini yang belum di-kick
+      prisma.student.findMany({
+        where: {
+          examId: exam.id,
+          status: { notIn: ["kicked"] },
+        },
+        orderBy: { joinedAt: "asc" },
+        select: {
+          id: true,
+          name: true,
+          nisn: true,
+          status: true,
+          joinedAt: true,
+        },
+      }),
+    ]);
 
     // Masking NISN untuk privasi peserta lain (3 digit pertama + *******)
     const participants = allStudents.map((s) => {

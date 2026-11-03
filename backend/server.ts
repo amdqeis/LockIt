@@ -146,6 +146,10 @@ app.prepare().then(async () => {
         return next(new Error("Sesi peserta tidak ditemukan"));
       }
 
+      if (student.status === "submitted") {
+        return next(new Error("Ujian telah selesai dikumpulkan"));
+      }
+
       socket.data.student = student;
       next();
     } catch (err) {

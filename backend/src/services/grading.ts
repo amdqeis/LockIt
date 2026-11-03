@@ -14,6 +14,13 @@ export interface StudentScoreSummary {
   submittedAt: Date | null;
 }
 
+function checkAnswerCorrect(selectedOption: string, correctAnswer: string): boolean {
+  if (!selectedOption || !correctAnswer) return false;
+  const sParts = selectedOption.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean).sort().join(",");
+  const cParts = correctAnswer.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean).sort().join(",");
+  return sParts === cParts;
+}
+
 export async function autoGradeStudent(studentId: string): Promise<StudentScoreSummary> {
   const student = await prisma.student.findUnique({
     where: { id: studentId },
@@ -37,34 +44,41 @@ export async function autoGradeStudent(studentId: string): Promise<StudentScoreS
   let earnedPoints = 0;
   let totalPoints = 0;
   let correctCount = 0;
+  const answerUpdates: { id: string; isCorrect: boolean }[] = [];
 
   for (const q of questions) {
     totalPoints += q.points;
     const answer = answerMap.get(q.id);
 
     if (answer && answer.selectedOption) {
-      const isCorrect = answer.selectedOption.toUpperCase() === q.correctAnswer.toUpperCase();
+      const isCorrect = checkAnswerCorrect(answer.selectedOption, q.correctAnswer);
       if (isCorrect) {
         earnedPoints += q.points;
         correctCount += 1;
       }
 
-      // Update answer record if not yet evaluated or changed
+      // Collect answer updates if not yet evaluated or changed
       if (answer.isCorrect !== isCorrect) {
-        await prisma.answer.update({
-          where: { id: answer.id },
-          data: { isCorrect },
-        });
+        answerUpdates.push({ id: answer.id, isCorrect });
       }
     } else {
       // If student never answered this question
       if (answer && answer.isCorrect !== false) {
-        await prisma.answer.update({
-          where: { id: answer.id },
-          data: { isCorrect: false },
-        });
+        answerUpdates.push({ id: answer.id, isCorrect: false });
       }
     }
+  }
+
+  // Batch execute answer updates in parallel (eliminating N+1 query loop)
+  if (answerUpdates.length > 0) {
+    await Promise.all(
+      answerUpdates.map(({ id, isCorrect }) =>
+        prisma.answer.update({
+          where: { id },
+          data: { isCorrect },
+        })
+      )
+    );
   }
 
   const finalScore = totalPoints > 0 ? Math.round((earnedPoints / totalPoints) * 1000) / 10 : 0;
@@ -112,7 +126,7 @@ export async function autoGradeExam(examId: string): Promise<StudentScoreSummary
       const answer = answerMap.get(q.id);
 
       if (answer && answer.selectedOption) {
-        const isCorrect = answer.selectedOption.toUpperCase() === q.correctAnswer.toUpperCase();
+        const isCorrect = checkAnswerCorrect(answer.selectedOption, q.correctAnswer);
         if (isCorrect) {
           earnedPoints += q.points;
           correctCount += 1;
@@ -211,19 +225,20 @@ export async function readStudentGradingSummaries(examId: string): Promise<Stude
 // Jika exam sudah ended → baca hasil grading dari DB (sudah ditulis saat exam berakhir).
 // Jika exam masih active → tampilkan skor sementara berdasarkan isCorrect yang sudah ada.
 export async function getExamResults(examId: string) {
-  const exam = await prisma.exam.findUnique({
-    where: { id: examId },
-    include: {
-      _count: { select: { questions: true } },
-    },
-  });
+  // Parallel fetch: exam metadata & student summaries run concurrently
+  const [exam, studentSummaries] = await Promise.all([
+    prisma.exam.findUnique({
+      where: { id: examId },
+      include: {
+        _count: { select: { questions: true } },
+      },
+    }),
+    readStudentGradingSummaries(examId),
+  ]);
 
   if (!exam) {
     throw new Error("Ujian tidak ditemukan");
   }
-
-  // Pure-read: tidak menulis ke DB
-  const studentSummaries = await readStudentGradingSummaries(examId);
 
   const scores = studentSummaries.map((s) => s.finalScore);
   const totalStudents = studentSummaries.length;
@@ -237,6 +252,7 @@ export async function getExamResults(examId: string) {
   return {
     exam: {
       id: exam.id,
+      teacherId: exam.teacherId,
       title: exam.title,
       accessCode: exam.accessCode,
       durationMinutes: exam.durationMinutes,

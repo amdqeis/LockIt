@@ -13,22 +13,32 @@ const createExamSchema = z.object({
   durationMinutes: z.number().int().min(5, "Durasi minimal 5 menit").max(360, "Durasi maksimal 360 menit"),
   violationPolicy: z
     .object({
-      max_violations: z.number().int().min(1).default(5),
-      action: z.enum(["warning", "lock", "review"]).default("warning"),
+      max_violations: z.number().int().min(1).default(3),
+      action: z.enum(["warning", "lock", "review", "auto_end"]).default("lock"),
       detect_copy_paste: z.boolean().default(true),
-      detect_right_click: z.boolean().default(false),
-      detect_devtools: z.boolean().default(false),
+      detect_right_click: z.boolean().default(true),
+      detect_devtools: z.boolean().default(true),
+      detect_tab_switch: z.boolean().default(true),
+      detect_fullscreen_exit: z.boolean().default(true),
+      detect_screenshot: z.boolean().default(true),
+      detect_ip_change: z.boolean().default(true),
     })
+    .passthrough()
     .default({
-      max_violations: 5,
-      action: "warning",
+      max_violations: 3,
+      action: "lock",
       detect_copy_paste: true,
-      detect_right_click: false,
-      detect_devtools: false,
+      detect_right_click: true,
+      detect_devtools: true,
+      detect_tab_switch: true,
+      detect_fullscreen_exit: true,
+      detect_screenshot: true,
+      detect_ip_change: true,
     }),
   settings: z
     .object({
       randomize_questions: z.boolean().default(true),
+      randomize_choices: z.boolean().default(true),
       display_mode: z.enum(["one_by_one", "all_at_once"]).default("one_by_one"),
       auto_save_interval_seconds: z.number().int().min(5).max(120).default(30),
       bank_id: z.string().optional(),
@@ -37,6 +47,7 @@ const createExamSchema = z.object({
     .passthrough()
     .default({
       randomize_questions: true,
+      randomize_choices: true,
       display_mode: "one_by_one",
       auto_save_interval_seconds: 30,
     }),
@@ -116,20 +127,20 @@ export async function POST(req: NextRequest) {
       });
 
       if (Array.isArray(questions) && questions.length > 0) {
-        for (let idx = 0; idx < questions.length; idx++) {
-          const norm = normalizeQuestionForDb(questions[idx], idx);
-          await tx.question.create({
-            data: {
-              examId: created.id,
-              orderIndex: norm.orderIndex,
-              questionText: norm.questionText,
-              imageUrl: norm.imageUrl,
-              options: norm.options as any,
-              correctAnswer: norm.correctAnswer,
-              points: norm.points,
-            },
-          });
-        }
+        const questionData = questions.map((q, idx) => {
+          const norm = normalizeQuestionForDb(q, idx);
+          return {
+            examId: created.id,
+            orderIndex: norm.orderIndex,
+            questionText: norm.questionText,
+            imageUrl: norm.imageUrl,
+            type: norm.type || "single_choice",
+            options: norm.options as any,
+            correctAnswer: norm.correctAnswer,
+            points: norm.points,
+          };
+        });
+        await tx.question.createMany({ data: questionData });
       }
 
       return tx.exam.findUnique({

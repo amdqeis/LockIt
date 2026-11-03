@@ -214,7 +214,22 @@ function IdentityFormInner() {
                 marginBottom: "20px",
               }}
             >
-              ⚠️ {serverError}
+              <div>⚠️ {serverError}</div>
+              {serverError.includes("mengumpulkan") && (
+                <div style={{ marginTop: "6px" }}>
+                  <a
+                    href="/exam/done"
+                    style={{
+                      color: T.danger,
+                      fontWeight: 700,
+                      textDecoration: "underline",
+                      fontSize: "12px",
+                    }}
+                  >
+                    Lihat Konfirmasi Ujian Selesai →
+                  </a>
+                </div>
+              )}
             </div>
           )}
 

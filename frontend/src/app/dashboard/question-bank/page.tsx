@@ -129,7 +129,13 @@ function ImageZoomModal({ src, alt, onClose }: { src: string; alt: string; onClo
         >
           ✕
         </button>
-        <img src={src} alt={alt} style={{ maxWidth: "85vw", maxHeight: "80vh", objectFit: "contain", borderRadius: "6px" }} />
+        <img
+          src={src}
+          alt={alt}
+          loading="lazy"
+          decoding="async"
+          style={{ maxWidth: "85vw", maxHeight: "80vh", objectFit: "contain", borderRadius: "6px" }}
+        />
         {alt && <div style={{ fontSize: "12px", color: "#64748B", marginTop: "8px", textAlign: "center" }}>{alt}</div>}
       </div>
     </div>
@@ -835,6 +841,8 @@ function QuestionModal({ initial, defaultBankId, banks, onClose, onSave }: Quest
                       <img
                         src={imageUrl}
                         alt={imageAlt || "Preview"}
+                        loading="lazy"
+                        decoding="async"
                         style={{ width: "70px", height: "48px", objectFit: "cover", borderRadius: "4px", border: "1px solid #CBD5E1", background: "white" }}
                       />
                       <input
@@ -1069,6 +1077,8 @@ function QuestionModal({ initial, defaultBankId, banks, onClose, onSave }: Quest
                   <img
                     src={imageUrl}
                     alt={imageAlt || "Lampiran Soal"}
+                    loading="lazy"
+                    decoding="async"
                     style={{ maxWidth: "100%", maxHeight: "160px", objectFit: "contain", borderRadius: "6px", border: "1px solid #E2E8F0" }}
                   />
                 )}
@@ -1968,6 +1978,8 @@ export default function QuestionBankPage() {
                             <img
                               src={q.imageUrl}
                               alt={q.imageAlt || "Gambar Soal"}
+                              loading="lazy"
+                              decoding="async"
                               style={{ maxWidth: "320px", maxHeight: "180px", objectFit: "contain", display: "block" }}
                             />
                             {q.imageAlt && (

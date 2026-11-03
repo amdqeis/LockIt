@@ -9,15 +9,17 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const teacher = await authenticateTeacher(req);
     const { id } = await params;
 
-    const exam = await prisma.exam.findUnique({ where: { id } });
+    const [exam, questions] = await Promise.all([
+      prisma.exam.findUnique({ where: { id } }),
+      prisma.question.findMany({
+        where: { examId: id },
+        orderBy: { orderIndex: "asc" },
+      }),
+    ]);
+
     if (!exam || (teacher.role !== "ADMIN" && exam.teacherId !== teacher.teacherId)) {
       return errorResponse("NOT_FOUND", "Ujian tidak ditemukan", 404);
     }
-
-    const questions = await prisma.question.findMany({
-      where: { examId: id },
-      orderBy: { orderIndex: "asc" },
-    });
 
     const totalPoints = questions.reduce((sum, q) => sum + q.points, 0);
 

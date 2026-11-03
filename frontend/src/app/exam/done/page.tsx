@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { checkActiveSession } from "@/lib/examSession";
 
 interface SubmissionSummary {
   name: string;
@@ -31,13 +32,29 @@ export default function ExamDonePage() {
   const [confettiRotations, setConfettiRotations] = useState<number[]>([]);
 
   useEffect(() => {
+    let hasLoadedSummary = false;
     try {
       const stored = sessionStorage.getItem("eduquas_submission_summary");
       if (stored) {
         const parsed = JSON.parse(stored);
         setSummary((prev) => ({ ...prev, ...parsed }));
+        hasLoadedSummary = true;
       }
     } catch {}
+
+    // Fallback: Jika sessionStorage kosong (mis. reload/tab baru), sinkronkan dengan check API backend
+    if (!hasLoadedSummary) {
+      checkActiveSession().then((res) => {
+        if (res && !res.isActive && res.reason === "submitted") {
+          setSummary((prev) => ({
+            ...prev,
+            name: res.studentName || prev.name,
+            nisn: res.studentNisn || prev.nisn,
+            exam: res.examTitle || prev.exam,
+          }));
+        }
+      });
+    }
 
     // Generate random rotation values for each confetti piece (client-only)
     setConfettiRotations(
@@ -268,6 +285,30 @@ export default function ExamDonePage() {
               lineHeight: 1.7,
             }}>
               📋 Hasil ujian akan diumumkan oleh pengawas. Kamu sudah bisa menutup tab ini.
+            </div>
+
+            {/* Action button */}
+            <div style={{ marginTop: "20px" }}>
+              <a
+                href="/"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "8px",
+                  padding: "12px 24px",
+                  borderRadius: "12px",
+                  background: "#10B981",
+                  color: "#ffffff",
+                  fontSize: "14px",
+                  fontWeight: 600,
+                  textDecoration: "none",
+                  boxShadow: "0 4px 12px rgba(16, 185, 129, 0.25)",
+                  transition: "opacity 0.2s",
+                }}
+              >
+                Kembali ke Beranda
+              </a>
             </div>
           </div>
         </div>

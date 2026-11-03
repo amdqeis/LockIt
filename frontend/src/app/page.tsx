@@ -200,7 +200,10 @@ function JoinContent() {
 
       // Check backend error codes
       const errCode = res.error?.code;
-      if (errCode === "EXAM_NOT_FOUND") {
+      if (errCode === "ALREADY_SUBMITTED") {
+        setResultStatus("notice");
+        setMessage("Anda sudah menyelesaikan dan mengumpulkan ujian ini.");
+      } else if (errCode === "EXAM_NOT_FOUND") {
         setAttemptCount((prev) => prev + 1);
         setResultStatus("error");
         setMessage("Kode tidak ditemukan. Periksa lagi kode dari pengawas.");
@@ -594,9 +597,20 @@ function JoinContent() {
                 boxShadow: "0 2px 8px rgba(245,158,11,0.12)",
               }}
             >
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                 <span style={{ fontSize: "18px" }}>⚠️</span>
                 <span>{alreadySubmittedBanner}</span>
+                <a
+                  href="/exam/done"
+                  style={{
+                    color: "#92400E",
+                    fontWeight: 700,
+                    textDecoration: "underline",
+                    marginLeft: "4px",
+                  }}
+                >
+                  Lihat Konfirmasi Ujian
+                </a>
               </div>
               <button
                 type="button"

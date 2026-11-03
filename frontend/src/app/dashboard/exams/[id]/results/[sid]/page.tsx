@@ -69,7 +69,7 @@ function ResultDetailPage() {
                   if (typeof opt === "string") {
                     return { id: String.fromCharCode(97 + optIdx), text: opt };
                   }
-                  return { id: (opt.key || opt.id || "").toLowerCase(), text: opt.text || "" };
+                  return { id: (opt.id || opt.key || opt.label || "").toLowerCase(), text: opt.text || "" };
                 });
               }
 
@@ -310,8 +310,10 @@ function ResultDetailPage() {
                   {/* Options */}
                   <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                     {q.options.map((opt) => {
-                      const isStudentChoice = q.selectedAnswer === opt.id;
-                      const isCorrectOpt = q.correctAnswer === opt.id;
+                      const studentChoices = q.selectedAnswer ? q.selectedAnswer.split(",").map((s: string) => s.trim().toLowerCase()) : [];
+                      const correctChoices = q.correctAnswer ? q.correctAnswer.split(",").map((s: string) => s.trim().toLowerCase()) : [];
+                      const isStudentChoice = studentChoices.includes(opt.id);
+                      const isCorrectOpt = correctChoices.includes(opt.id);
 
                       let bg = "transparent";
                       let borderColor = "#E5E7EB";
@@ -319,7 +321,7 @@ function ResultDetailPage() {
                       let labelColor = "#374151";
                       let suffix = null;
 
-                      if (isStudentChoice && isCorrect) {
+                      if (isStudentChoice && isCorrectOpt) {
                         bg = "#F0FDF4";
                         borderColor = "#16A34A";
                         labelBg = "#16A34A";
@@ -329,7 +331,7 @@ function ResultDetailPage() {
                             ✅ Jawaban Siswa (Benar)
                           </span>
                         );
-                      } else if (isStudentChoice && !isCorrect) {
+                      } else if (isStudentChoice && !isCorrectOpt) {
                         bg = "#FFF5F5";
                         borderColor = "#DC2626";
                         labelBg = "#DC2626";

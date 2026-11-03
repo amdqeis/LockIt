@@ -12,7 +12,9 @@ import {
   submitStudentExam,
   saveSessionHint,
   clearSessionHint,
+  markStudentWarningAsRead,
 } from "@/lib/examSession";
+import { io } from "socket.io-client";
 import { SkeletonBase, SkeletonQuestionCard } from "@/app/components/skeleton";
 
 type AutoSaveStatus = "saved" | "saving" | "failed";
@@ -27,7 +29,7 @@ function normalizeQuestion(q: any, idx: number) {
         return { id: letter, text: opt };
       }
       return {
-        id: (opt.id || opt.key || letter).toLowerCase(),
+        id: (opt.id || opt.key || opt.label || letter).toLowerCase(),
         text: opt.text || opt.label || opt.content || opt.value || "",
       };
     });
@@ -131,7 +133,10 @@ function ImageZoomModal({ src, alt, onClose }: { src: string; alt: string; onClo
           />
         ) : (
           <img
-            src={src} alt={alt}
+            src={src}
+            alt={alt}
+            loading="lazy"
+            decoding="async"
             style={{ maxWidth: "90vw", maxHeight: "85vh", objectFit: "contain", borderRadius: "6px", boxShadow: "0 16px 48px rgba(15,30,40,0.55), 0 4px 12px rgba(15,30,40,0.25)" }}
           />
         )}
@@ -297,7 +302,10 @@ function QuestionImage({ src, alt, isMobile }: { src: string; alt: string; isMob
           </div>
         )}
         <img
-          src={src} alt={alt}
+          src={src}
+          alt={alt}
+          loading="lazy"
+          decoding="async"
           onLoad={() => setLoaded(true)}
           onError={() => { setError(true); setLoaded(true); }}
           style={{
@@ -546,9 +554,9 @@ export default function ExamSessionPage() {
       try {
         const res = await fetchExamSession();
         if (!res.success) {
-          if (res.error?.code === "ALREADY_SUBMITTED") {
+          if (res.error?.code === "ALREADY_SUBMITTED" || res.error?.code === "EXAM_ALREADY_SUBMITTED") {
             sessionStorage.setItem("exam_already_submitted", "true");
-            window.location.href = "/";
+            window.location.href = "/exam/done";
             return;
           }
           if (res.error?.code === "EXAM_NOT_STARTED") {
@@ -625,11 +633,23 @@ export default function ExamSessionPage() {
     if (timeLeft <= 0) {
       setTimeExpiredOverlay(true);
       clearSessionHint();
+      try {
+        if (typeof window !== "undefined") {
+          const summaryPayload = JSON.stringify({
+            name: studentProfile?.name || "Peserta Ujian",
+            nisn: studentProfile?.nisn || "0000000000",
+            exam: examMeta?.title || "Ujian Selesai",
+            answered: answeredCount,
+            total: totalQ,
+          });
+          sessionStorage.setItem("eduquas_submission_summary", summaryPayload);
+        }
+      } catch {}
       submitStudentExam().finally(() => {
         sessionStorage.setItem("exam_just_submitted", "true");
         sessionStorage.setItem("exam_submitted_title", examMeta?.title || "Ujian");
         setTimeout(() => {
-          window.location.href = "/";
+          window.location.href = "/exam/done";
         }, 2500);
       });
       return;
@@ -651,6 +671,12 @@ export default function ExamSessionPage() {
             setIsLocked(false);
             setScreenshotLockReason(null);
           }
+          if (res.data.warning?.message) {
+            setWarningBanner(res.data.warning.message);
+            if (res.data.warning.id) {
+              markStudentWarningAsRead(res.data.warning.id).catch(() => {});
+            }
+          }
           if (!res.data.isExamActive) {
             setTimeExpiredOverlay(true);
           }
@@ -660,6 +686,41 @@ export default function ExamSessionPage() {
       }
     }, 15000);
     return () => clearInterval(interval);
+  }, [submitted]);
+
+  // Real-time socket events from teacher (warning, unlock, kick, end)
+  useEffect(() => {
+    if (submitted) return;
+    const socket = io("/student-session", {
+      withCredentials: true,
+      transports: ["websocket", "polling"],
+    });
+
+    socket.on("teacher_warning", ({ warningId, message }: { warningId?: string; message: string }) => {
+      if (message) {
+        setWarningBanner(message);
+        if (warningId) {
+          markStudentWarningAsRead(warningId).catch(() => {});
+        }
+      }
+    });
+
+    socket.on("student_unlocked", () => {
+      setIsLocked(false);
+      setScreenshotLockReason(null);
+    });
+
+    socket.on("student_kicked", () => {
+      window.location.href = "/";
+    });
+
+    socket.on("exam_ended", () => {
+      setTimeExpiredOverlay(true);
+    });
+
+    return () => {
+      socket.disconnect();
+    };
   }, [submitted]);
 
   // Browser-only proctoring event listeners
@@ -897,7 +958,7 @@ export default function ExamSessionPage() {
     sessionStorage.setItem("exam_just_submitted", "true");
     sessionStorage.setItem("exam_submitted_title", examMeta?.title || "Ujian");
     clearSessionHint();
-    window.location.href = "/";
+    window.location.href = "/exam/done";
   };
 
   const formatTime = (s: number) => {
@@ -1525,7 +1586,7 @@ export default function ExamSessionPage() {
 
               {/* ── OPTIONS (stacked below question) ── */}
               <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: hasImage || isMulti || question.hint ? "4px" : "0" }}>
-                {question.options.map((opt: any) => {
+                {question.options.map((opt: any, optIdx: number) => {
                   const isSelected = isMulti
                     ? selectedMulti.has(opt.id)
                     : answers[question.id] === opt.id;
@@ -1585,7 +1646,7 @@ export default function ExamSessionPage() {
                           fontWeight: 700, fontSize: "13px",
                           color: isSelected ? "white" : "#6E8EA0", flexShrink: 0
                         }}>
-                          {opt.id.toUpperCase()}
+                          {String.fromCharCode(65 + optIdx)}
                         </span>
                       )}
                       <span style={{ flex: 1, color: isSelected ? "white" : "#2F4655" }}>

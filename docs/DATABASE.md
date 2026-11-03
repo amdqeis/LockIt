@@ -135,11 +135,13 @@ Menyimpan informasi ujian yang dibuat oleh guru.
 ```json
 {
   "randomize_questions": true,
+  "randomize_choices": true,
   "display_mode": "one_by_one",
   "auto_save_interval_seconds": 30
 }
 ```
-- `randomize_questions` → acak urutan soal per peserta atau tidak
+- `randomize_questions` → acak urutan soal per peserta atau tidak (default: true)
+- `randomize_choices` → acak urutan pilihan jawaban per peserta atau tidak (default: true)
 - `display_mode` → `"one_by_one"` (satu per satu) atau `"all_at_once"` (semua sekaligus)
 - `auto_save_interval_seconds` → interval simpan otomatis (detik)
 

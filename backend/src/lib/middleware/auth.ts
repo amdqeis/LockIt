@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { verifyAccessToken, verifyStudentSessionToken, hashStudentToken, TeacherJwtPayload, StudentTokenPayload } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { UnauthorizedError, ForbiddenError } from "@/lib/errors";
+import { UnauthorizedError, ForbiddenError, AppError } from "@/lib/errors";
 
 export async function authenticateTeacher(req: NextRequest): Promise<TeacherJwtPayload> {
   const authHeader = req.headers.get("authorization");
@@ -39,7 +39,14 @@ export async function requireAdmin(req: NextRequest): Promise<TeacherJwtPayload>
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function authenticateStudent(req: NextRequest): Promise<{ student: any; payload: StudentTokenPayload }> {
+export interface AuthenticateStudentOptions {
+  skipSubmittedCheck?: boolean;
+}
+
+export async function authenticateStudent(
+  req: NextRequest,
+  options?: AuthenticateStudentOptions
+): Promise<{ student: any; payload: StudentTokenPayload }> {
   const cookieToken = req.cookies.get("studentSession")?.value;
   const headerToken = req.headers.get("x-student-session");
   const token = cookieToken || headerToken;
@@ -66,6 +73,15 @@ export async function authenticateStudent(req: NextRequest): Promise<{ student: 
   if (!student) {
     // Bisa berarti: student tidak ada, atau token sudah digantikan oleh login baru
     throw new UnauthorizedError("Sesi tidak valid atau telah digantikan oleh sesi baru.");
+  }
+
+  // Guard: Tolak token jika siswa sudah menyelesaikan & mengumpulkan ujian (403)
+  if (!options?.skipSubmittedCheck && student.status === "submitted") {
+    throw new AppError(
+      "ALREADY_SUBMITTED",
+      "Ujian ini sudah dikumpulkan. Anda tidak dapat mengakses sesi ujian kembali.",
+      403
+    );
   }
 
   return { student, payload };

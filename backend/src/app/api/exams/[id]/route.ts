@@ -17,11 +17,17 @@ const updateExamSchema = z.object({
       detect_copy_paste: z.boolean().optional(),
       detect_right_click: z.boolean().optional(),
       detect_devtools: z.boolean().optional(),
+      detect_tab_switch: z.boolean().optional(),
+      detect_fullscreen_exit: z.boolean().optional(),
+      detect_screenshot: z.boolean().optional(),
+      detect_ip_change: z.boolean().optional(),
     })
+    .passthrough()
     .optional(),
   settings: z
     .object({
       randomize_questions: z.boolean().optional(),
+      randomize_choices: z.boolean().optional(),
       display_mode: z.enum(["one_by_one", "all_at_once"]).optional(),
       auto_save_interval_seconds: z.number().int().min(5).max(120).optional(),
       bank_id: z.string().optional(),
@@ -125,19 +131,21 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
       if (exam.status === "draft" && Array.isArray(parsed.data.questions)) {
         await tx.question.deleteMany({ where: { examId: id } });
-        for (let idx = 0; idx < parsed.data.questions.length; idx++) {
-          const norm = normalizeQuestionForDb(parsed.data.questions[idx], idx);
-          await tx.question.create({
-            data: {
+        if (parsed.data.questions.length > 0) {
+          const questionData = parsed.data.questions.map((q, idx) => {
+            const norm = normalizeQuestionForDb(q, idx);
+            return {
               examId: id,
               orderIndex: norm.orderIndex,
               questionText: norm.questionText,
               imageUrl: norm.imageUrl,
+              type: norm.type || "single_choice",
               options: norm.options as any,
               correctAnswer: norm.correctAnswer,
               points: norm.points,
-            },
+            };
           });
+          await tx.question.createMany({ data: questionData });
         }
       }
 

@@ -52,15 +52,27 @@ function ResultsPage() {
 
         if (!isMounted) return;
 
-        if (examRes.success && examRes.data?.exam) {
+        if (examRes.success && (examRes.data?.exam || examRes.data?.title)) {
+          const examData = examRes.data?.exam || examRes.data;
           setExam({
-            id: examRes.data.exam.id,
-            title: examRes.data.exam.title,
+            id: examData.id,
+            title: examData.title,
+          });
+        } else if (resultsRes.success && resultsRes.data?.exam?.title) {
+          setExam({
+            id: resultsRes.data.exam.id,
+            title: resultsRes.data.exam.title,
           });
         }
 
-        if (resultsRes.success && Array.isArray(resultsRes.data) && resultsRes.data.length > 0) {
-          const mapped: ResultRow[] = resultsRes.data.map((item: any) => ({
+        const rawList = Array.isArray(resultsRes.data)
+          ? resultsRes.data
+          : Array.isArray(resultsRes.data?.students)
+          ? resultsRes.data.students
+          : [];
+
+        if (resultsRes.success && rawList.length > 0) {
+          const mapped: ResultRow[] = rawList.map((item: any) => ({
             id: item.studentId || item.id,
             name: item.name,
             nisn: item.nisn || "-",

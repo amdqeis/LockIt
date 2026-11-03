@@ -98,9 +98,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     await prisma.$transaction(async (tx) => {
       await tx.question.deleteMany({ where: { examId: id } });
 
-      for (const q of questions) {
-        await tx.question.create({
-          data: {
+      if (questions.length > 0) {
+        await tx.question.createMany({
+          data: questions.map((q) => ({
             examId: id,
             orderIndex: q.orderIndex,
             questionText: q.questionText,
@@ -108,7 +108,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             options: q.options as any,
             correctAnswer: q.correctAnswer,
             points: q.points,
-          },
+          })),
         });
       }
     });

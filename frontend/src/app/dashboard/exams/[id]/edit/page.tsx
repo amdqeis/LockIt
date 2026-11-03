@@ -122,6 +122,8 @@ interface FormState {
   detectDevTools: boolean;
   detectTabSwitch: boolean;
   detectFullscreenExit: boolean;
+  detectScreenshot: boolean;
+  detectIpChange: boolean;
 }
 
 // ─── Shared control styles ────────────────────────────────────────────────────
@@ -291,9 +293,9 @@ function EditExamPage() {
     title: "",
     description: "",
     duration: 90,
-    shuffleQuestions: false,
+    shuffleQuestions: true,
     displayMode: "all_at_once",
-    shuffleChoices: false,
+    shuffleChoices: true,
     allowBackNavigation: true,
     startsAt: "",
     endsAt: "",
@@ -306,6 +308,8 @@ function EditExamPage() {
     detectDevTools: true,
     detectTabSwitch: true,
     detectFullscreenExit: true,
+    detectScreenshot: true,
+    detectIpChange: true,
   };
 
   const [form, setForm] = useState<FormState>(initialForm);
@@ -329,12 +333,17 @@ function EditExamPage() {
           description: beExam.description || prev.description,
           duration: beExam.durationMinutes || prev.duration,
           shuffleQuestions: beExam.settings?.randomize_questions ?? prev.shuffleQuestions,
+          shuffleChoices: beExam.settings?.randomize_choices ?? prev.shuffleChoices,
           displayMode: beExam.settings?.display_mode ?? prev.displayMode,
           maxViolations: beExam.violationPolicy?.max_violations ?? prev.maxViolations,
           actionAtLimit: beExam.violationPolicy?.action === "lock" ? "lock" : "warn",
           detectCopyPaste: beExam.violationPolicy?.detect_copy_paste ?? prev.detectCopyPaste,
           detectRightClick: beExam.violationPolicy?.detect_right_click ?? prev.detectRightClick,
           detectDevTools: beExam.violationPolicy?.detect_devtools ?? prev.detectDevTools,
+          detectTabSwitch: beExam.violationPolicy?.detect_tab_switch ?? prev.detectTabSwitch,
+          detectFullscreenExit: beExam.violationPolicy?.detect_fullscreen_exit ?? prev.detectFullscreenExit,
+          detectScreenshot: beExam.violationPolicy?.detect_screenshot ?? prev.detectScreenshot,
+          detectIpChange: beExam.violationPolicy?.detect_ip_change ?? prev.detectIpChange,
         }));
 
         const banks = getStoredQuestionBanks();
@@ -442,7 +451,7 @@ function EditExamPage() {
     auto_end: `Pada pelanggaran ke-${form.maxViolations}, ujian peserta diakhiri dan jawaban yang sudah ada langsung dinilai.`,
   };
 
-  const allDetectionsOff = !form.detectCopyPaste && !form.detectRightClick && !form.detectDevTools && !form.detectTabSwitch && !form.detectFullscreenExit;
+  const allDetectionsOff = !form.detectCopyPaste && !form.detectRightClick && !form.detectDevTools && !form.detectTabSwitch && !form.detectFullscreenExit && !form.detectScreenshot && !form.detectIpChange;
 
   // ── Validation ──────────────────────────────────────────────────────────────
   const validate = () => {
@@ -485,16 +494,21 @@ function EditExamPage() {
         description: form.description?.trim() || null,
         durationMinutes: Number(form.duration) || 90,
         violationPolicy: {
-          max_violations: form.maxViolations || 5,
+          max_violations: form.maxViolations || 3,
           action: form.actionAtLimit === "lock" ? "lock" : "warning",
           detect_copy_paste: form.detectCopyPaste,
           detect_right_click: form.detectRightClick,
           detect_devtools: form.detectDevTools,
+          detect_tab_switch: form.detectTabSwitch,
+          detect_fullscreen_exit: form.detectFullscreenExit,
+          detect_screenshot: form.detectScreenshot,
+          detect_ip_change: form.detectIpChange,
         },
         settings: {
           bank_id: selectedBank?.id,
           bank_title: selectedBank?.title,
           randomize_questions: form.shuffleQuestions,
+          randomize_choices: form.shuffleChoices,
           display_mode: form.displayMode,
           auto_save_interval_seconds: 30,
         },
@@ -1136,6 +1150,8 @@ function EditExamPage() {
                 <ToggleRow id={`${uid}-dt`} label="Deteksi DevTools" helper="Catat jika peserta membuka developer tools" checked={form.detectDevTools} onChange={v => set("detectDevTools", v)} />
                 <ToggleRow id={`${uid}-tab`} label="Deteksi pindah tab atau keluar aplikasi" helper="Catat jika peserta meninggalkan halaman ujian" checked={form.detectTabSwitch} onChange={v => set("detectTabSwitch", v)} />
                 <ToggleRow id={`${uid}-fs`} label="Deteksi keluar layar penuh" helper="Catat jika peserta keluar dari mode layar penuh" checked={form.detectFullscreenExit} onChange={v => set("detectFullscreenExit", v)} />
+                <ToggleRow id={`${uid}-ss`} label="Deteksi screenshot / tangkapan layar" helper="Catat dan kunci sementara jika peserta mencoba mengambil tangkapan layar (PrintScreen)" checked={form.detectScreenshot} onChange={v => set("detectScreenshot", v)} />
+                <ToggleRow id={`${uid}-ip`} label="Deteksi perubahan IP address" helper="Catat jika peserta berganti jaringan atau alamat IP saat ujian berlangsung" checked={form.detectIpChange} onChange={v => set("detectIpChange", v)} />
               </div>
 
               <div style={{ marginTop: "12px", fontSize: "12px", color: T.textSecondary, lineHeight: "18px", borderTop: `1px solid ${T.border}`, paddingTop: "12px" }}>

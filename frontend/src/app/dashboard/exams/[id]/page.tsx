@@ -78,6 +78,7 @@ function ExamDetailPage() {
           bankId: beExam.settings?.bank_id || null,
           bankTitle: beExam.settings?.bank_title || null,
           shuffleQuestions: beExam.settings?.randomize_questions ?? true,
+          shuffleChoices: beExam.settings?.randomize_choices ?? true,
           questionMode: beExam.settings?.display_mode === "one_by_one" ? "one-by-one" : "all-at-once",
           createdAt: new Date(beExam.createdAt).toLocaleDateString("id-ID", {
             day: "numeric",
@@ -85,11 +86,15 @@ function ExamDetailPage() {
             year: "numeric",
           }),
           violationPolicy: {
-            maxViolations: beExam.violationPolicy?.max_violations || 5,
+            maxViolations: beExam.violationPolicy?.max_violations || 3,
             action: beExam.violationPolicy?.action === "lock" ? "auto-lock" : "warning",
             detectCopyPaste: beExam.violationPolicy?.detect_copy_paste ?? true,
             detectRightClick: beExam.violationPolicy?.detect_right_click ?? false,
             detectDevTools: beExam.violationPolicy?.detect_devtools ?? false,
+            detectTabSwitch: beExam.violationPolicy?.detect_tab_switch ?? true,
+            detectFullscreenExit: beExam.violationPolicy?.detect_fullscreen_exit ?? true,
+            detectScreenshot: beExam.violationPolicy?.detect_screenshot ?? true,
+            detectIpChange: beExam.violationPolicy?.detect_ip_change ?? true,
           },
         };
         setExam(mapped);
@@ -625,6 +630,10 @@ function ExamDetailPage() {
                     {exam.violationPolicy.detectCopyPaste && <span style={{ background: "#FEF9C3", color: "#78350F", padding: "3px 10px", borderRadius: "100px", fontSize: "12px" }}>Copy-Paste ✓</span>}
                     {exam.violationPolicy.detectRightClick && <span style={{ background: "#FEF9C3", color: "#78350F", padding: "3px 10px", borderRadius: "100px", fontSize: "12px" }}>Klik Kanan ✓</span>}
                     {exam.violationPolicy.detectDevTools && <span style={{ background: "#FEF9C3", color: "#78350F", padding: "3px 10px", borderRadius: "100px", fontSize: "12px" }}>DevTools ✓</span>}
+                    {exam.violationPolicy.detectTabSwitch && <span style={{ background: "#FEF9C3", color: "#78350F", padding: "3px 10px", borderRadius: "100px", fontSize: "12px" }}>Pindah Tab ✓</span>}
+                    {exam.violationPolicy.detectFullscreenExit && <span style={{ background: "#FEF9C3", color: "#78350F", padding: "3px 10px", borderRadius: "100px", fontSize: "12px" }}>Layar Penuh ✓</span>}
+                    {exam.violationPolicy.detectScreenshot && <span style={{ background: "#FEE2E2", color: "#991B1B", padding: "3px 10px", borderRadius: "100px", fontSize: "12px", fontWeight: 600 }}>Screenshot ✓</span>}
+                    {exam.violationPolicy.detectIpChange && <span style={{ background: "#FEF9C3", color: "#78350F", padding: "3px 10px", borderRadius: "100px", fontSize: "12px" }}>Ganti IP ✓</span>}
                   </div>
                 </div>
               </div>
@@ -1014,7 +1023,8 @@ function ExamDetailPage() {
               <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                 {[
                   { label: "Mode Tampilan", value: exam.questionMode === "one-by-one" ? "Satu per satu" : "Semua sekaligus" },
-                  { label: "Acak Urutan", value: exam.shuffleQuestions ? "✅ Aktif" : "❌ Nonaktif" },
+                  { label: "Acak Urutan Soal", value: exam.shuffleQuestions ? "✅ Aktif" : "❌ Nonaktif" },
+                  { label: "Acak Pilihan Jawaban", value: exam.shuffleChoices ? "✅ Aktif" : "❌ Nonaktif" },
                   { label: "Bank Soal", value: exam.bankTitle || (exam.bankId ? "Terkait" : "Belum dipilih") },
                 ].map(item => (
                   <div key={item.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "14px", padding: "8px 0", borderBottom: "1px solid #F3F4F6" }}>

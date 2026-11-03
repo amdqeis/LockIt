@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { generateStudentSessionToken, hashStudentToken } from "@/lib/auth";
+import { generateStudentSessionToken, verifyStudentSessionToken, hashStudentToken } from "@/lib/auth";
 import { successResponse, errorResponse, safeErrorMessage } from "@/lib/response";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 import { createRequestLogger } from "@/lib/logger";
@@ -68,6 +68,29 @@ export async function POST(req: NextRequest) {
       return errorResponse("EXAM_TIME_EXPIRED", "Waktu pengerjaan ujian telah berakhir", 400);
     }
 
+    // 1. DETEKSI LEWAT JWT TOKEN: Jika request membawa token ujian ini dan statusnya sudah submitted, tolak langsung!
+    const cookieToken = req.cookies.get("studentSession")?.value;
+    const headerToken = req.headers.get("x-student-session");
+    const existingToken = cookieToken || headerToken;
+
+    if (existingToken) {
+      const existingPayload = verifyStudentSessionToken(existingToken);
+      if (existingPayload && existingPayload.examId === exam.id) {
+        const studentFromToken = await prisma.student.findUnique({
+          where: { id: existingPayload.studentId },
+          select: { status: true, nisn: true, name: true },
+        });
+
+        if (studentFromToken && studentFromToken.status === "submitted") {
+          return errorResponse(
+            "ALREADY_SUBMITTED",
+            "Token/perangkat ini telah menyelesaikan ujian ini. Anda tidak dapat mengerjakan ulang ujian yang sama.",
+            403
+          );
+        }
+      }
+    }
+
     // Check if student with same NISN already exists in this exam
     let student = await prisma.student.findUnique({
       where: {
@@ -127,9 +150,9 @@ export async function POST(req: NextRequest) {
         },
       });
 
-      // Jika IP berubah, hitung sebagai pelanggaran (Item 8)
-      if (ipChanged) {
-        const policy = (exam.violationPolicy as any) || {};
+      // Jika IP berubah, hitung sebagai pelanggaran jika diaktifkan di kebijakan (Item 8)
+      const policy = (exam.violationPolicy as any) || {};
+      if (ipChanged && policy.detect_ip_change !== false) {
         const maxViolations = policy.max_violations || 3;
         const policyAction = policy.action || "lock";
 

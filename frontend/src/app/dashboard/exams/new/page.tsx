@@ -131,6 +131,8 @@ interface FormState {
   detectDevTools: boolean;
   detectTabSwitch: boolean;
   detectFullscreenExit: boolean;
+  detectScreenshot: boolean;
+  detectIpChange: boolean;
 }
 
 // ─── Shared control styles ────────────────────────────────────────────────────
@@ -296,21 +298,23 @@ export default function NewExamPage() {
     title: "",
     description: "",
     duration: 90,
-    shuffleQuestions: false,
+    shuffleQuestions: true,
     displayMode: "one_by_one",
-    shuffleChoices: false,
+    shuffleChoices: true,
     allowBackNavigation: true,
     startsAt: "",
     endsAt: "",
     audienceIds: [],
     passingScore: "",
     maxViolations: 3,
-    actionAtLimit: "warn",
+    actionAtLimit: "lock",
     detectCopyPaste: true,
     detectRightClick: true,
     detectDevTools: true,
     detectTabSwitch: true,
     detectFullscreenExit: true,
+    detectScreenshot: true,
+    detectIpChange: true,
   });
 
   const set = useCallback(<K extends keyof FormState>(key: K, val: FormState[K]) => {
@@ -413,7 +417,7 @@ export default function NewExamPage() {
     auto_end: `Pada pelanggaran ke-${form.maxViolations}, ujian peserta diakhiri dan jawaban yang sudah ada langsung dinilai.`,
   };
 
-  const allDetectionsOff = !form.detectCopyPaste && !form.detectRightClick && !form.detectDevTools && !form.detectTabSwitch && !form.detectFullscreenExit;
+  const allDetectionsOff = !form.detectCopyPaste && !form.detectRightClick && !form.detectDevTools && !form.detectTabSwitch && !form.detectFullscreenExit && !form.detectScreenshot && !form.detectIpChange;
 
   // ── Validation ──────────────────────────────────────────────────────────────
   const validate = (mode: "draft" | "save") => {
@@ -462,16 +466,21 @@ export default function NewExamPage() {
           description: form.description?.trim() || undefined,
           durationMinutes: Number(form.duration) || 90,
           violationPolicy: {
-            max_violations: form.maxViolations || 5,
+            max_violations: form.maxViolations || 3,
             action: form.actionAtLimit === "lock" ? "lock" : "warning",
             detect_copy_paste: form.detectCopyPaste,
             detect_right_click: form.detectRightClick,
             detect_devtools: form.detectDevTools,
+            detect_tab_switch: form.detectTabSwitch,
+            detect_fullscreen_exit: form.detectFullscreenExit,
+            detect_screenshot: form.detectScreenshot,
+            detect_ip_change: form.detectIpChange,
           },
           settings: {
             bank_id: selectedBank?.id,
             bank_title: selectedBank?.title,
             randomize_questions: form.shuffleQuestions,
+            randomize_choices: form.shuffleChoices,
             display_mode: form.displayMode,
             auto_save_interval_seconds: 30,
           },
@@ -1103,6 +1112,20 @@ export default function NewExamPage() {
                   helper="Catat jika peserta keluar dari mode layar penuh"
                   checked={form.detectFullscreenExit}
                   onChange={v => set("detectFullscreenExit", v)}
+                />
+                <ToggleRow
+                  id={`${uid}-ss`}
+                  label="Deteksi screenshot / tangkapan layar"
+                  helper="Catat dan kunci sementara jika peserta mencoba mengambil tangkapan layar (PrintScreen)"
+                  checked={form.detectScreenshot}
+                  onChange={v => set("detectScreenshot", v)}
+                />
+                <ToggleRow
+                  id={`${uid}-ip`}
+                  label="Deteksi perubahan IP address"
+                  helper="Catat jika peserta berganti jaringan atau alamat IP saat ujian berlangsung"
+                  checked={form.detectIpChange}
+                  onChange={v => set("detectIpChange", v)}
                 />
               </div>
 

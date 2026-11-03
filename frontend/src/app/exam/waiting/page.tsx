@@ -102,7 +102,11 @@ export default function WaitingPage() {
             }
           }
         } else if (res.status === 401 || res.status === 403) {
-          // Token expired or invalid
+          const json = await res.json().catch(() => null);
+          if (json?.error?.code === "ALREADY_SUBMITTED" || json?.error?.code === "EXAM_ALREADY_SUBMITTED") {
+            router.replace("/exam/done");
+            return;
+          }
           setConnectionStatus("offline");
         } else {
           setConnectionStatus("reconnecting");

@@ -97,6 +97,7 @@ model Question {
   orderIndex   Int      @map("order_index")
   questionText String   @map("question_text")
   imageUrl     String?  @map("image_url")
+  type         String   @default("single_choice")
   options      Json
   correctAnswer String  @map("correct_answer")
   points       Int      @default(10)

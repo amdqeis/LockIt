@@ -15,13 +15,19 @@ import { AppError } from "@/lib/errors";
  */
 export async function GET(req: NextRequest) {
   try {
-    const { student } = await authenticateStudent(req);
+    const { student } = await authenticateStudent(req, { skipSubmittedCheck: true });
     const exam = student.exam;
     const now = new Date();
 
     // Siswa sudah submit — sesi berakhir
     if (student.status === "submitted") {
-      return successResponse({ isActive: false, reason: "submitted" as const });
+      return successResponse({
+        isActive: false,
+        reason: "submitted" as const,
+        studentName: student.name,
+        studentNisn: student.nisn,
+        examTitle: exam.title,
+      });
     }
 
     // Ujian sudah selesai
