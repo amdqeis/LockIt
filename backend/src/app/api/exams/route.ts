@@ -43,6 +43,8 @@ const createExamSchema = z.object({
       auto_save_interval_seconds: z.number().int().min(5).max(120).default(30),
       bank_id: z.string().optional(),
       bank_title: z.string().optional(),
+      show_score_to_student: z.boolean().default(true),
+      allow_answer_review: z.boolean().default(false),
     })
     .passthrough()
     .default({
@@ -50,6 +52,8 @@ const createExamSchema = z.object({
       randomize_choices: true,
       display_mode: "one_by_one",
       auto_save_interval_seconds: 30,
+      show_score_to_student: true,
+      allow_answer_review: false,
     }),
   questions: z.array(z.any()).optional(),
 });

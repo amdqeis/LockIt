@@ -32,6 +32,8 @@ const updateExamSchema = z.object({
       auto_save_interval_seconds: z.number().int().min(5).max(120).optional(),
       bank_id: z.string().optional(),
       bank_title: z.string().optional(),
+      show_score_to_student: z.boolean().optional(),
+      allow_answer_review: z.boolean().optional(),
     })
     .passthrough()
     .optional(),
@@ -120,7 +122,12 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       if (parsed.data.description !== undefined) updateData.description = parsed.data.description;
       if (parsed.data.durationMinutes !== undefined) updateData.durationMinutes = parsed.data.durationMinutes;
       if (parsed.data.violationPolicy !== undefined) updateData.violationPolicy = parsed.data.violationPolicy as any;
-      if (parsed.data.settings !== undefined) updateData.settings = parsed.data.settings as any;
+      if (parsed.data.settings !== undefined) {
+        updateData.settings = {
+          ...(typeof exam.settings === "object" && exam.settings !== null ? exam.settings : {}),
+          ...parsed.data.settings,
+        };
+      }
     }
 
     const updated = await prisma.$transaction(async (tx) => {

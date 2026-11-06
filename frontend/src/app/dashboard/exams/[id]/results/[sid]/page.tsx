@@ -13,7 +13,8 @@ interface QuestionDetail {
   points: number;
   correctAnswer: string;
   selectedAnswer: string | null;
-  isCorrect: boolean;
+  isCorrect: boolean | null;
+  type?: string;
   options: { id: string; text: string }[];
 }
 
@@ -78,9 +79,10 @@ function ResultDetailPage() {
                 number: a.orderIndex !== undefined ? a.orderIndex + 1 : idx + 1,
                 text: a.questionText || "",
                 points: a.points || 1,
-                correctAnswer: (a.correctAnswer || "").toLowerCase(),
-                selectedAnswer: a.selectedOption ? a.selectedOption.toLowerCase() : null,
-                isCorrect: !!a.isCorrect,
+                correctAnswer: a.type === "short_answer" ? (a.correctAnswer || "") : (a.correctAnswer || "").toLowerCase(),
+                selectedAnswer: a.type === "short_answer" ? (a.selectedOption || null) : (a.selectedOption ? a.selectedOption.toLowerCase() : null),
+                isCorrect: a.type === "short_answer" ? (a.isCorrect ?? null) : !!a.isCorrect,
+                type: a.type,
                 options: parsedOptions,
               };
             });
@@ -238,7 +240,7 @@ function ResultDetailPage() {
                 <div
                   style={{
                     padding: "14px 20px",
-                    background: notAnswered ? "#F8FAFC" : isCorrect ? "#F0FDF4" : "#FFF5F5",
+                    background: q.type === "short_answer" ? "#F0FDFA" : notAnswered ? "#F8FAFC" : isCorrect ? "#F0FDF4" : "#FFF5F5",
                     borderBottom: "1px solid #E9ECF0",
                     display: "flex",
                     justifyContent: "space-between",
@@ -259,7 +261,20 @@ function ResultDetailPage() {
                     >
                       +{q.points} poin
                     </span>
-                    {notAnswered ? (
+                    {q.type === "short_answer" ? (
+                      <span
+                        style={{
+                          background: notAnswered ? "#F3F4F6" : "#CCFBF1",
+                          color: notAnswered ? "#6B7280" : "#0F766E",
+                          padding: "2px 10px",
+                          borderRadius: "100px",
+                          fontSize: "12px",
+                          fontWeight: 600,
+                        }}
+                      >
+                        {notAnswered ? "— Tidak Dijawab" : "✍️ Jawaban Singkat (Dinilai Manual)"}
+                      </span>
+                    ) : notAnswered ? (
                       <span
                         style={{
                           background: "#F3F4F6",
@@ -307,7 +322,32 @@ function ResultDetailPage() {
                     {q.text}
                   </p>
 
-                  {/* Options */}
+                  {/* Options or Short Answer Content */}
+                  {q.type === "short_answer" ? (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                      <label style={{ fontSize: "12px", fontWeight: 700, color: "#475569" }}>
+                        Jawaban Teks Siswa:
+                      </label>
+                      <div
+                        style={{
+                          padding: "12px 16px",
+                          borderRadius: "8px",
+                          border: "1.5px solid #CBD5E1",
+                          background: notAnswered ? "#F8FAFC" : "#FFFFFF",
+                          color: notAnswered ? "#94A3B8" : "#1E293B",
+                          fontSize: "14px",
+                          lineHeight: 1.6,
+                          whiteSpace: "pre-wrap",
+                          fontStyle: notAnswered ? "italic" : "normal",
+                        }}
+                      >
+                        {notAnswered ? "(Siswa tidak mengisi jawaban untuk soal ini)" : q.selectedAnswer}
+                      </div>
+                      <div style={{ fontSize: "12px", color: "#64748B", marginTop: "2px" }}>
+                        ℹ️ Tipe soal jawaban singkat tidak dinilai secara otomatis. Poin dapat dinilai manual oleh pengawas.
+                      </div>
+                    </div>
+                  ) : (
                   <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                     {q.options.map((opt) => {
                       const studentChoices = q.selectedAnswer ? q.selectedAnswer.split(",").map((s: string) => s.trim().toLowerCase()) : [];
@@ -391,6 +431,7 @@ function ResultDetailPage() {
                       );
                     })}
                   </div>
+                  )}
                 </div>
               </div>
             );

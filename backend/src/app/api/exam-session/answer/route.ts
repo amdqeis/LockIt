@@ -11,7 +11,7 @@ const answerSchema = z.object({
   selectedOption: z
     .string()
     .trim()
-    .max(50, "Opsi jawaban terlalu panjang")
+    .max(2000, "Jawaban terlalu panjang (maks. 2000 karakter)")
     .nullable()
     .optional(),
 });
@@ -62,23 +62,27 @@ export async function POST(req: NextRequest) {
 
     const { questionId, selectedOption } = parsed.data;
 
-    const cleanOption =
-      selectedOption && selectedOption.trim().length > 0
-        ? selectedOption.trim().toUpperCase()
-        : null;
-
-    if (cleanOption && !/^([A-Z])(,[A-Z])*$/.test(cleanOption)) {
-      return errorResponse("VALIDATION_ERROR", "Format opsi jawaban harus huruf tunggal atau huruf dipisah koma (mis. A,C)", 400);
-    }
-
-    // Verify question belongs to this exam
+    // Verify question belongs to this exam and check question type
     const question = await prisma.question.findUnique({
       where: { id: questionId },
-      select: { examId: true },
+      select: { examId: true, type: true },
     });
 
     if (!question || question.examId !== exam.id) {
       return errorResponse("QUESTION_NOT_FOUND", "Soal tidak ditemukan pada ujian ini", 404);
+    }
+
+    let cleanOption: string | null = null;
+    if (selectedOption && selectedOption.trim().length > 0) {
+      if (question.type === "short_answer") {
+        // Soal jawaban singkat: simpan teks mentah siswa tanpa uppercase atau regex pilihan ganda
+        cleanOption = selectedOption.trim();
+      } else {
+        cleanOption = selectedOption.trim().toUpperCase();
+        if (!/^([A-Z])(,[A-Z])*$/.test(cleanOption)) {
+          return errorResponse("VALIDATION_ERROR", "Format opsi jawaban harus huruf tunggal atau huruf dipisah koma (mis. A,C)", 400);
+        }
+      }
     }
 
     const answer = await prisma.answer.upsert({
@@ -99,6 +103,27 @@ export async function POST(req: NextRequest) {
         answeredAt: now,
       },
     });
+
+    // Emit real-time answer progress to teacher dashboard
+    const io = (globalThis as any).io;
+    if (io) {
+      try {
+        const answeredCount = await prisma.answer.count({
+          where: {
+            studentId: student.id,
+            selectedOption: { not: null },
+            NOT: { selectedOption: "" },
+          },
+        });
+
+        io.of("/teacher-dashboard").to(`exam:${exam.id}`).emit("student_answer_progress", {
+          studentId: student.id,
+          answeredCount,
+        });
+      } catch (socketErr) {
+        console.error("Socket emit failed on student answer:", socketErr);
+      }
+    }
 
     return successResponse({
       questionId: answer.questionId,

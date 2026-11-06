@@ -45,11 +45,12 @@ export async function GET(
         orderIndex: q.orderIndex,
         questionText: q.questionText,
         imageUrl: q.imageUrl,
+        type: q.type,
         options: q.options,
         correctAnswer: q.correctAnswer,
         points: q.points,
         selectedOption: ans?.selectedOption ?? null,
-        isCorrect: ans?.isCorrect ?? false,
+        isCorrect: q.type === "short_answer" ? (ans?.isCorrect ?? null) : (ans?.isCorrect ?? false),
         answeredAt: ans?.answeredAt ?? null,
       };
     });

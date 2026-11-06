@@ -92,6 +92,37 @@ export async function GET(req: NextRequest) {
       });
     }
 
+    const totalQuestions = questions.length;
+    let selectedQuestions = questions;
+    let currentChunk = 1;
+    let totalChunks = 1;
+    let hasMore = false;
+
+    const chunkParam = req.nextUrl.searchParams.get("chunk");
+    const limitParam = req.nextUrl.searchParams.get("limit");
+    const offsetParam = req.nextUrl.searchParams.get("offset");
+
+    if (chunkParam === "1") {
+      const half = Math.ceil(totalQuestions / 2);
+      selectedQuestions = questions.slice(0, half);
+      currentChunk = 1;
+      totalChunks = totalQuestions > half ? 2 : 1;
+      hasMore = totalChunks > 1;
+    } else if (chunkParam === "2") {
+      const half = Math.ceil(totalQuestions / 2);
+      selectedQuestions = questions.slice(half);
+      currentChunk = 2;
+      totalChunks = 2;
+      hasMore = false;
+    } else if (limitParam) {
+      const limit = Math.max(1, parseInt(limitParam, 10) || 10);
+      const offset = Math.max(0, parseInt(offsetParam || "0", 10) || 0);
+      selectedQuestions = questions.slice(offset, offset + limit);
+      currentChunk = Math.floor(offset / limit) + 1;
+      totalChunks = Math.ceil(totalQuestions / limit);
+      hasMore = offset + limit < totalQuestions;
+    }
+
     return successResponse({
       student: {
         id: student.id,
@@ -110,7 +141,11 @@ export async function GET(req: NextRequest) {
         settings: exam.settings,
         violationPolicy: exam.violationPolicy,
       },
-      questions,
+      questions: selectedQuestions,
+      totalQuestions,
+      chunk: currentChunk,
+      totalChunks,
+      hasMore,
       answers,
       serverTime: new Date().toISOString(),
     });

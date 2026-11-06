@@ -10,10 +10,11 @@ export async function POST(req: NextRequest) {
     const { student } = await authenticateStudent(req);
     const exam = student.exam;
 
-    // HIGH-06: Rate limit heartbeat — normal setiap 10-30 detik, max 10/menit
+    // HIGH-06: Rate limit heartbeat — normal setiap 10-30 detik (max 10/menit),
+    // saat status terkunci izinkan frekuensi lebih tinggi (max 45/menit) untuk deteksi unblock instan
     const rateLimit = checkRateLimit(student.id, {
       windowMs: 60 * 1000,
-      max: 10,
+      max: student.isLocked ? 45 : 10,
       keyPrefix: "heartbeat",
     });
 

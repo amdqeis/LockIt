@@ -43,7 +43,7 @@ function normalizeQuestion(q: any, idx: number) {
   return {
     id: q.id,
     number: q.orderIndex || idx + 1,
-    type: (q.type || "single_choice") as "single_choice" | "multi_select" | "latex",
+    type: (q.type || "single_choice") as "single_choice" | "multi_select" | "latex" | "short_answer",
     text: q.questionText || q.text || "",
     image: q.imageUrl || q.image || null,
     options: opts,
@@ -354,7 +354,7 @@ function QNumberGrid({
         const isCurrent = idx === currentQ;
         const isAnswered = isQuestionAnswered(q);
         const isFlagged = flagged.has(idx);
-        const typeColor = q.type === "multi_select" ? "#D97706" : q.type === "latex" ? "#7C3AED" : "#29ABE2";
+        const typeColor = q.type === "short_answer" ? "#0D9488" : q.type === "multi_select" ? "#D97706" : q.type === "latex" ? "#7C3AED" : "#29ABE2";
         const size = "36px";
         return (
           <button
@@ -363,7 +363,7 @@ function QNumberGrid({
             style={{
               width: size, height: size, borderRadius: "6px",
               border: isCurrent ? `2.5px solid ${typeColor}` : isAnswered ? `2px solid ${typeColor}` : "1.5px solid #D9E9F2",
-              background: isCurrent ? typeColor : isAnswered ? (q.type === "multi_select" ? "#FEF3C7" : q.type === "latex" ? "#EDE9FE" : "#E0F4FD") : "white",
+              background: isCurrent ? typeColor : isAnswered ? (q.type === "short_answer" ? "#CCFBF1" : q.type === "multi_select" ? "#FEF3C7" : q.type === "latex" ? "#EDE9FE" : "#E0F4FD") : "white",
               color: isCurrent ? "white" : isAnswered ? typeColor : "#6E8EA0",
               fontWeight: isCurrent ? 700 : 500,
               fontSize: "13px",
@@ -492,7 +492,13 @@ export default function ExamSessionPage() {
   const [screenshotLockReason, setScreenshotLockReason] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(true);
   const [showFullscreenGate, setShowFullscreenGate] = useState(false);
+  const [splitScreenWarning, setSplitScreenWarning] = useState<string | null>(null);
   const [hasEnteredFullscreenBefore, setHasEnteredFullscreenBefore] = useState(false);
+  const [isShieldActive, setIsShieldActive] = useState<boolean>(false);
+  const [isCheckingUnlock, setIsCheckingUnlock] = useState<boolean>(false);
+  const [totalExpectedQuestions, setTotalExpectedQuestions] = useState<number>(0);
+  const [isChunk2Loading, setIsChunk2Loading] = useState<boolean>(false);
+  const blurTimestampRef = useRef<number>(0);
   const [studentProfile, setStudentProfile] = useState<{ name: string; nisn: string } | null>(null);
   const [warningBanner, setWarningBanner] = useState<string | null>(null);
   const [timeExpiredOverlay, setTimeExpiredOverlay] = useState(false);
@@ -506,7 +512,8 @@ export default function ExamSessionPage() {
   const togglePanel = (panel: SidePanel) =>
     setActivePanel((prev) => (prev === panel ? null : panel));
 
-  const totalQ = questionsList.length;
+  const totalQ = Math.max(totalExpectedQuestions, questionsList.length);
+  const isQuestionPending = currentQ >= questionsList.length && questionsList.length > 0;
   const question: Question = questionsList[currentQ] || questionsList[0] || {
     id: "q-loading",
     number: 1,
@@ -518,79 +525,206 @@ export default function ExamSessionPage() {
 
   const answeredCount = questionsList.filter((q) => {
     if (q.type === "multi_select") return (multiAnswers[q.id]?.size ?? 0) > 0;
+    if (q.type === "short_answer") return !!(answers[q.id] && answers[q.id].trim().length > 0);
     return !!answers[q.id];
   }).length;
 
-  const isQuestionAnswered = (q: Question) =>
-    q.type === "multi_select" ? (multiAnswers[q.id]?.size ?? 0) > 0 : !!answers[q.id];
+  const isQuestionAnswered = (q: Question) => {
+    if (q.type === "multi_select") return (multiAnswers[q.id]?.size ?? 0) > 0;
+    if (q.type === "short_answer") return !!(answers[q.id] && answers[q.id].trim().length > 0);
+    return !!answers[q.id];
+  };
 
   useEffect(() => {
     setCurrentDateStr(new Date().toLocaleDateString("id-ID", { weekday: "long", year: "numeric", month: "long", day: "numeric" }));
   }, []);
 
-  // Fullscreen Management: permintaan fullscreen dengan fallback user gesture & pengawasan status
+  // Fullscreen & Split-Screen Detection Guard
+  const checkTrueFullscreen = useCallback(() => {
+    if (typeof window === "undefined") return { isFs: false, isSplit: false, reason: "" };
+
+    const hasFsElement = !!(
+      document.fullscreenElement ||
+      (document as any).webkitFullscreenElement ||
+      (document as any).mozFullScreenElement ||
+      (document as any).msFullscreenElement
+    );
+
+    const screenW = window.screen.availWidth || window.screen.width;
+    const screenH = window.screen.availHeight || window.screen.height;
+    const innerW = window.innerWidth;
+    const innerH = window.innerHeight;
+    const outerW = window.outerWidth || innerW;
+    const outerH = window.outerHeight || innerH;
+
+    const isMobileDevice =
+      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+      innerW < 768;
+
+    let isSplit = false;
+    let splitReason = "";
+
+    if (isMobileDevice) {
+      // HP / Android: Deteksi mode layar terbagi (split-screen / multi-window)
+      const maxScreen = Math.max(screenH, screenW);
+      const minScreen = Math.min(screenH, screenW);
+      const ratioH = innerH / maxScreen;
+      const ratioW = innerW / minScreen;
+
+      if (ratioH < 0.68) {
+        isSplit = true;
+        splitReason = `Mode Split-Screen HP terdeteksi (tinggi viewport ${innerH}px vs ${maxScreen}px).`;
+      } else if (ratioW < 0.72) {
+        isSplit = true;
+        splitReason = `Mode Layar Terbagi HP terdeteksi (lebar viewport ${innerW}px vs ${minScreen}px).`;
+      }
+    } else {
+      // Laptop / Desktop: Deteksi Windows Snap Assist / Window Split
+      const widthRatio = innerW / screenW;
+      const heightRatio = innerH / screenH;
+      const outerWidthRatio = outerW / screenW;
+
+      if (widthRatio < 0.90 || outerWidthRatio < 0.90) {
+        isSplit = true;
+        splitReason = `Jendela browser terbagi (split-screen/snap). Lebar aktif: ${Math.round(widthRatio * 100)}% dari layar monitor.`;
+      } else if (heightRatio < 0.85) {
+        isSplit = true;
+        splitReason = `Jendela browser terbagi secara vertikal. Tinggi aktif: ${Math.round(heightRatio * 100)}% dari layar monitor.`;
+      }
+    }
+
+    const isTrue = hasFsElement && !isSplit;
+    return { isFs: isTrue, isSplit, reason: splitReason };
+  }, []);
+
   const enterFullscreen = useCallback(async () => {
     try {
+      const { isSplit, reason } = checkTrueFullscreen();
+      if (isSplit) {
+        setSplitScreenWarning(reason);
+        sendProctoringEvent("split_screen", { reason, trigger: "attempted_fullscreen_while_split" });
+        setIsFullscreen(false);
+        setShowFullscreenGate(true);
+        return;
+      }
+
       if (!document.fullscreenElement) {
         await document.documentElement.requestFullscreen();
       }
-      setIsFullscreen(true);
-      setShowFullscreenGate(false);
-      setHasEnteredFullscreenBefore(true);
+
+      setTimeout(() => {
+        const recheck = checkTrueFullscreen();
+        if (!recheck.isFs) {
+          setIsFullscreen(false);
+          setShowFullscreenGate(true);
+          if (recheck.isSplit) {
+            setSplitScreenWarning(recheck.reason);
+            sendProctoringEvent("split_screen", { reason: recheck.reason });
+          }
+        } else {
+          setIsFullscreen(true);
+          setSplitScreenWarning(null);
+          setShowFullscreenGate(false);
+          setHasEnteredFullscreenBefore(true);
+        }
+      }, 300);
     } catch (err) {
       console.warn("Fullscreen request rejected or requires user gesture:", err);
       setIsFullscreen(false);
       setShowFullscreenGate(true);
     }
-  }, []);
+  }, [checkTrueFullscreen]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined" || submitted) return;
 
     const checkFs = () => {
-      const active = !!document.fullscreenElement;
-      setIsFullscreen(active);
-      return active;
+      const { isFs, isSplit, reason } = checkTrueFullscreen();
+      if (!isFs) {
+        setIsFullscreen(false);
+        setShowFullscreenGate(true);
+        if (isSplit) {
+          setSplitScreenWarning(reason);
+          sendProctoringEvent("split_screen", { reason });
+        }
+        return false;
+      }
+      setIsFullscreen(true);
+      setSplitScreenWarning(null);
+      setShowFullscreenGate(false);
+      setHasEnteredFullscreenBefore(true);
+      return true;
     };
 
     const initialFs = checkFs();
-
     if (!initialFs) {
-      // Coba request fullscreen (berhasil jika browser memperbolehkan atau jika ada transient gesture)
       document.documentElement
         .requestFullscreen()
         .then(() => {
-          setIsFullscreen(true);
-          setShowFullscreenGate(false);
-          setHasEnteredFullscreenBefore(true);
+          checkFs();
         })
         .catch(() => {
-          // Browser menolak request otomatis tanpa gesture user — tampilkan Fullscreen Gate
           setIsFullscreen(false);
           setShowFullscreenGate(true);
         });
-    } else {
-      setHasEnteredFullscreenBefore(true);
     }
 
     const onFsChange = () => {
-      const active = !!document.fullscreenElement;
-      setIsFullscreen(active);
-      if (!active) {
-        // Keluar dari fullscreen tercatat sebagai pelanggaran
-        sendProctoringEvent("fullscreen_exit");
+      const { isFs, isSplit, reason } = checkTrueFullscreen();
+      setIsFullscreen(isFs);
+      if (!isFs) {
+        if (isSplit) {
+          setSplitScreenWarning(reason);
+          sendProctoringEvent("split_screen", { reason });
+        } else {
+          sendProctoringEvent("fullscreen_exit");
+        }
         setShowFullscreenGate(true);
       } else {
+        setSplitScreenWarning(null);
         setShowFullscreenGate(false);
         setHasEnteredFullscreenBefore(true);
       }
     };
 
-    document.addEventListener("fullscreenchange", onFsChange);
-    return () => {
-      document.removeEventListener("fullscreenchange", onFsChange);
+    const onResize = () => {
+      const { isFs, isSplit, reason } = checkTrueFullscreen();
+      if (!isFs) {
+        setIsFullscreen(false);
+        setShowFullscreenGate(true);
+        if (isSplit) {
+          setSplitScreenWarning(reason);
+          sendProctoringEvent("split_screen", { reason });
+        }
+      }
     };
-  }, []);
+
+    // Guard interval setiap 1 detik untuk deteksi snap/split-screen kontinu
+    const timer = setInterval(() => {
+      const { isFs, isSplit, reason } = checkTrueFullscreen();
+      if (!isFs) {
+        setIsFullscreen(false);
+        setShowFullscreenGate(true);
+        if (isSplit && !splitScreenWarning) {
+          setSplitScreenWarning(reason);
+          sendProctoringEvent("split_screen", { reason });
+        }
+      } else if (splitScreenWarning) {
+        setSplitScreenWarning(null);
+      }
+    }, 1000);
+
+    document.addEventListener("fullscreenchange", onFsChange);
+    document.addEventListener("webkitfullscreenchange", onFsChange);
+    window.addEventListener("resize", onResize);
+
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("fullscreenchange", onFsChange);
+      document.removeEventListener("webkitfullscreenchange", onFsChange);
+      window.removeEventListener("resize", onResize);
+    };
+  }, [checkTrueFullscreen, submitted, splitScreenWarning]);
 
   // Auto-scroll pill nav mobile ke nomor soal yang aktif
   useEffect(() => {
@@ -601,12 +735,13 @@ export default function ExamSessionPage() {
     }
   }, [currentQ, isMobile]);
 
-  // Fase A: Load exam session from backend
+  // Fase A: Load exam session from backend (Incremental Chunked Fetching)
   useEffect(() => {
     let isSubscribed = true;
     const loadSession = async () => {
       try {
-        const res = await fetchExamSession();
+        // 1. Fetch chunk 1 (tahap pertama: 50% butir soal awal + metadata + seluruh jawaban)
+        const res = await fetchExamSession({ chunk: 1 });
         if (!res.success) {
           if (res.error?.code === "ALREADY_SUBMITTED" || res.error?.code === "EXAM_ALREADY_SUBMITTED") {
             sessionStorage.setItem("exam_already_submitted", "true");
@@ -619,7 +754,11 @@ export default function ExamSessionPage() {
           }
         }
         if (res.success && res.data && isSubscribed) {
-          const { student, exam, questions: beQuestions, answers: beAnswers, serverTime } = res.data;
+          const { student, exam, questions: beQuestions, answers: beAnswers, serverTime, totalQuestions, hasMore } = res.data;
+          
+          const expectedTotal = totalQuestions || (Array.isArray(beQuestions) ? beQuestions.length : 0);
+          setTotalExpectedQuestions(expectedTotal);
+
           if (Array.isArray(beQuestions) && beQuestions.length > 0) {
             const mapped = beQuestions.map((q, idx) => normalizeQuestion(q, idx));
             setQuestionsList(mapped);
@@ -669,6 +808,30 @@ export default function ExamSessionPage() {
             setAnswers((prev) => ({ ...prev, ...restored }));
             setMultiAnswers((prev) => ({ ...prev, ...restoredMulti }));
           }
+
+          // 2. Fetch chunk 2 (tahap kedua: sisa soal) secara asinkron di latar belakang
+          if (hasMore) {
+            setIsChunk2Loading(true);
+            fetchExamSession({ chunk: 2 })
+              .then((res2) => {
+                if (res2.success && res2.data?.questions && isSubscribed) {
+                  const chunkQuestions = res2.data.questions;
+                  setQuestionsList((prev) => {
+                    const existingIds = new Set(prev.map((q) => q.id));
+                    const newQuestions = chunkQuestions
+                      .filter((q) => !existingIds.has(q.id))
+                      .map((q, idx) => normalizeQuestion(q, prev.length + idx));
+                    return [...prev, ...newQuestions];
+                  });
+                }
+              })
+              .catch((err) => {
+                console.error("Gagal sinkronisasi chunk 2 soal:", err);
+              })
+              .finally(() => {
+                if (isSubscribed) setIsChunk2Loading(false);
+              });
+          }
         }
       } catch {
         // Fallback to mock session
@@ -687,19 +850,22 @@ export default function ExamSessionPage() {
     if (timeLeft <= 0) {
       setTimeExpiredOverlay(true);
       clearSessionHint();
-      try {
-        if (typeof window !== "undefined") {
-          const summaryPayload = JSON.stringify({
-            name: studentProfile?.name || "Peserta Ujian",
-            nisn: studentProfile?.nisn || "0000000000",
-            exam: examMeta?.title || "Ujian Selesai",
-            answered: answeredCount,
-            total: totalQ,
-          });
-          sessionStorage.setItem("eduquas_submission_summary", summaryPayload);
-        }
-      } catch {}
-      submitStudentExam().finally(() => {
+      submitStudentExam().then((res) => {
+        try {
+          if (typeof window !== "undefined") {
+            const summaryPayload = JSON.stringify({
+              name: studentProfile?.name || "Peserta Ujian",
+              nisn: studentProfile?.nisn || "0000000000",
+              exam: examMeta?.title || "Ujian Selesai",
+              answered: answeredCount,
+              total: totalQ,
+              showScoreToStudent: res.data?.showScoreToStudent !== false,
+              allowAnswerReview: res.data?.allowAnswerReview === true,
+            });
+            sessionStorage.setItem("eduquas_submission_summary", summaryPayload);
+          }
+        } catch {}
+      }).finally(() => {
         sessionStorage.setItem("exam_just_submitted", "true");
         sessionStorage.setItem("exam_submitted_title", examMeta?.title || "Ujian");
         setTimeout(() => {
@@ -712,7 +878,24 @@ export default function ExamSessionPage() {
     return () => clearInterval(t);
   }, [timeLeft, isLocked, submitted]);
 
-  // Periodic heartbeat (15s)
+  // Fast adaptive polling saat status terkunci (1.5 detik) untuk unblock instan
+  useEffect(() => {
+    if (!isLocked || submitted) return;
+    const fastInterval = setInterval(async () => {
+      try {
+        const res = await sendStudentHeartbeat();
+        if (res.success && res.data) {
+          if (!res.data.isLocked) {
+            setIsLocked(false);
+            setScreenshotLockReason(null);
+          }
+        }
+      } catch {}
+    }, 1500);
+    return () => clearInterval(fastInterval);
+  }, [isLocked, submitted]);
+
+  // Periodic heartbeat standar (15s) saat status normal
   useEffect(() => {
     if (submitted) return;
     const interval = setInterval(async () => {
@@ -796,27 +979,57 @@ export default function ExamSessionPage() {
 
     const handleVisibilityChange = () => {
       if (document.hidden) {
+        blurTimestampRef.current = Date.now();
+        setIsShieldActive(true);
         sendProctoringEvent("tab_switch");
+      } else {
+        setIsShieldActive(false);
+        const blurTime = blurTimestampRef.current;
+        const now = Date.now();
+        if (blurTime > 0) {
+          const gap = now - blurTime;
+          blurTimestampRef.current = 0;
+          // Jeda micro capture screenshot pada HP (Power+VolDown) & Windows Snipping: 150ms - 2800ms
+          if (gap >= 150 && gap <= 2800) {
+            triggerScreenshotViolation("Tangkapan layar OS/HP terdeteksi (Jeda overlay screenshot)", { gapMs: gap });
+            return;
+          }
+        }
       }
     };
 
     const handleBlur = () => {
+      blurTimestampRef.current = Date.now();
+      setIsShieldActive(true);
       sendProctoringEvent("window_blur");
       // Purge clipboard saat kehilangan fokus agar screenshot OS tidak tersimpan
       try {
         if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText("");
+          navigator.clipboard.writeText("").catch(() => {});
         }
       } catch {}
     };
 
     const handleFocus = async () => {
+      setIsShieldActive(false);
       // Purge clipboard saat kembali fokus
       try {
         if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText("");
+          navigator.clipboard.writeText("").catch(() => {});
         }
       } catch {}
+
+      const blurTime = blurTimestampRef.current;
+      const now = Date.now();
+      if (blurTime > 0) {
+        const gap = now - blurTime;
+        blurTimestampRef.current = 0;
+        // Jeda overlay screenshot di Android/iOS & Windows Snipping: 150ms - 2800ms
+        if (gap >= 150 && gap <= 2800) {
+          triggerScreenshotViolation("Tangkapan layar OS/HP terdeteksi (Jeda capture screen)", { gapMs: gap });
+          return;
+        }
+      }
 
       // Deteksi jika pengguna baru saja mengambil screenshot via tool eksternal OS
       if (navigator.clipboard && navigator.clipboard.read) {
@@ -825,6 +1038,7 @@ export default function ExamSessionPage() {
           for (const item of items) {
             if (item.types.some((t) => t.startsWith("image/"))) {
               triggerScreenshotViolation("Tangkapan layar terdeteksi pada clipboard sistem");
+              navigator.clipboard.writeText("").catch(() => {});
               break;
             }
           }
@@ -954,6 +1168,18 @@ export default function ExamSessionPage() {
       sendProctoringEvent("right_click");
     };
 
+    const handleSelectStart = (e: Event) => {
+      // Izinkan seleksi teks hanya jika target berupa textarea atau input (mis. soal isian/jawaban singkat)
+      const target = e.target as HTMLElement | null;
+      if (target) {
+        const tagName = target.tagName?.toLowerCase();
+        if (tagName === "textarea" || tagName === "input" || target.isContentEditable) {
+          return;
+        }
+      }
+      e.preventDefault();
+    };
+
     const captureOptions = { capture: true, passive: false };
 
     window.addEventListener("focus", handleFocus);
@@ -961,6 +1187,7 @@ export default function ExamSessionPage() {
     document.addEventListener("visibilitychange", handleVisibilityChange);
     document.addEventListener("copy", handleCopy, captureOptions);
     document.addEventListener("paste", handlePaste, captureOptions);
+    document.addEventListener("selectstart", handleSelectStart, captureOptions);
     window.addEventListener("keydown", handleKeyDown, captureOptions);
     document.addEventListener("keydown", handleKeyDown, captureOptions);
     window.addEventListener("keyup", handleKeyUp, captureOptions);
@@ -974,6 +1201,7 @@ export default function ExamSessionPage() {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       document.removeEventListener("copy", handleCopy, captureOptions);
       document.removeEventListener("paste", handlePaste, captureOptions);
+      document.removeEventListener("selectstart", handleSelectStart, captureOptions);
       window.removeEventListener("keydown", handleKeyDown, captureOptions);
       document.removeEventListener("keydown", handleKeyDown, captureOptions);
       window.removeEventListener("keyup", handleKeyUp, captureOptions);
@@ -1000,6 +1228,20 @@ export default function ExamSessionPage() {
         } else {
           setAutoSaveStatus("failed");
         }
+      } catch {
+        setAutoSaveStatus("failed");
+      }
+    }, 600);
+  };
+
+  const handleShortAnswerChange = (qId: string, text: string) => {
+    setAnswers((a) => ({ ...a, [qId]: text }));
+    setAutoSaveStatus("saving");
+    if (saveTimeoutRef.current[qId]) clearTimeout(saveTimeoutRef.current[qId]);
+    saveTimeoutRef.current[qId] = setTimeout(async () => {
+      try {
+        const res = await saveStudentAnswer(qId, text.trim() || null);
+        setAutoSaveStatus(res.success ? "saved" : "failed");
       } catch {
         setAutoSaveStatus("failed");
       }
@@ -1063,6 +1305,18 @@ export default function ExamSessionPage() {
   const handleSubmit = async () => {
     setSubmitted(true);
     setSubmitStep(0);
+    let subFlags = { showScoreToStudent: true, allowAnswerReview: false };
+    try {
+      const res = await submitStudentExam();
+      if (res && res.data) {
+        subFlags = {
+          showScoreToStudent: res.data.showScoreToStudent !== false,
+          allowAnswerReview: res.data.allowAnswerReview === true,
+        };
+      }
+    } catch {
+      // Continue to done
+    }
     try {
       if (typeof window !== "undefined") {
         const summaryPayload = JSON.stringify({
@@ -1071,15 +1325,12 @@ export default function ExamSessionPage() {
           exam: examMeta?.title || "Ujian Selesai",
           answered: answeredCount,
           total: totalQ,
+          showScoreToStudent: subFlags.showScoreToStudent,
+          allowAnswerReview: subFlags.allowAnswerReview,
         });
         sessionStorage.setItem("eduquas_submission_summary", summaryPayload);
       }
     } catch {}
-    try {
-      await submitStudentExam();
-    } catch {
-      // Continue to home
-    }
     sessionStorage.setItem("exam_just_submitted", "true");
     sessionStorage.setItem("exam_submitted_title", examMeta?.title || "Ujian");
     clearSessionHint();
@@ -1116,9 +1367,49 @@ export default function ExamSessionPage() {
         <p style={{ color: "rgba(255,255,255,0.75)", maxWidth: "420px", lineHeight: 1.7, fontSize: "14px" }}>
           {screenshotLockReason ?? "Pengawas sedang meninjau aktivitasmu. Tunggu hingga pengawas membuka kunci."}
         </p>
-        <div style={{ marginTop: "20px", display: "inline-flex", alignItems: "center", gap: "8px", padding: "8px 16px", borderRadius: "100px", background: "rgba(22,163,74,0.2)", color: "#4ade80", fontSize: "13px" }}>
+
+        {/* Tombol unblock instan — periksa status tanpa delay */}
+        <button
+          onClick={async () => {
+            setIsCheckingUnlock(true);
+            try {
+              const res = await sendStudentHeartbeat();
+              if (res.success && res.data) {
+                if (!res.data.isLocked) {
+                  setIsLocked(false);
+                  setScreenshotLockReason(null);
+                }
+              }
+            } catch {}
+            finally {
+              setIsCheckingUnlock(false);
+            }
+          }}
+          disabled={isCheckingUnlock}
+          style={{
+            marginTop: "20px",
+            padding: "12px 28px",
+            background: isCheckingUnlock ? "#64748B" : "#1B76BF",
+            color: "white",
+            border: "none",
+            borderRadius: "8px",
+            fontWeight: 700,
+            fontSize: "14px",
+            cursor: isCheckingUnlock ? "not-allowed" : "pointer",
+            boxShadow: "0 4px 16px rgba(27, 118, 191, 0.4)",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "8px",
+            transition: "all 0.15s ease",
+          }}
+        >
+          <span>{isCheckingUnlock ? "🔄" : "⚡"}</span>
+          <span>{isCheckingUnlock ? "Memeriksa Status..." : "Periksa Pembukaan Kunci"}</span>
+        </button>
+
+        <div style={{ marginTop: "16px", display: "inline-flex", alignItems: "center", gap: "8px", padding: "6px 14px", borderRadius: "100px", background: "rgba(22,163,74,0.15)", color: "#4ade80", fontSize: "12px" }}>
           <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#4ade80", display: "inline-block" }} />
-          Terhubung ke server
+          Pengecekan otomatis aktif (tiap 1.5 detik)
         </div>
       </div>
     );
@@ -1158,17 +1449,17 @@ export default function ExamSessionPage() {
             width: "76px",
             height: "76px",
             borderRadius: "50%",
-            background: "rgba(41, 171, 226, 0.15)",
-            border: "2px solid #29ABE2",
+            background: splitScreenWarning ? "rgba(228, 71, 43, 0.15)" : "rgba(41, 171, 226, 0.15)",
+            border: `2px solid ${splitScreenWarning ? "#E4472B" : "#29ABE2"}`,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             fontSize: "36px",
             marginBottom: "20px",
-            boxShadow: "0 0 24px rgba(41, 171, 226, 0.25)",
+            boxShadow: `0 0 24px ${splitScreenWarning ? "rgba(228, 71, 43, 0.35)" : "rgba(41, 171, 226, 0.25)"}`,
           }}
         >
-          ⛶
+          {splitScreenWarning ? "⚠️" : "⛶"}
         </div>
         <h1
           style={{
@@ -1177,48 +1468,62 @@ export default function ExamSessionPage() {
             marginBottom: "12px",
             fontFamily: "Poppins, sans-serif",
             letterSpacing: "-0.5px",
+            color: splitScreenWarning ? "#FFA494" : "white",
           }}
         >
-          {hasEnteredFullscreenBefore
+          {splitScreenWarning
+            ? "⚠️ Pelanggaran: Mode Split-Screen Terdeteksi!"
+            : hasEnteredFullscreenBefore
             ? "⚠️ Mode Layar Penuh Terputus!"
             : "Mode Layar Penuh Diperlukan"}
         </h1>
-        <p
+        <div
           style={{
             color: "rgba(255, 255, 255, 0.82)",
-            maxWidth: "480px",
+            maxWidth: "500px",
             lineHeight: 1.7,
             fontSize: "14px",
             marginBottom: "28px",
           }}
         >
-          {hasEnteredFullscreenBefore
-            ? "Kamu telah keluar dari mode layar penuh. Keluar dari layar penuh tercatat sebagai pelanggaran proctoring. Klik tombol di bawah untuk kembali ke mode layar penuh dan melanjutkan pengerjaan soal."
-            : "Untuk menjaga integritas dan ketertiban ujian, seluruh pengerjaan soal wajib dilakukan dalam mode layar penuh (fullscreen). Klik tombol di bawah untuk memulai."}
-        </p>
+          {splitScreenWarning ? (
+            <div style={{ background: "rgba(228, 71, 43, 0.18)", border: "1px solid rgba(228, 71, 43, 0.6)", padding: "14px 18px", borderRadius: "10px", textAlign: "left", color: "white" }}>
+              <p style={{ margin: "0 0 8px 0", fontWeight: 700, color: "#FFA494" }}>{splitScreenWarning}</p>
+              <p style={{ margin: 0, fontSize: "13px", color: "rgba(255,255,255,0.85)" }}>
+                Anda dilarang menggunakan mode layar terbagi (split-screen / snap). Tutup aplikasi lain atau kembalikan jendela browser ke ukuran penuh 100%, lalu klik tombol di bawah untuk verifikasi ulang.
+              </p>
+            </div>
+          ) : hasEnteredFullscreenBefore ? (
+            "Kamu telah keluar dari mode layar penuh. Keluar dari layar penuh tercatat sebagai pelanggaran proctoring. Klik tombol di bawah untuk kembali ke mode layar penuh dan melanjutkan pengerjaan soal."
+          ) : (
+            "Untuk menjaga integritas dan ketertiban ujian, seluruh pengerjaan soal wajib dilakukan dalam mode layar penuh (fullscreen). Klik tombol di bawah untuk memulai."
+          )}
+        </div>
         <button
           onClick={enterFullscreen}
           style={{
             padding: "14px 32px",
-            background: "#29ABE2",
+            background: splitScreenWarning ? "#E4472B" : "#29ABE2",
             color: "white",
             border: "none",
             borderRadius: "8px",
             fontWeight: 700,
             fontSize: "15px",
             cursor: "pointer",
-            boxShadow: "0 4px 18px rgba(41, 171, 226, 0.45)",
+            boxShadow: `0 4px 18px ${splitScreenWarning ? "rgba(228, 71, 43, 0.45)" : "rgba(41, 171, 226, 0.45)"}`,
             display: "flex",
             alignItems: "center",
             gap: "10px",
             transition: "all 0.15s ease",
           }}
-          onMouseEnter={(e) => (e.currentTarget.style.background = "#1D8AB8")}
-          onMouseLeave={(e) => (e.currentTarget.style.background = "#29ABE2")}
+          onMouseEnter={(e) => (e.currentTarget.style.background = splitScreenWarning ? "#C53018" : "#1D8AB8")}
+          onMouseLeave={(e) => (e.currentTarget.style.background = splitScreenWarning ? "#E4472B" : "#29ABE2")}
         >
           <span style={{ fontSize: "18px" }}>⛶</span>
           <span>
-            {hasEnteredFullscreenBefore
+            {splitScreenWarning
+              ? "Verifikasi & Masuk Layar Penuh"
+              : hasEnteredFullscreenBefore
               ? "Kembali ke Layar Penuh"
               : "Masuk Layar Penuh & Mulai Ujian"}
           </span>
@@ -1266,6 +1571,7 @@ export default function ExamSessionPage() {
     single_choice: { label: hasImage ? "Pilihan Ganda + Gambar" : "Pilihan Ganda", bg: hasImage ? "#E8F5E9" : "#E0F4FD", color: hasImage ? "#2E7D32" : "#0284C7" },
     multi_select:  { label: "Pilihan Ganda — Boleh lebih dari satu jawaban", bg: "#FEF3C7", color: "#92400E" },
     latex:         { label: hasImage ? "Matematika + Gambar" : "Soal Matematika", bg: hasImage ? "#F3E5F5" : "#EDE9FE", color: hasImage ? "#6A1B9A" : "#6D28D9" },
+    short_answer:  { label: "Jawaban Singkat (Esai)", bg: "#CCFBF1", color: "#0F766E" },
   };
 
   const badge = typeBadge[question.type] ?? typeBadge.single_choice;
@@ -1274,7 +1580,16 @@ export default function ExamSessionPage() {
   const selectedMulti = multiAnswers[question.id] ?? new Set<string>();
 
   return (
-    <div style={{ minHeight: "100vh", background: "#EDF6FC", display: "flex", flexDirection: "column", fontFamily: "Poppins, sans-serif" }}>
+    <div style={{
+      minHeight: "100vh",
+      background: "#EDF6FC",
+      display: "flex",
+      flexDirection: "column",
+      fontFamily: "Poppins, sans-serif",
+      userSelect: "none",
+      WebkitUserSelect: "none",
+      WebkitTouchCallout: "none",
+    }}>
 
       {/* Warning Banner */}
       {warningBanner && (
@@ -1395,11 +1710,13 @@ export default function ExamSessionPage() {
                   single: questionsList.filter(q => q.type === "single_choice"),
                   multi:  questionsList.filter(q => q.type === "multi_select"),
                   latex:  questionsList.filter(q => q.type === "latex"),
+                  short:  questionsList.filter(q => q.type === "short_answer"),
                 };
                 const answeredByType = {
                   single: byType.single.filter(q => isQuestionAnswered(q)).length,
                   multi:  byType.multi.filter(q => isQuestionAnswered(q)).length,
                   latex:  byType.latex.filter(q => isQuestionAnswered(q)).length,
+                  short:  byType.short.filter(q => isQuestionAnswered(q)).length,
                 };
                 return (
                   <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
@@ -1445,6 +1762,7 @@ export default function ExamSessionPage() {
                         { label: "Pilihan Ganda", answered: answeredByType.single, total: byType.single.length, color: "#29ABE2" },
                         { label: "Multi Pilih",   answered: answeredByType.multi,  total: byType.multi.length,  color: "#D97706" },
                         { label: "Matematika",    answered: answeredByType.latex,  total: byType.latex.length,  color: "#7C3AED" },
+                        { label: "Jawaban Singkat", answered: answeredByType.short, total: byType.short.length, color: "#0D9488" },
                       ].map(t => t.total > 0 && (
                         <div key={t.label} style={{ marginBottom: "10px" }}>
                           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
@@ -1708,12 +2026,12 @@ export default function ExamSessionPage() {
                 const isCurrent = qIdx === currentQ;
                 const isAnswered = isQuestionAnswered(q);
                 const isFlagged = flagged.has(qIdx);
-                const typeColor = q.type === "multi_select" ? "#D97706" : q.type === "latex" ? "#7C3AED" : "#29ABE2";
+                const typeColor = q.type === "short_answer" ? "#0D9488" : q.type === "multi_select" ? "#D97706" : q.type === "latex" ? "#7C3AED" : "#29ABE2";
                 return (
                   <button key={qIdx} onClick={() => setCurrentQ(qIdx)} style={{
                     width: "32px", height: "32px", borderRadius: "6px", flexShrink: 0,
                     border: isCurrent ? `2.5px solid ${typeColor}` : isAnswered ? `2px solid ${typeColor}` : "1.5px solid #D9E9F2",
-                    background: isCurrent ? typeColor : isAnswered ? (q.type === "multi_select" ? "#FEF3C7" : q.type === "latex" ? "#EDE9FE" : "#E0F4FD") : "white",
+                    background: isCurrent ? typeColor : isAnswered ? (q.type === "short_answer" ? "#CCFBF1" : q.type === "multi_select" ? "#FEF3C7" : q.type === "latex" ? "#EDE9FE" : "#E0F4FD") : "white",
                     color: isCurrent ? "white" : isAnswered ? typeColor : "#6E8EA0",
                     fontWeight: isCurrent ? 700 : 500, fontSize: "11px", cursor: "pointer",
                     display: "flex", alignItems: "center", justifyContent: "center",
@@ -1810,84 +2128,108 @@ export default function ExamSessionPage() {
                 </div>
               )}
 
-              {/* ── OPTIONS (stacked below question) ── */}
-              <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: hasImage || isMulti || question.hint ? "4px" : "0" }}>
-                {question.options.map((opt: any, optIdx: number) => {
-                  const isSelected = isMulti
-                    ? selectedMulti.has(opt.id)
-                    : answers[question.id] === opt.id;
+              {/* ── OPTIONS / INPUT (stacked below question) ── */}
+              {question.type === "short_answer" ? (
+                <div style={{ marginTop: hasImage || question.hint ? "8px" : "4px", display: "flex", flexDirection: "column", gap: "8px" }}>
+                  <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155" }}>
+                    ✍️ Tuliskan Jawaban Singkat Anda:
+                  </label>
+                  <textarea
+                    value={answers[question.id] || ""}
+                    onChange={(e) => handleShortAnswerChange(question.id, e.target.value)}
+                    placeholder="Ketik jawaban di sini (tersimpan otomatis)..."
+                    rows={4}
+                    style={{
+                      width: "100%", padding: "14px 16px", borderRadius: "8px", border: "1.5px solid #CBD5E1",
+                      fontSize: "14px", fontFamily: "Poppins, sans-serif", color: "#1E293B", background: "#FFFFFF",
+                      resize: "vertical", outline: "none", boxSizing: "border-box", userSelect: "text", WebkitUserSelect: "text",
+                      boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+                    }}
+                  />
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "2px" }}>
+                    <span style={{ fontSize: "12px", color: "#64748B" }}>Poin maksimal: {question.points} poin • Dinilai manual oleh pengawas</span>
+                    <span style={{ fontSize: "12px", color: "#94A3B8" }}>{(answers[question.id] || "").length} karakter</span>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: hasImage || isMulti || question.hint ? "4px" : "0" }}>
+                  {question.options.map((opt: any, optIdx: number) => {
+                    const isSelected = isMulti
+                      ? selectedMulti.has(opt.id)
+                      : answers[question.id] === opt.id;
 
-                  const activeColor = question.type === "multi_select" ? "#D97706"
-                    : question.type === "latex" ? "#7C3AED"
-                    : "#29ABE2";
-                  const activeShadow = question.type === "multi_select"
-                    ? "0 4px 14px rgba(217,119,6,0.20)"
-                    : question.type === "latex"
-                    ? "0 4px 14px rgba(124,58,237,0.20)"
-                    : "0 4px 14px rgba(41,171,226,0.22)";
+                    const activeColor = question.type === "multi_select" ? "#D97706"
+                      : question.type === "latex" ? "#7C3AED"
+                      : "#29ABE2";
+                    const activeShadow = question.type === "multi_select"
+                      ? "0 4px 14px rgba(217,119,6,0.20)"
+                      : question.type === "latex"
+                      ? "0 4px 14px rgba(124,58,237,0.20)"
+                      : "0 4px 14px rgba(41,171,226,0.22)";
 
-                  const optHasLatex = hasLatex(opt.text);
+                    const optHasLatex = hasLatex(opt.text);
 
-                  return (
-                    <button
-                      key={opt.id}
-                      onClick={() => isMulti
-                        ? handleMultiToggle(question.id, opt.id)
-                        : handleSingleAnswer(question.id, opt.id)
-                      }
-                      style={{
-                        display: "flex", alignItems: "center", gap: "12px",
-                        padding: isMobile ? "12px 14px" : "13px 18px",
-                        borderRadius: "6px",
-                        border: isSelected ? `2px solid ${activeColor}` : "1.5px solid #D9E9F2",
-                        background: isSelected ? activeColor : "white",
-                        color: isSelected ? "white" : "#2F4655",
-                        cursor: "pointer", textAlign: "left",
-                        transition: "all 0.15s",
-                        fontSize: isMobile ? "14px" : "15px",
-                        fontWeight: isSelected ? 600 : 400,
-                        boxShadow: isSelected ? activeShadow : "0 1px 3px rgba(0,0,0,0.04)",
-                        fontFamily: "Poppins, sans-serif", width: "100%",
-                      }}
-                    >
-                      {isMulti ? (
-                        <span style={{
-                          width: "22px", height: "22px", borderRadius: "6px",
-                          border: isSelected ? "2px solid rgba(255,255,255,0.5)" : "1.5px solid #C8E6F5",
-                          background: isSelected ? "rgba(255,255,255,0.2)" : "#EBF3F8",
-                          display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0
-                        }}>
-                          {isSelected && (
-                            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                              <path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                            </svg>
-                          )}
-                        </span>
-                      ) : (
-                        <span style={{
-                          width: "32px", height: "32px", borderRadius: "50%",
-                          border: isSelected ? "2px solid rgba(255,255,255,0.35)" : "1.5px solid #C8E6F5",
-                          background: isSelected ? "rgba(255,255,255,0.18)" : "#EBF3F8",
-                          display: "flex", alignItems: "center", justifyContent: "center",
-                          fontWeight: 700, fontSize: "13px",
-                          color: isSelected ? "white" : "#6E8EA0", flexShrink: 0
-                        }}>
-                          {String.fromCharCode(65 + optIdx)}
-                        </span>
-                      )}
-                      <span style={{ flex: 1, color: isSelected ? "white" : "#2F4655" }}>
-                        {(optHasLatex || question.type === "latex")
-                          ? <LatexRenderer key={`${question.id}-${opt.id}`} text={opt.text} style={{ color: "inherit" }} />
-                          : opt.text
+                    return (
+                      <button
+                        key={opt.id}
+                        onClick={() => isMulti
+                          ? handleMultiToggle(question.id, opt.id)
+                          : handleSingleAnswer(question.id, opt.id)
                         }
-                      </span>
-                      {isMulti && isSelected && (
-                        <span style={{ fontSize: "11px", background: "rgba(255,255,255,0.2)", padding: "2px 8px", borderRadius: "999px", flexShrink: 0 }}>✓</span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
+                        style={{
+                          display: "flex", alignItems: "center", gap: "12px",
+                          padding: isMobile ? "12px 14px" : "13px 18px",
+                          borderRadius: "6px",
+                          border: isSelected ? `2px solid ${activeColor}` : "1.5px solid #D9E9F2",
+                          background: isSelected ? activeColor : "white",
+                          color: isSelected ? "white" : "#2F4655",
+                          cursor: "pointer", textAlign: "left",
+                          transition: "all 0.15s",
+                          fontSize: isMobile ? "14px" : "15px",
+                          fontWeight: isSelected ? 600 : 400,
+                          boxShadow: isSelected ? activeShadow : "0 1px 3px rgba(0,0,0,0.04)",
+                          fontFamily: "Poppins, sans-serif", width: "100%",
+                        }}
+                      >
+                        {isMulti ? (
+                          <span style={{
+                            width: "22px", height: "22px", borderRadius: "6px",
+                            border: isSelected ? "2px solid rgba(255,255,255,0.5)" : "1.5px solid #C8E6F5",
+                            background: isSelected ? "rgba(255,255,255,0.2)" : "#EBF3F8",
+                            display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0
+                          }}>
+                            {isSelected && (
+                              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                                <path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                              </svg>
+                            )}
+                          </span>
+                        ) : (
+                          <span style={{
+                            width: "32px", height: "32px", borderRadius: "50%",
+                            border: isSelected ? "2px solid rgba(255,255,255,0.35)" : "1.5px solid #C8E6F5",
+                            background: isSelected ? "rgba(255,255,255,0.18)" : "#EBF3F8",
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            fontWeight: 700, fontSize: "13px",
+                            color: isSelected ? "white" : "#6E8EA0", flexShrink: 0
+                          }}>
+                            {String.fromCharCode(65 + optIdx)}
+                          </span>
+                        )}
+                        <span style={{ flex: 1, color: isSelected ? "white" : "#2F4655" }}>
+                          {(optHasLatex || question.type === "latex")
+                            ? <LatexRenderer key={`${question.id}-${opt.id}`} text={opt.text} style={{ color: "inherit" }} />
+                            : opt.text
+                          }
+                        </span>
+                        {isMulti && isSelected && (
+                          <span style={{ fontSize: "11px", background: "rgba(255,255,255,0.2)", padding: "2px 8px", borderRadius: "999px", flexShrink: 0 }}>✓</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
 
               {/* Tombol Clear Jawaban — tampil hanya jika ada pilihan */}
               {isQuestionAnswered(question) && (
@@ -1992,6 +2334,7 @@ export default function ExamSessionPage() {
                       { color: "#29ABE2", label: "Pilihan Ganda" },
                       { color: "#D97706", label: "Multi Pilih" },
                       { color: "#7C3AED", label: "Matematika" },
+                      { color: "#0D9488", label: "Jawaban Singkat" },
                     ].map(({ color, label }) => (
                       <div key={label} style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                         <div style={{ width: "10px", height: "10px", borderRadius: "3px", background: color, flexShrink: 0 }} />

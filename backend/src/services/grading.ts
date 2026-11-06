@@ -47,6 +47,11 @@ export async function autoGradeStudent(studentId: string): Promise<StudentScoreS
   const answerUpdates: { id: string; isCorrect: boolean }[] = [];
 
   for (const q of questions) {
+    if (q.type === "short_answer") {
+      // Soal jawaban singkat dinilai manual oleh guru; lewati evaluasi otomatis
+      continue;
+    }
+
     totalPoints += q.points;
     const answer = answerMap.get(q.id);
 
@@ -111,7 +116,8 @@ export async function autoGradeExam(examId: string): Promise<StudentScoreSummary
   ]);
 
   const questionMap = new Map(allQuestions.map((q) => [q.id, q]));
-  const totalPoints = allQuestions.reduce((sum, q) => sum + q.points, 0);
+  const autoGradableQuestions = allQuestions.filter((q) => q.type !== "short_answer");
+  const totalPoints = autoGradableQuestions.reduce((sum, q) => sum + q.points, 0);
 
   // Collect answer updates to do in bulk
   const answerUpdates: { id: string; isCorrect: boolean }[] = [];
@@ -122,7 +128,7 @@ export async function autoGradeExam(examId: string): Promise<StudentScoreSummary
     let earnedPoints = 0;
     let correctCount = 0;
 
-    for (const q of allQuestions) {
+    for (const q of autoGradableQuestions) {
       const answer = answerMap.get(q.id);
 
       if (answer && answer.selectedOption) {
@@ -181,12 +187,12 @@ export async function readStudentGradingSummaries(examId: string): Promise<Stude
     }),
     prisma.question.findMany({
       where: { examId },
-      select: { id: true, points: true },
+      select: { id: true, points: true, type: true },
     }),
   ]);
 
   const questionPointsMap = new Map(allQuestions.map((q) => [q.id, q.points]));
-  const totalPoints = allQuestions.reduce((sum, q) => sum + q.points, 0);
+  const totalPoints = allQuestions.filter((q) => q.type !== "short_answer").reduce((sum, q) => sum + q.points, 0);
   const results: StudentScoreSummary[] = [];
 
   for (const student of allStudents) {

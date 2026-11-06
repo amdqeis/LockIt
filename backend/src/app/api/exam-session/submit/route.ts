@@ -37,22 +37,38 @@ export async function POST(req: NextRequest) {
     const io = (globalThis as any).io;
     if (io) {
       try {
+        const answeredCount = await prisma.answer.count({
+          where: {
+            studentId: student.id,
+            selectedOption: { not: null },
+            NOT: { selectedOption: "" },
+          },
+        });
+
         io.of("/teacher-dashboard").to(`exam:${exam.id}`).emit("student_submitted", {
           studentId: student.id,
           name: student.name,
           nisn: student.nisn,
           submittedAt: now.toISOString(),
           score: scoreSummary?.finalScore ?? null,
+          answeredCount,
         });
       } catch (socketErr) {
         console.error("Socket emit failed on student submit:", socketErr);
       }
     }
 
+    const examSettings = (typeof exam.settings === "object" && exam.settings !== null ? exam.settings : {}) as any;
+    const showScoreToStudent = examSettings.show_score_to_student !== false;
+    const allowAnswerReview = examSettings.allow_answer_review === true;
+
     const response = successResponse({
       message: "Ujian berhasil dikumpulkan. Terima kasih telah mengerjakan!",
       studentId: updatedStudent.id,
       submittedAt: now.toISOString(),
+      showScoreToStudent,
+      allowAnswerReview,
+      ...(showScoreToStudent && scoreSummary ? { score: scoreSummary.finalScore } : {}),
     });
 
     // Pertahankan cookie studentSession agar request berikutnya (dan halaman /exam/done)

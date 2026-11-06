@@ -34,6 +34,9 @@ interface StudentFeedItem {
   activeFlags: ViolationKey[];
   violationCount: number;
   lastEventAt?: string;
+  answeredCount?: number;
+  totalQuestions?: number;
+  score?: number | null;
 }
 
 // ─── Violation Config ─────────────────────────────────────────────────────────
@@ -171,7 +174,7 @@ function StudentCard({ student, isSelected, onClick }: {
         padding: "10px 10px 12px", cursor: "pointer",
         display: "flex", flexDirection: "column", alignItems: "center",
         width: "100%", textAlign: "center", outline: "none",
-        minHeight: 140, boxShadow: shadow,
+        minHeight: 155, boxShadow: shadow,
         transition: "box-shadow 0.18s ease, border-color 0.18s ease",
       }}
     >
@@ -264,6 +267,48 @@ function StudentCard({ student, isSelected, onClick }: {
           borderRadius: 99, padding: "2px 8px", lineHeight: "15px", fontWeight: 600,
         }}>✓ Aman</div>
       )}
+
+      {/* Live Answer Progress & Score */}
+      {isSubmitted ? (
+        <div style={{ marginTop: 6, width: "100%", paddingInline: 2 }}>
+          <div style={{
+            fontSize: 10,
+            fontWeight: 700,
+            color: "#15803D",
+            background: "#DCFCE7",
+            border: "1px solid #86EFAC",
+            borderRadius: 6,
+            padding: "2px 6px",
+            lineHeight: "15px",
+            display: "inline-block",
+          }}>
+            Nilai: {student.score !== null && student.score !== undefined ? student.score : "—"}
+          </div>
+          {typeof student.answeredCount === "number" && typeof student.totalQuestions === "number" && (
+            <div style={{ fontSize: 9, color: "#64748B", marginTop: 2 }}>
+              {student.answeredCount}/{student.totalQuestions} Soal
+            </div>
+          )}
+        </div>
+      ) : typeof student.answeredCount === "number" && typeof student.totalQuestions === "number" ? (
+        <div style={{ marginTop: 6, width: "100%", paddingInline: 2 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 9, color: "#64748B", marginBottom: 3 }}>
+            <span>📝 Soal</span>
+            <span style={{ fontWeight: 700, color: "#1E293B" }}>
+              {student.answeredCount}/{student.totalQuestions}
+            </span>
+          </div>
+          <div style={{ width: "100%", height: 4, background: "#E2E8F0", borderRadius: 99, overflow: "hidden" }}>
+            <div style={{
+              width: `${student.totalQuestions > 0 ? Math.min(100, Math.round((student.answeredCount / student.totalQuestions) * 100)) : 0}%`,
+              height: "100%",
+              background: "#1B76BF",
+              borderRadius: 99,
+              transition: "width 0.3s ease",
+            }} />
+          </div>
+        </div>
+      ) : null}
     </button>
   );
 }
@@ -301,6 +346,49 @@ function StudentListRow({ student, index, isSelected, onClick }: {
           background: st.bg, color: st.color,
         }}>{st.label}</span>
       </div>
+      {/* Progres / Nilai */}
+      <div style={{ flex: 1.5, minWidth: 120 }}>
+        {student.status === "submitted" ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{
+              fontSize: 11,
+              fontWeight: 700,
+              padding: "2px 8px",
+              borderRadius: 6,
+              background: "#DCFCE7",
+              color: "#15803D",
+              border: "1px solid #86EFAC",
+            }}>
+              Nilai: {student.score !== null && student.score !== undefined ? student.score : "—"}
+            </span>
+            {typeof student.answeredCount === "number" && typeof student.totalQuestions === "number" && (
+              <span style={{ fontSize: 10, color: "#64748B" }}>
+                ({student.answeredCount}/{student.totalQuestions})
+              </span>
+            )}
+          </div>
+        ) : typeof student.answeredCount === "number" && typeof student.totalQuestions === "number" ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 2, maxWidth: 130 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#475569" }}>
+              <span>{student.answeredCount}/{student.totalQuestions} Soal</span>
+              <span style={{ fontWeight: 600 }}>
+                {student.totalQuestions > 0 ? Math.round((student.answeredCount / student.totalQuestions) * 100) : 0}%
+              </span>
+            </div>
+            <div style={{ width: "100%", height: 4, background: "#E2E8F0", borderRadius: 99, overflow: "hidden" }}>
+              <div style={{
+                width: `${student.totalQuestions > 0 ? Math.min(100, Math.round((student.answeredCount / student.totalQuestions) * 100)) : 0}%`,
+                height: "100%",
+                background: "#1B76BF",
+                borderRadius: 99,
+                transition: "width 0.3s ease",
+              }} />
+            </div>
+          </div>
+        ) : (
+          <span style={{ fontSize: 11, color: "#9CA3AF" }}>—</span>
+        )}
+      </div>
       <div style={{ flex: 1.5, minWidth: 0 }}>
         {topFlag && flagCfg ? (
           <span style={{
@@ -335,11 +423,13 @@ function DetailPanel({
   student,
   onClose,
   onActionDone,
+  onRequestKick,
 }: {
   examId: string;
   student: StudentFeedItem;
   onClose: () => void;
   onActionDone?: () => void;
+  onRequestKick?: (student: StudentFeedItem) => void;
 }) {
   const topFlag = getTopFlag(student.activeFlags);
   const st = STATUS_STYLE[student.status] || STATUS_STYLE.offline;
@@ -434,7 +524,40 @@ function DetailPanel({
             </div>
           </div>
 
-          {/* Stats */}
+          {/* Stats: Progres & Nilai */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
+            <div style={{ background: "#F8FAFC", borderRadius: 10, padding: "12px 14px", border: "1px solid #E3E5EA" }}>
+              <div style={{ fontSize: 10, color: "#8A8F99", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>Soal Terjawab</div>
+              <div style={{ fontSize: 20, fontWeight: 800, color: "#1B76BF" }}>
+                {typeof student.answeredCount === "number" && typeof student.totalQuestions === "number"
+                  ? `${student.answeredCount} / ${student.totalQuestions}`
+                  : "—"}
+              </div>
+              {typeof student.answeredCount === "number" && typeof student.totalQuestions === "number" && (
+                <div style={{ width: "100%", height: 4, background: "#E2E8F0", borderRadius: 99, overflow: "hidden", marginTop: 6 }}>
+                  <div style={{
+                    width: `${student.totalQuestions > 0 ? Math.min(100, Math.round((student.answeredCount / student.totalQuestions) * 100)) : 0}%`,
+                    height: "100%",
+                    background: "#1B76BF",
+                    borderRadius: 99,
+                  }} />
+                </div>
+              )}
+            </div>
+            <div style={{ background: student.status === "submitted" ? "#F0FDF4" : "#F8FAFC", borderRadius: 10, padding: "12px 14px", border: student.status === "submitted" ? "1px solid #BBF7D0" : "1px solid #E3E5EA" }}>
+              <div style={{ fontSize: 10, color: student.status === "submitted" ? "#166534" : "#8A8F99", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>Nilai Akhir</div>
+              <div style={{ fontSize: 20, fontWeight: 800, color: student.status === "submitted" ? "#15803D" : "#94A3B8" }}>
+                {student.status === "submitted"
+                  ? (student.score !== null && student.score !== undefined ? `${student.score}` : "—")
+                  : "Mengerjakan"}
+              </div>
+              <div style={{ fontSize: 10, color: student.status === "submitted" ? "#166534" : "#94A3B8", marginTop: 4 }}>
+                {student.status === "submitted" ? "Terkumpul" : "Belum submit"}
+              </div>
+            </div>
+          </div>
+
+          {/* Stats: Pelanggaran */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 20 }}>
             <div style={{ background: "#F8FAFC", borderRadius: 10, padding: "12px 14px", border: "1px solid #E3E5EA" }}>
               <div style={{ fontSize: 10, color: "#8A8F99", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>Total Pelanggaran</div>
@@ -541,25 +664,433 @@ function DetailPanel({
         </div>
 
         {/* Actions */}
-        <div style={{ padding: "14px 20px", borderTop: "1px solid #E3E5EA", display: "flex", gap: 10 }}>
-          {student.status === "blocked" ? (
+        <div style={{ padding: "14px 20px", borderTop: "1px solid #E3E5EA", display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ display: "flex", gap: 10 }}>
+            {student.status === "submitted" ? (
+              <Link
+                href={`/dashboard/exams/${examId}/results/${student.studentId}`}
+                style={{
+                  flex: 1, height: 38, borderRadius: 8,
+                  background: "#1B76BF", color: "white", fontSize: 13, fontWeight: 600,
+                  textDecoration: "none", display: "flex", alignItems: "center", justifyContent: "center",
+                  gap: 6, fontFamily: "var(--font-family)",
+                }}
+              >
+                🔍 Lihat Rincian Jawaban & Nilai
+              </Link>
+            ) : student.status === "blocked" ? (
+              <button
+                onClick={handleUnlock}
+                style={{
+                  flex: 1, height: 38, borderRadius: 8, border: "1.5px solid #E3E5EA",
+                  background: "white", color: "#1F2430", fontSize: 13, fontWeight: 600,
+                  cursor: "pointer", fontFamily: "var(--font-family)",
+                }}
+              >🔓 Buka Kunci</button>
+            ) : (
+              <button
+                onClick={handleWarn}
+                style={{
+                  flex: 1, height: 38, borderRadius: 8, border: "1.5px solid #E3E5EA",
+                  background: "white", color: "#1F2430", fontSize: 13, fontWeight: 600,
+                  cursor: "pointer", fontFamily: "var(--font-family)",
+                }}
+              >⚠️ Kirim Peringatan</button>
+            )}
+          </div>
+
+          {/* Tombol Kick Siswa */}
+          {student.status !== "kicked" ? (
             <button
-              onClick={handleUnlock}
+              onClick={() => onRequestKick?.(student)}
               style={{
-                flex: 1, height: 38, borderRadius: 8, border: "1.5px solid #E3E5EA",
-                background: "white", color: "#1F2430", fontSize: 13, fontWeight: 600,
-                cursor: "pointer", fontFamily: "var(--font-family)",
+                width: "100%", height: 36, borderRadius: 8,
+                border: "1.5px solid #FCA5A5", background: "#FEF2F2", color: "#DC2626",
+                fontSize: 12, fontWeight: 600, cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                fontFamily: "var(--font-family)",
               }}
-            >🔓 Buka Kunci</button>
+            >
+              🚫 Keluarkan Siswa dari Ujian (Kick)
+            </button>
           ) : (
-            <button
-              onClick={handleWarn}
+            <div style={{ textAlign: "center", fontSize: 12, fontWeight: 600, color: "#991B1B", padding: "4px 0" }}>
+              Peserta Telah Dikeluarkan 🚫
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Double Confirm Kick Modal ────────────────────────────────────────────────
+function KickDoubleConfirmModal({
+  examId,
+  student,
+  isOpen,
+  onClose,
+  onSuccess,
+}: {
+  examId: string;
+  student: StudentFeedItem | null;
+  isOpen: boolean;
+  onClose: () => void;
+  onSuccess?: () => void;
+}) {
+  const [step, setStep] = useState<1 | 2>(1);
+  const [reason, setReason] = useState<string>("Terbukti melakukan kecurangan (PrtScn / DevTools / Ganti Tab)");
+  const [customReason, setCustomReason] = useState<string>("");
+  const [acknowledged, setAcknowledged] = useState<boolean>(false);
+  const [submitting, setSubmitting] = useState<boolean>(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      setStep(1);
+      setReason("Terbukti melakukan kecurangan (PrtScn / DevTools / Ganti Tab)");
+      setCustomReason("");
+      setAcknowledged(false);
+      setErrorMsg(null);
+      setSubmitting(false);
+    }
+  }, [isOpen]);
+
+  if (!isOpen || !student) return null;
+
+  const PRESET_REASONS = [
+    "Terbukti melakukan kecurangan (PrtScn / DevTools / Ganti Tab)",
+    "Perangkat / Alamat IP tidak sah",
+    "Bukan peserta resmi kelas ujian ini",
+    "Pelanggaran tata tertib pengawasan berulang",
+  ];
+
+  const effectiveReason = customReason.trim() ? customReason.trim() : reason;
+
+  const handleExecuteKick = async () => {
+    if (!acknowledged) {
+      setErrorMsg("Harap centang kotak persetujuan pengaman sebelum mengeluarkan peserta.");
+      return;
+    }
+    setSubmitting(true);
+    setErrorMsg(null);
+    try {
+      const res = await apiFetch<any>(`/api/exams/${examId}/students/${student.studentId}/kick`, {
+        method: "POST",
+        body: JSON.stringify({ reason: effectiveReason }),
+      });
+      if (res.success) {
+        onSuccess?.();
+        onClose();
+      } else {
+        setErrorMsg(res.error?.message || "Gagal mengeluarkan siswa.");
+      }
+    } catch {
+      setErrorMsg("Terjadi gangguan jaringan saat memproses permintaan.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 1200,
+        background: "rgba(15,24,40,0.55)",
+        backdropFilter: "blur(3px)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "20px",
+      }}
+      onClick={onClose}
+    >
+      <div
+        style={{
+          background: "white",
+          borderRadius: "14px",
+          maxWidth: "480px",
+          width: "100%",
+          boxShadow: "0 24px 64px rgba(0,0,0,0.22)",
+          overflow: "hidden",
+          border: step === 2 ? "2px solid #EF4444" : "1px solid #E2E8F0",
+          fontFamily: "var(--font-family, 'Poppins', sans-serif)",
+          animation: "scaleIn 0.18s ease",
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header Modal */}
+        <div
+          style={{
+            padding: "16px 20px",
+            borderBottom: "1px solid #E2E8F0",
+            background: step === 2 ? "#FEF2F2" : "#FFF7ED",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <span style={{ fontSize: "18px" }}>{step === 2 ? "🛑" : "⚠️"}</span>
+            <div>
+              <div style={{ fontSize: "15px", fontWeight: 700, color: step === 2 ? "#991B1B" : "#9A3412" }}>
+                {step === 1 ? "Keluarkan Siswa (Tahap 1 dari 2)" : "KONFIRMASI GANDA PENGELUARAN"}
+              </div>
+              <div style={{ fontSize: "11px", color: step === 2 ? "#B91C1C" : "#C2410C" }}>
+                {step === 1 ? "Pilih alasan pelanggaran peserta" : "Double Confirmation Safety Gate"}
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            disabled={submitting}
+            style={{ background: "none", border: "none", cursor: "pointer", fontSize: "18px", color: "#9CA3AF" }}
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Body Modal */}
+        <div style={{ padding: "20px" }}>
+          {/* Identity banner */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "12px",
+              padding: "10px 14px",
+              background: "#F8FAFC",
+              borderRadius: "8px",
+              border: "1px solid #E2E8F0",
+              marginBottom: "16px",
+            }}
+          >
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: "14px", fontWeight: 700, color: "#1E293B" }}>{student.name}</div>
+              <div style={{ fontSize: "11px", color: "#64748B" }}>
+                {student.identifierLabel}: {student.identifier} · Pelanggaran: {student.violationCount}×
+              </div>
+            </div>
+            <span
               style={{
-                flex: 1, height: 38, borderRadius: 8, border: "1.5px solid #E3E5EA",
-                background: "white", color: "#1F2430", fontSize: 13, fontWeight: 600,
-                cursor: "pointer", fontFamily: "var(--font-family)",
+                fontSize: "11px",
+                fontWeight: 600,
+                padding: "2px 8px",
+                borderRadius: "99px",
+                background: "#FEE2E2",
+                color: "#DC2626",
               }}
-            >⚠️ Kirim Peringatan</button>
+            >
+              Target Kick
+            </span>
+          </div>
+
+          {step === 1 ? (
+            /* TAHAP 1: PILIH ALASAN */
+            <div>
+              <label style={{ fontSize: "12px", fontWeight: 600, color: "#334155", display: "block", marginBottom: "8px" }}>
+                Pilih Alasan Pengeluaran:
+              </label>
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginBottom: "12px" }}>
+                {PRESET_REASONS.map((p) => {
+                  const isSelected = reason === p && !customReason;
+                  return (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => {
+                        setReason(p);
+                        setCustomReason("");
+                      }}
+                      style={{
+                        textAlign: "left",
+                        padding: "8px 12px",
+                        borderRadius: "6px",
+                        border: isSelected ? "1.5px solid #DC2626" : "1px solid #E2E8F0",
+                        background: isSelected ? "#FEF2F2" : "#F8FAFC",
+                        color: isSelected ? "#991B1B" : "#334155",
+                        fontSize: "12px",
+                        cursor: "pointer",
+                        fontWeight: isSelected ? 600 : 400,
+                        transition: "all 0.12s ease",
+                      }}
+                    >
+                      {isSelected ? "● " : "○ "} {p}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <label style={{ fontSize: "11px", color: "#64748B", display: "block", marginBottom: "4px" }}>
+                Atau masukkan alasan spesifik lain:
+              </label>
+              <input
+                type="text"
+                placeholder="Ketik alasan khusus di sini..."
+                value={customReason}
+                onChange={(e) => setCustomReason(e.target.value)}
+                style={{
+                  width: "100%",
+                  height: "38px",
+                  padding: "0 12px",
+                  borderRadius: "6px",
+                  border: "1px solid #CBD5E1",
+                  fontSize: "13px",
+                  outline: "none",
+                  boxSizing: "border-box",
+                }}
+              />
+            </div>
+          ) : (
+            /* TAHAP 2: DOUBLE CONFIRM */
+            <div>
+              <div
+                style={{
+                  background: "#FEF2F2",
+                  border: "1.5px solid #F87171",
+                  borderRadius: "8px",
+                  padding: "14px",
+                  marginBottom: "16px",
+                }}
+              >
+                <div style={{ fontSize: "13px", fontWeight: 700, color: "#991B1B", marginBottom: "4px" }}>
+                  TINDAKAN INI TIDAK DAPAT DIBATALKAN!
+                </div>
+                <p style={{ fontSize: "12px", color: "#7F1D1D", margin: 0, lineHeight: 1.5 }}>
+                  Sesi ujian <strong>{student.name}</strong> akan langsung diputus secara paksa dari server. Token siswa
+                  akan dihapus dan lembar ujian akan dikunci.
+                </p>
+                <div style={{ marginTop: "8px", fontSize: "11px", color: "#991B1B", fontStyle: "italic" }}>
+                  Alasan: &ldquo;{effectiveReason}&rdquo;
+                </div>
+              </div>
+
+              {/* Checkbox Safety Gate */}
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: "10px",
+                  background: acknowledged ? "#F0FDF4" : "#F8FAFC",
+                  border: acknowledged ? "1.5px solid #86EFAC" : "1px solid #CBD5E1",
+                  borderRadius: "8px",
+                  padding: "12px",
+                  cursor: "pointer",
+                  transition: "all 0.15s ease",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={acknowledged}
+                  onChange={(e) => setAcknowledged(e.target.checked)}
+                  style={{ width: "18px", height: "18px", marginTop: "2px", cursor: "pointer" }}
+                />
+                <span style={{ fontSize: "12px", fontWeight: 600, color: acknowledged ? "#166534" : "#1E293B", lineHeight: 1.4 }}>
+                  Saya menyatakan telah memverifikasi pelanggaran ini dan bertanggung jawab penuh untuk mengeluarkan peserta dari ujian.
+                </span>
+              </label>
+
+              {errorMsg && (
+                <div style={{ marginTop: "12px", fontSize: "12px", color: "#DC2626", fontWeight: 600 }}>
+                  ⚠️ {errorMsg}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Footer Actions */}
+        <div
+          style={{
+            padding: "14px 20px",
+            borderTop: "1px solid #E2E8F0",
+            background: "#FAFBFD",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          {step === 1 ? (
+            <>
+              <button
+                type="button"
+                onClick={onClose}
+                style={{
+                  padding: "8px 16px",
+                  borderRadius: "6px",
+                  border: "1px solid #CBD5E1",
+                  background: "white",
+                  color: "#475569",
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={() => setStep(2)}
+                style={{
+                  padding: "8px 18px",
+                  borderRadius: "6px",
+                  border: "none",
+                  background: "#DC2626",
+                  color: "white",
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}
+              >
+                Lanjut ke Konfirmasi Akhir (2/2) →
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={() => setStep(1)}
+                disabled={submitting}
+                style={{
+                  padding: "8px 14px",
+                  borderRadius: "6px",
+                  border: "1px solid #CBD5E1",
+                  background: "white",
+                  color: "#475569",
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                ← Kembali
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteKick}
+                disabled={!acknowledged || submitting}
+                style={{
+                  padding: "9px 20px",
+                  borderRadius: "6px",
+                  border: "none",
+                  background: acknowledged ? "#B91C1C" : "#9CA3AF",
+                  color: "white",
+                  fontSize: "13px",
+                  fontWeight: 700,
+                  cursor: acknowledged && !submitting ? "pointer" : "not-allowed",
+                  boxShadow: acknowledged ? "0 2px 8px rgba(185,28,28,0.3)" : "none",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}
+              >
+                {submitting ? "Mengeluarkan Siswa..." : "🛑 YA, KELUARKAN SISWA SEKARANG"}
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -1363,6 +1894,8 @@ function MonitorPageContent() {
   const [filter, setFilter] = useState("all");
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [selectedStudent, setSelectedStudent] = useState<StudentFeedItem | null>(null);
+  const [kickTargetStudent, setKickTargetStudent] = useState<StudentFeedItem | null>(null);
+  const [kickToast, setKickToast] = useState<{ id: string; msg: string } | null>(null);
   const [students, setStudents] = useState<StudentFeedItem[]>([]);
   const [filterOpen, setFilterOpen] = useState(false);
   const filterRef = useRef<HTMLDivElement>(null);
@@ -1465,6 +1998,9 @@ function MonitorPageContent() {
             activeFlags,
             violationCount: s.violationCount || 0,
             lastEventAt: s.joinedAt,
+            answeredCount: typeof s.answeredCount === "number" ? s.answeredCount : s._count?.answers,
+            totalQuestions: s.totalQuestions ?? (dashRes.success ? dashRes.data?.exam?.totalQuestions : undefined),
+            score: s.score,
           };
         });
         setStudents(mapped);
@@ -1547,6 +2083,39 @@ function MonitorPageContent() {
         studentId: data.studentId,
       });
       setTimeout(() => setUrgentToast(null), 7000);
+    });
+
+    socket.on("student_answer_progress", (data: { studentId: string; answeredCount: number }) => {
+      setStudents((prev) =>
+        prev.map((s) =>
+          s.studentId === data.studentId
+            ? { ...s, answeredCount: data.answeredCount }
+            : s
+        )
+      );
+    });
+
+    socket.on("student_submitted", (data: {
+      studentId: string;
+      name?: string;
+      nisn?: string;
+      score: number | null;
+      answeredCount?: number;
+      submittedAt?: string;
+    }) => {
+      setStudents((prev) =>
+        prev.map((s) =>
+          s.studentId === data.studentId
+            ? {
+                ...s,
+                status: "submitted",
+                score: data.score,
+                answeredCount: data.answeredCount ?? s.answeredCount,
+                lastEventAt: data.submittedAt ?? s.lastEventAt,
+              }
+            : s
+        )
+      );
     });
 
     socket.on("student_status_changed", () => {
@@ -1983,6 +2552,7 @@ function MonitorPageContent() {
                   <span style={{ width: 10 }} /><span style={{ width: 30 }} />
                   <span style={{ flex: 2 }}>Nama</span>
                   <span style={{ flex: 1, minWidth: 80 }}>Status</span>
+                  <span style={{ flex: 1.5, minWidth: 120 }}>Progres / Nilai</span>
                   <span style={{ flex: 1.5 }}>Pelanggaran Aktif</span>
                   <span style={{ flex: 0.6, textAlign: "center" }}>Total</span>
                   <span style={{ flex: 1, textAlign: "right" }}>Waktu</span>
@@ -2003,11 +2573,28 @@ function MonitorPageContent() {
       {selectedStudent && (
         <DetailPanel
           examId={examId}
-          student={selectedStudent}
+          student={students.find((s) => s.studentId === selectedStudent.studentId) || selectedStudent}
           onClose={() => setSelectedStudent(null)}
           onActionDone={fetchDashboardData}
+          onRequestKick={(stu) => setKickTargetStudent(stu)}
         />
       )}
+
+      {/* Kick Double Confirm Modal */}
+      <KickDoubleConfirmModal
+        examId={examId}
+        student={kickTargetStudent}
+        isOpen={!!kickTargetStudent}
+        onClose={() => setKickTargetStudent(null)}
+        onSuccess={() => {
+          const kickedName = kickTargetStudent?.name || "Peserta";
+          setKickTargetStudent(null);
+          setSelectedStudent(null);
+          fetchDashboardData();
+          setKickToast({ id: String(Date.now()), msg: `Siswa ${kickedName} berhasil dikeluarkan dari ujian.` });
+          setTimeout(() => setKickToast(null), 5000);
+        }}
+      />
 
       {/* Lobby Approval Pop-Up Modal */}
       <LobbyApprovalModal
@@ -2089,6 +2676,40 @@ function MonitorPageContent() {
         </div>
       )}
 
+      {/* Kick Success Toast */}
+      {kickToast && (
+        <div
+          style={{
+            position: "fixed",
+            top: 56,
+            right: 24,
+            zIndex: 600,
+            background: "#F0FDF4",
+            border: "1.5px solid #86EFAC",
+            borderRadius: 12,
+            padding: "14px 18px",
+            boxShadow: "0 10px 30px rgba(0,0,0,0.14)",
+            maxWidth: 380,
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            animation: "slideIn 0.2s ease",
+            fontFamily: "var(--font-family)",
+          }}
+        >
+          <span style={{ fontSize: 20 }}>✅</span>
+          <div style={{ flex: 1, fontSize: 13, fontWeight: 600, color: "#166534" }}>
+            {kickToast.msg}
+          </div>
+          <button
+            onClick={() => setKickToast(null)}
+            style={{ background: "none", border: "none", cursor: "pointer", fontSize: 16, color: "#15803D" }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       <div aria-live="polite" aria-atomic="true" style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0,0,0,0)", whiteSpace: "nowrap" }} />
 
       <style>{`
@@ -2100,6 +2721,10 @@ function MonitorPageContent() {
         @keyframes slideIn {
           from { opacity: 0; transform: translateX(24px); }
           to   { opacity: 1; transform: translateX(0); }
+        }
+        @keyframes scaleIn {
+          from { opacity: 0; transform: scale(0.95); }
+          to   { opacity: 1; transform: scale(1); }
         }
         button:focus-visible { outline: 2px solid #29ABE2; outline-offset: 2px; }
       `}</style>

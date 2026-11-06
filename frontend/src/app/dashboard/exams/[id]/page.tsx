@@ -1171,27 +1171,40 @@ function ExamDetailPage() {
                               <span style={{ fontWeight: 700, fontSize: "14px", color: "#111827" }}>
                                 #{q.orderIndex || idx + 1}. {q.questionText}
                               </span>
-                              <span style={{ fontSize: "11px", background: "#E0F2FE", color: "#0369A1", padding: "2px 8px", borderRadius: "6px", fontWeight: 600 }}>
-                                {q.points || 10} poin
-                              </span>
+                              <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                                {q.type === "short_answer" && (
+                                  <span style={{ fontSize: "11px", background: "#CCFBF1", color: "#0F766E", padding: "2px 8px", borderRadius: "6px", fontWeight: 600 }}>
+                                    ✍️ Jawaban Singkat
+                                  </span>
+                                )}
+                                <span style={{ fontSize: "11px", background: "#E0F2FE", color: "#0369A1", padding: "2px 8px", borderRadius: "6px", fontWeight: 600 }}>
+                                  {q.points || 10} poin
+                                </span>
+                              </div>
                             </div>
-                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", marginTop: "10px" }}>
-                              {opts.map((opt: any, oIdx: number) => {
-                                const optLabel = (opt.label || opt.id || String.fromCharCode(65 + oIdx)).toUpperCase();
-                                const isCorrect = optLabel === (q.correctAnswer || "").toUpperCase();
-                                return (
-                                  <div key={optLabel} style={{
-                                    fontSize: "13px", padding: "6px 10px", borderRadius: "6px",
-                                    background: isCorrect ? "#DCFCE7" : "white",
-                                    border: `1px solid ${isCorrect ? "#86EFAC" : "#E5E7EB"}`,
-                                    color: isCorrect ? "#166534" : "#374151",
-                                    fontWeight: isCorrect ? 600 : 400
-                                  }}>
-                                    <strong>{optLabel}.</strong> {opt.text || opt.label} {isCorrect && "✓ (Kunci)"}
-                                  </div>
-                                );
-                              })}
-                            </div>
+                            {q.type === "short_answer" ? (
+                              <div style={{ marginTop: "8px", padding: "8px 12px", borderRadius: "6px", background: "#F0FDFA", border: "1px dashed #0D9488", color: "#0F766E", fontSize: "12px", fontStyle: "italic" }}>
+                                ✍️ Soal Jawaban Singkat (dinilai manual oleh pengawas)
+                              </div>
+                            ) : (
+                              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", marginTop: "10px" }}>
+                                {opts.map((opt: any, oIdx: number) => {
+                                  const optLabel = (opt.label || opt.id || String.fromCharCode(65 + oIdx)).toUpperCase();
+                                  const isCorrect = optLabel === (q.correctAnswer || "").toUpperCase();
+                                  return (
+                                    <div key={optLabel} style={{
+                                      fontSize: "13px", padding: "6px 10px", borderRadius: "6px",
+                                      background: isCorrect ? "#DCFCE7" : "white",
+                                      border: `1px solid ${isCorrect ? "#86EFAC" : "#E5E7EB"}`,
+                                      color: isCorrect ? "#166534" : "#374151",
+                                      fontWeight: isCorrect ? 600 : 400
+                                    }}>
+                                      <strong>{optLabel}.</strong> {opt.text || opt.label} {isCorrect && "✓ (Kunci)"}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
                           </div>
                         );
                       })}

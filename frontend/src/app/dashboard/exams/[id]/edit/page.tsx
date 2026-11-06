@@ -107,10 +107,14 @@ interface FormState {
   title: string;
   description: string;
   duration: number;
+  className: string;
+  examType: string;
   shuffleQuestions: boolean;
   displayMode: "one_by_one" | "all_at_once";
   shuffleChoices: boolean;
   allowBackNavigation: boolean;
+  showScoreToStudent: boolean;
+  allowAnswerReview: boolean;
   startsAt: string;
   endsAt: string;
   audienceIds: string[];
@@ -293,10 +297,14 @@ function EditExamPage() {
     title: "",
     description: "",
     duration: 90,
+    className: "",
+    examType: "Quiz 1",
     shuffleQuestions: true,
     displayMode: "all_at_once",
     shuffleChoices: true,
     allowBackNavigation: true,
+    showScoreToStudent: true,
+    allowAnswerReview: false,
     startsAt: "",
     endsAt: "",
     audienceIds: [],
@@ -332,9 +340,13 @@ function EditExamPage() {
           title: beExam.title || prev.title,
           description: beExam.description || prev.description,
           duration: beExam.durationMinutes || prev.duration,
+          className: beExam.settings?.class_name || "",
+          examType: beExam.settings?.exam_type || "Quiz 1",
           shuffleQuestions: beExam.settings?.randomize_questions ?? prev.shuffleQuestions,
           shuffleChoices: beExam.settings?.randomize_choices ?? prev.shuffleChoices,
           displayMode: beExam.settings?.display_mode ?? prev.displayMode,
+          showScoreToStudent: beExam.settings?.show_score_to_student !== false,
+          allowAnswerReview: beExam.settings?.allow_answer_review === true,
           maxViolations: beExam.violationPolicy?.max_violations ?? prev.maxViolations,
           actionAtLimit: beExam.violationPolicy?.action === "lock" ? "lock" : "warn",
           detectCopyPaste: beExam.violationPolicy?.detect_copy_paste ?? prev.detectCopyPaste,
@@ -507,9 +519,13 @@ function EditExamPage() {
         settings: {
           bank_id: selectedBank?.id,
           bank_title: selectedBank?.title,
+          class_name: form.className.trim() || undefined,
+          exam_type: form.examType.trim() || undefined,
           randomize_questions: form.shuffleQuestions,
           randomize_choices: form.shuffleChoices,
           display_mode: form.displayMode,
+          show_score_to_student: form.showScoreToStudent,
+          allow_answer_review: form.allowAnswerReview,
           auto_save_interval_seconds: 30,
         },
         questions: bankQuestions,
@@ -692,6 +708,62 @@ function EditExamPage() {
                     <IconAlert />{errors.title}
                   </div>
                 )}
+              </div>
+
+              {/* Kelas & Kategori / Nama Ujian */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "20px" }}>
+                <div>
+                  <label htmlFor={`${uid}-class`} style={labelStyle}>
+                    Kelas / Rombel
+                  </label>
+                  <input
+                    id={`${uid}-class`}
+                    type="text"
+                    style={{ ...inputStyle }}
+                    placeholder="Contoh: Kelas 10-A, XI IPA 1..."
+                    value={form.className}
+                    disabled={isActive}
+                    onChange={e => set("className", e.target.value)}
+                  />
+                  <div style={helperStyle}>Kelas atau kelompok target siswa</div>
+                </div>
+
+                <div>
+                  <label htmlFor={`${uid}-exam-type`} style={labelStyle}>
+                    Kategori / Tipe Ujian
+                  </label>
+                  <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", marginBottom: "6px" }}>
+                    {["Quiz 1", "Quiz 2", "UTS", "UAS", "Ulangan Harian"].map(preset => (
+                      <button
+                        key={preset}
+                        type="button"
+                        disabled={isActive}
+                        onClick={() => set("examType", preset)}
+                        style={{
+                          fontSize: "12px",
+                          fontWeight: form.examType === preset ? 600 : 400,
+                          padding: "4px 10px",
+                          borderRadius: "6px",
+                          border: form.examType === preset ? `1.5px solid ${T.primary}` : `1px solid ${T.borderInput}`,
+                          background: form.examType === preset ? T.primaryTint : "white",
+                          color: form.examType === preset ? T.primary : T.textPrimary,
+                          cursor: isActive ? "not-allowed" : "pointer",
+                        }}
+                      >
+                        {preset}
+                      </button>
+                    ))}
+                  </div>
+                  <input
+                    id={`${uid}-exam-type`}
+                    type="text"
+                    style={{ ...inputStyle }}
+                    placeholder="Ketik nama/kategori ujian..."
+                    value={form.examType}
+                    disabled={isActive}
+                    onChange={e => set("examType", e.target.value)}
+                  />
+                </div>
               </div>
 
               {/* Deskripsi */}
@@ -951,6 +1023,20 @@ function EditExamPage() {
                   checked={form.shuffleChoices}
                   onChange={v => set("shuffleChoices", v)}
                 />
+                <ToggleRow
+                  id={`${uid}-showscore`}
+                  label="Tampilkan nilai akhir ke siswa"
+                  helper="Siswa dapat melihat nilai/skor langsung setelah mengumpulkan ujian"
+                  checked={form.showScoreToStudent}
+                  onChange={v => set("showScoreToStudent", v)}
+                />
+                <ToggleRow
+                  id={`${uid}-allowreview`}
+                  label="Izinkan siswa me-review jawaban"
+                  helper="Siswa dapat melihat kembali lembar jawaban mereka setelah ujian selesai"
+                  checked={form.allowAnswerReview}
+                  onChange={v => set("allowAnswerReview", v)}
+                />
               </div>
 
               {/* Mode tampilan soal */}
@@ -1069,6 +1155,9 @@ function EditExamPage() {
                   type="text"
                   style={{ ...inputStyle }}
                   placeholder="Ketik nama kelas atau kelompok…"
+                  value={form.className}
+                  disabled={isActive}
+                  onChange={e => set("className", e.target.value)}
                   aria-describedby={`${uid}-audience-hint`}
                 />
                 <div id={`${uid}-audience-hint`} style={helperStyle}>

@@ -11,6 +11,8 @@ interface SubmissionSummary {
   total: number;
   violations: number;
   duration: number;
+  showScoreToStudent?: boolean;
+  allowAnswerReview?: boolean;
 }
 
 const DEFAULT_SUMMARY: SubmissionSummary = {
@@ -21,6 +23,8 @@ const DEFAULT_SUMMARY: SubmissionSummary = {
   total: 0,
   violations: 0,
   duration: 90,
+  showScoreToStudent: true,
+  allowAnswerReview: false,
 };
 
 export default function ExamDonePage() {
@@ -32,29 +36,27 @@ export default function ExamDonePage() {
   const [confettiRotations, setConfettiRotations] = useState<number[]>([]);
 
   useEffect(() => {
-    let hasLoadedSummary = false;
     try {
       const stored = sessionStorage.getItem("eduquas_submission_summary");
       if (stored) {
         const parsed = JSON.parse(stored);
         setSummary((prev) => ({ ...prev, ...parsed }));
-        hasLoadedSummary = true;
       }
     } catch {}
 
-    // Fallback: Jika sessionStorage kosong (mis. reload/tab baru), sinkronkan dengan check API backend
-    if (!hasLoadedSummary) {
-      checkActiveSession().then((res) => {
-        if (res && !res.isActive && res.reason === "submitted") {
-          setSummary((prev) => ({
-            ...prev,
-            name: res.studentName || prev.name,
-            nisn: res.studentNisn || prev.nisn,
-            exam: res.examTitle || prev.exam,
-          }));
-        }
-      });
-    }
+    // Selalu sinkronkan dengan check API backend untuk memastikan metadata status ujian terkini
+    checkActiveSession().then((res) => {
+      if (res && !res.isActive && res.reason === "submitted") {
+        setSummary((prev) => ({
+          ...prev,
+          name: res.studentName || prev.name,
+          nisn: res.studentNisn || prev.nisn,
+          exam: res.examTitle || prev.exam,
+          showScoreToStudent: res.showScoreToStudent !== undefined ? res.showScoreToStudent : prev.showScoreToStudent,
+          allowAnswerReview: res.allowAnswerReview !== undefined ? res.allowAnswerReview : prev.allowAnswerReview,
+        }));
+      }
+    });
 
     // Generate random rotation values for each confetti piece (client-only)
     setConfettiRotations(
@@ -244,6 +246,32 @@ export default function ExamDonePage() {
               </div>
             </div>
 
+            {/* Score hidden notification if disabled */}
+            {summary.showScoreToStudent === false && (
+              <div style={{
+                padding: "12px 16px",
+                borderRadius: "12px",
+                background: "#FEF3C7",
+                border: "1.5px solid #FDE68A",
+                color: "#92400E",
+                fontSize: "13px",
+                lineHeight: 1.6,
+                marginBottom: "20px",
+                textAlign: "left",
+                display: "flex",
+                alignItems: "flex-start",
+                gap: "10px",
+              }}>
+                <span style={{ fontSize: "16px" }}>🔒</span>
+                <div>
+                  <strong>Nilai Ujian Dirahasiakan</strong>
+                  <div style={{ fontSize: "12px", marginTop: "2px", color: "#B45309" }}>
+                    Pengawas mengatur agar nilai ujian tidak ditampilkan langsung kepada peserta. Silakan hubungi pengawas untuk informasi nilai.
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Info rows */}
             <div style={{
               background: "#F9FAFB",
@@ -287,8 +315,34 @@ export default function ExamDonePage() {
               📋 Hasil ujian akan diumumkan oleh pengawas. Kamu sudah bisa menutup tab ini.
             </div>
 
-            {/* Action button */}
-            <div style={{ marginTop: "20px" }}>
+            {/* Action buttons */}
+            <div style={{ marginTop: "20px", display: "flex", flexDirection: "column", gap: "10px" }}>
+              {summary.allowAnswerReview && (
+                <a
+                  href="/exam/review"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "8px",
+                    padding: "12px 24px",
+                    borderRadius: "12px",
+                    background: "#1B76BF",
+                    color: "#ffffff",
+                    fontSize: "14px",
+                    fontWeight: 600,
+                    textDecoration: "none",
+                    boxShadow: "0 4px 12px rgba(27, 118, 191, 0.25)",
+                    transition: "opacity 0.2s",
+                  }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="11" cy="11" r="8" />
+                    <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                  </svg>
+                  Lihat & Review Jawaban Saya
+                </a>
+              )}
               <a
                 href="/"
                 style={{
@@ -298,12 +352,13 @@ export default function ExamDonePage() {
                   gap: "8px",
                   padding: "12px 24px",
                   borderRadius: "12px",
-                  background: "#10B981",
-                  color: "#ffffff",
+                  background: summary.allowAnswerReview ? "#F1F5F9" : "#10B981",
+                  color: summary.allowAnswerReview ? "#475569" : "#ffffff",
                   fontSize: "14px",
                   fontWeight: 600,
                   textDecoration: "none",
-                  boxShadow: "0 4px 12px rgba(16, 185, 129, 0.25)",
+                  border: summary.allowAnswerReview ? "1px solid #CBD5E1" : "none",
+                  boxShadow: summary.allowAnswerReview ? "none" : "0 4px 12px rgba(16, 185, 129, 0.25)",
                   transition: "opacity 0.2s",
                 }}
               >

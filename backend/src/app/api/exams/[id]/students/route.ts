@@ -20,7 +20,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       return errorResponse("NOT_FOUND", "Ujian tidak ditemukan", 404);
     }
 
-    const [students, total] = await Promise.all([
+    const [students, total, questions] = await Promise.all([
       prisma.student.findMany({
         where: { examId: id },
         orderBy: { joinedAt: "asc" },
@@ -39,6 +39,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
           kickReason: true,
           joinedAt: true,
           submittedAt: true,
+          answers: {
+            select: {
+              questionId: true,
+              selectedOption: true,
+              isCorrect: true,
+            },
+          },
           _count: {
             select: {
               answers: true,
@@ -49,7 +56,52 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         },
       }),
       prisma.student.count({ where: { examId: id } }),
+      prisma.question.findMany({
+        where: { examId: id },
+        select: { id: true, points: true, type: true },
+      }),
     ]);
+
+    const questionPointsMap = new Map(questions.map((q) => [q.id, q.points]));
+    const autoGradableQuestions = questions.filter((q) => q.type !== "short_answer");
+    const totalPoints = autoGradableQuestions.reduce((sum, q) => sum + q.points, 0);
+    const totalQuestions = questions.length;
+
+    const formattedStudents = students.map((s) => {
+      const answeredCount = s.answers.filter(
+        (a) => a.selectedOption !== null && a.selectedOption.trim() !== ""
+      ).length;
+
+      let score: number | null = null;
+      if (s.status === "submitted") {
+        let earnedPoints = 0;
+        for (const a of s.answers) {
+          if (a.isCorrect === true) {
+            earnedPoints += questionPointsMap.get(a.questionId) ?? 0;
+          }
+        }
+        score = totalPoints > 0 ? Math.round((earnedPoints / totalPoints) * 1000) / 10 : 0;
+      }
+
+      return {
+        id: s.id,
+        name: s.name,
+        nisn: s.nisn,
+        status: s.status,
+        isLocked: s.isLocked,
+        violationCount: s.violationCount,
+        ipAddress: s.ipAddress,
+        acceptedAt: s.acceptedAt,
+        kickedAt: s.kickedAt,
+        kickReason: s.kickReason,
+        joinedAt: s.joinedAt,
+        submittedAt: s.submittedAt,
+        answeredCount,
+        totalQuestions,
+        score,
+        _count: s._count,
+      };
+    });
 
     return successResponse({
       examId: id,
@@ -57,7 +109,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       page,
       pageSize,
       totalPages: Math.ceil(total / pageSize),
-      students,
+      students: formattedStudents,
     });
   } catch (err: any) {
     if (err instanceof AppError) {

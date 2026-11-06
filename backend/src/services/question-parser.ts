@@ -222,15 +222,23 @@ export function normalizeQuestionForDb(q: any, idx: number): ParsedQuestion {
   });
 
   const rawType = (q.type || "").toString().toLowerCase();
+  const isShortAnswer = rawType === "short_answer" || rawType === "essay" || rawType === "isian";
   const hasMultipleAnswers =
     (Array.isArray(q.correctAnswers) && q.correctAnswers.length > 1) ||
     detectedCorrects.length > 1 ||
     (typeof q.correctAnswer === "string" && q.correctAnswer.includes(","));
   const isMulti = rawType === "multi_select" || rawType === "multiselect" || rawType === "multiple" || hasMultipleAnswers;
-  const type = isMulti ? "multi_select" : (rawType === "latex" ? "latex" : "single_choice");
+  const type = isShortAnswer
+    ? "short_answer"
+    : isMulti
+    ? "multi_select"
+    : (rawType === "latex" ? "latex" : "single_choice");
 
   let finalCorrectAnswer = "";
-  if (Array.isArray(q.correctAnswers) && q.correctAnswers.length > 0) {
+  if (isShortAnswer) {
+    // Soal jawaban singkat / esai dinilai manual oleh guru; kunci jawaban opsional
+    finalCorrectAnswer = (q.correctAnswer || "").toString().trim();
+  } else if (Array.isArray(q.correctAnswers) && q.correctAnswers.length > 0) {
     const mapped = q.correctAnswers.map((ca: any) => {
       const target = String(ca).trim().toUpperCase();
       const matched = options.find((o, oIdx) => {

@@ -19,6 +19,10 @@ export async function GET(req: NextRequest) {
     const exam = student.exam;
     const now = new Date();
 
+    const examSettings = (typeof exam.settings === "object" && exam.settings !== null ? exam.settings : {}) as any;
+    const showScoreToStudent = examSettings.show_score_to_student !== false;
+    const allowAnswerReview = examSettings.allow_answer_review === true;
+
     // Siswa sudah submit — sesi berakhir
     if (student.status === "submitted") {
       return successResponse({
@@ -27,6 +31,8 @@ export async function GET(req: NextRequest) {
         studentName: student.name,
         studentNisn: student.nisn,
         examTitle: exam.title,
+        showScoreToStudent,
+        allowAnswerReview,
       });
     }
 

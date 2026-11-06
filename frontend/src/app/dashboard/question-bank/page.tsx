@@ -67,6 +67,7 @@ const TYPE_META: Record<QuestionType, { label: string; color: string; bg: string
   single_choice: { label: "Pilihan Ganda", color: "#0284C7", bg: "#E0F4FD", icon: "🔘" },
   multi_select:  { label: "Multi-Pilih",  color: "#D97706", bg: "#FEF3C7", icon: "☑️" },
   latex:         { label: "Matematika",   color: "#7C3AED", bg: "#EDE9FE", icon: "🧮" },
+  short_answer:  { label: "Jawaban Singkat", color: "#0D9488", bg: "#CCFBF1", icon: "✍️" },
 };
 
 // ─── Small UI Badges ──────────────────────────────────────────────────────────
@@ -552,18 +553,20 @@ function QuestionModal({ initial, defaultBankId, banks, onClose, onSave }: Quest
       e.image = "URL gambar harus diawali dengan http://, https://, atau berkas gambar yang valid";
     }
 
-    const emptyOptIndex = options.findIndex(o => !o.text.trim());
-    if (emptyOptIndex !== -1) {
-      e.options = `Pilihan jawaban ${options[emptyOptIndex].label} masih kosong`;
-    }
-
-    if (type === "multi_select") {
-      if (correctAnswers.size === 0) {
-        e.correctAnswer = "Pilih minimal 1 kunci jawaban benar untuk soal multi-pilih";
+    if (type !== "short_answer") {
+      const emptyOptIndex = options.findIndex(o => !o.text.trim());
+      if (emptyOptIndex !== -1) {
+        e.options = `Pilihan jawaban ${options[emptyOptIndex].label} masih kosong`;
       }
-    } else {
-      if (!correctAnswer) {
-        e.correctAnswer = "Pilih 1 kunci jawaban yang benar";
+
+      if (type === "multi_select") {
+        if (correctAnswers.size === 0) {
+          e.correctAnswer = "Pilih minimal 1 kunci jawaban benar untuk soal multi-pilih";
+        }
+      } else {
+        if (!correctAnswer) {
+          e.correctAnswer = "Pilih 1 kunci jawaban yang benar";
+        }
       }
     }
 
@@ -585,8 +588,8 @@ function QuestionModal({ initial, defaultBankId, banks, onClose, onSave }: Quest
         questionText: questionText.trim(),
         imageUrl: imageUrl.trim() || null,
         imageAlt: imageAlt.trim() || null,
-        options,
-        correctAnswer: type !== "multi_select" ? correctAnswer : null,
+        options: type === "short_answer" ? [] : options,
+        correctAnswer: type === "short_answer" ? "" : (type !== "multi_select" ? correctAnswer : null),
         correctAnswers: type === "multi_select" ? Array.from(correctAnswers) : null,
         points: Number(points) || 10,
         hint: hint.trim() || null,
@@ -676,6 +679,7 @@ function QuestionModal({ initial, defaultBankId, banks, onClose, onSave }: Quest
                       {[
                         { id: "single_choice" as QuestionType, label: "🔘 Pilihan Ganda" },
                         { id: "multi_select" as QuestionType, label: "☑️ Multi-Pilih" },
+                        { id: "short_answer" as QuestionType, label: "✍️ Jawaban Singkat" },
                       ].map(t => (
                         <button
                           key={t.id}
@@ -859,7 +863,17 @@ function QuestionModal({ initial, defaultBankId, banks, onClose, onSave }: Quest
                 </div>
               )}
 
-              {/* Pilihan Jawaban (A, B, C, D) */}
+              {/* Pilihan Jawaban (A, B, C, D) ATAU Info Jawaban Singkat */}
+              {type === "short_answer" ? (
+                <div style={{ padding: "14px", borderRadius: "8px", background: "#F0FDFA", border: "1.5px solid #CCFBF1" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "#0F766E", fontWeight: 700, fontSize: "13px", marginBottom: "4px" }}>
+                    <span>✍️ Tipe Soal: Jawaban Singkat (Tanpa Auto-Grading)</span>
+                  </div>
+                  <p style={{ margin: 0, fontSize: "12px", color: "#115E59", lineHeight: 1.5 }}>
+                    Siswa akan menjawab dengan mengetikkan teks bebas pada lembar ujian. Tidak memerlukan pilihan opsi (A/B/C/D) atau kunci jawaban otomatis. Nilai dinilai secara manual oleh guru/pengawas setelah ujian selesai.
+                  </p>
+                </div>
+              ) : (
               <div className="form-group" style={{ margin: 0 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: "6px" }}>
                   <div>
@@ -1002,6 +1016,7 @@ function QuestionModal({ initial, defaultBankId, banks, onClose, onSave }: Quest
                 {errors.options && <span className="form-error">⚠️ {errors.options}</span>}
                 {errors.correctAnswer && <span className="form-error">⚠️ {errors.correctAnswer}</span>}
               </div>
+              )}
             </div>
 
             {/* ─── WINDOW 2: LEMBAR SISWA (PANEL KANAN) ─────────────────────── */}
@@ -1083,7 +1098,27 @@ function QuestionModal({ initial, defaultBankId, banks, onClose, onSave }: Quest
                   />
                 )}
 
-                {/* Pilihan Siswa */}
+                {/* Pilihan Siswa ATAU Preview Jawaban Singkat */}
+                {type === "short_answer" ? (
+                  <div style={{ marginTop: "4px" }}>
+                    <div style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "6px" }}>
+                      ✍️ Input Jawaban Siswa (Esai / Isian):
+                    </div>
+                    <div
+                      style={{
+                        padding: "12px 14px",
+                        borderRadius: "6px",
+                        border: "1.5px dashed #94A3B8",
+                        background: "#F8FAFC",
+                        color: "#94A3B8",
+                        fontSize: "12px",
+                        fontStyle: "italic",
+                      }}
+                    >
+                      Siswa akan mengetik jawaban teks bebas di sini saat ujian berlangsung...
+                    </div>
+                  </div>
+                ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                   {options.map(opt => {
                     const isCorrect = type === "multi_select"
@@ -1139,6 +1174,7 @@ function QuestionModal({ initial, defaultBankId, banks, onClose, onSave }: Quest
                     );
                   })}
                 </div>
+                )}
 
                 {/* Hint jika diisi */}
                 {hint.trim() && (
@@ -1306,7 +1342,7 @@ export default function QuestionBankPage() {
       const matchSearch =
         !search ||
         q.questionText.toLowerCase().includes(search.toLowerCase()) ||
-        q.options.some(opt => opt.text.toLowerCase().includes(search.toLowerCase()));
+        (q.options && q.options.some(opt => opt.text.toLowerCase().includes(search.toLowerCase())));
 
       let matchType = true;
       if (questionTypeFilter === "image") {
@@ -1849,6 +1885,7 @@ export default function QuestionBankPage() {
                   <option value="all">Semua Tipe Soal</option>
                   <option value="single_choice">🔘 Pilihan Ganda</option>
                   <option value="multi_select">☑️ Multi-Pilih</option>
+                  <option value="short_answer">✍️ Jawaban Singkat</option>
                   <option value="latex">🧮 Matematika (LaTeX)</option>
                   <option value="image">🖼️ Memiliki Gambar</option>
                 </select>
@@ -1991,47 +2028,54 @@ export default function QuestionBankPage() {
                         </div>
                       )}
 
-                      {/* Options Grid / List */}
-                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "8px", marginBottom: "12px" }}>
-                        {q.options.map(opt => {
-                          const isCorrect = q.type === "multi_select"
-                            ? q.correctAnswers?.includes(opt.id)
-                            : q.correctAnswer === opt.id;
+                      {/* Options Grid / List or Short Answer Note */}
+                      {q.type === "short_answer" ? (
+                        <div style={{ padding: "8px 12px", borderRadius: "6px", background: "#F0FDFA", border: "1px dashed #0D9488", color: "#0F766E", fontSize: "12px", marginBottom: "12px", display: "flex", alignItems: "center", gap: "8px" }}>
+                          <span>✍️</span>
+                          <span><strong>Soal Jawaban Singkat:</strong> Siswa mengetik teks bebas. Dinilai manual oleh guru.</span>
+                        </div>
+                      ) : (
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "8px", marginBottom: "12px" }}>
+                          {(q.options || []).map(opt => {
+                            const isCorrect = q.type === "multi_select"
+                              ? q.correctAnswers?.includes(opt.id)
+                              : q.correctAnswer === opt.id;
 
-                          return (
-                            <div
-                              key={opt.id}
-                              style={{
-                                display: "flex", alignItems: "center", gap: "10px",
-                                padding: "8px 12px", borderRadius: "6px",
-                                border: `1.5px solid ${isCorrect ? "#10B981" : "#E2E8F0"}`,
-                                background: isCorrect ? "#F0FDF4" : "#FFFFFF",
-                                fontSize: "13px",
-                              }}
-                            >
-                              <span
+                            return (
+                              <div
+                                key={opt.id}
                                 style={{
-                                  width: "24px", height: "24px", borderRadius: "50%",
-                                  background: isCorrect ? "#10B981" : "#F1F5F9",
-                                  color: isCorrect ? "white" : "#475569",
-                                  fontWeight: 700, fontSize: "12px",
-                                  display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                                  display: "flex", alignItems: "center", gap: "10px",
+                                  padding: "8px 12px", borderRadius: "6px",
+                                  border: `1.5px solid ${isCorrect ? "#10B981" : "#E2E8F0"}`,
+                                  background: isCorrect ? "#F0FDF4" : "#FFFFFF",
+                                  fontSize: "13px",
                                 }}
                               >
-                                {opt.label}
-                              </span>
-                              <div style={{ flex: 1, color: isCorrect ? "#065F46" : "#334155", fontWeight: isCorrect ? 600 : 400 }}>
-                                <LatexRenderer text={opt.text} />
-                              </div>
-                              {isCorrect && (
-                                <span style={{ fontSize: "11px", fontWeight: 700, color: "#10B981", flexShrink: 0 }}>
-                                  ✓ Kunci
+                                <span
+                                  style={{
+                                    width: "24px", height: "24px", borderRadius: "50%",
+                                    background: isCorrect ? "#10B981" : "#F1F5F9",
+                                    color: isCorrect ? "white" : "#475569",
+                                    fontWeight: 700, fontSize: "12px",
+                                    display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                                  }}
+                                >
+                                  {opt.label}
                                 </span>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
+                                <div style={{ flex: 1, color: isCorrect ? "#065F46" : "#334155", fontWeight: isCorrect ? 600 : 400 }}>
+                                  <LatexRenderer text={opt.text} />
+                                </div>
+                                {isCorrect && (
+                                  <span style={{ fontSize: "11px", fontWeight: 700, color: "#10B981", flexShrink: 0 }}>
+                                    ✓ Kunci
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
 
                       {/* Hint / Explanation if available */}
                       {q.hint && (

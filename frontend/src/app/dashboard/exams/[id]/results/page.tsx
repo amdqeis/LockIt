@@ -27,7 +27,7 @@ function ResultsPage() {
   const params = useParams();
   const examId = Array.isArray(params.id) ? params.id[0] : (params.id as string);
 
-  const [exam, setExam] = useState<{ id: string; title: string }>({
+  const [exam, setExam] = useState<{ id: string; title: string; className?: string; examType?: string }>({
     id: examId,
     title: "Hasil Ujian",
   });
@@ -54,9 +54,27 @@ function ResultsPage() {
 
         if (examRes.success && (examRes.data?.exam || examRes.data?.title)) {
           const examData = examRes.data?.exam || examRes.data;
+          const settings = examData?.settings || {};
+          let className = (settings.class_name || settings.class || "").trim();
+          let examType = (settings.exam_type || settings.category || "").trim();
+          const title = (examData?.title || "").trim();
+          if (!className) {
+            const match = title.match(/(?:kelas|kls)\s*([0-9a-zA-Z\s\-]+)/i);
+            className = match ? `Kelas ${match[1].trim()}` : "Semua Kelas / Umum";
+          }
+          if (!examType) {
+            if (/quiz\s*1/i.test(title)) examType = "Quiz 1";
+            else if (/quiz\s*2/i.test(title)) examType = "Quiz 2";
+            else if (/uts/i.test(title)) examType = "UTS";
+            else if (/uas/i.test(title)) examType = "UAS";
+            else if (/ulangan\s*harian/i.test(title)) examType = "Ulangan Harian";
+            else examType = "Ujian Umum";
+          }
           setExam({
             id: examData.id,
             title: examData.title,
+            className,
+            examType,
           });
         } else if (resultsRes.success && resultsRes.data?.exam?.title) {
           setExam({
@@ -139,13 +157,8 @@ function ResultsPage() {
     return <span style={{ color: "#2563EB" }}>{sortBy.dir === "asc" ? "↑" : "↓"}</span>;
   };
 
-  const handleExportCsv = () => {
-    showToast("Mengunduh file CSV...");
-    window.open(`/api/exams/${examId}/export/csv`, "_blank");
-  };
-
   const handleExportXlsx = () => {
-    showToast("Mengunduh file Excel...");
+    showToast("Mengunduh file Excel (.xlsx)...");
     window.open(`/api/exams/${examId}/export/xlsx`, "_blank");
   };
 
@@ -186,48 +199,38 @@ function ResultsPage() {
             <span>›</span>
             <span style={{ color: "#111827" }}>Hasil Ujian</span>
           </div>
-          <h1 style={{ fontSize: "20px", fontWeight: 700, color: "#111827" }}>🏆 Hasil Ujian</h1>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", marginTop: "4px" }}>
+            <h1 style={{ fontSize: "20px", fontWeight: 700, color: "#111827", margin: 0 }}>🏆 Hasil Ujian: {exam.title}</h1>
+            {exam.className && (
+              <span style={{ fontSize: "12px", fontWeight: 600, padding: "2px 8px", borderRadius: "4px", background: "#F1F5F9", color: "#475569" }}>
+                🏫 {exam.className}
+              </span>
+            )}
+            {exam.examType && (
+              <span style={{ fontSize: "12px", fontWeight: 600, padding: "2px 8px", borderRadius: "4px", background: "#EFF6FF", color: "#2563EB" }}>
+                📝 {exam.examType}
+              </span>
+            )}
+          </div>
         </div>
         <div style={{ display: "flex", gap: "10px" }}>
-          <button
-            onClick={handleExportCsv}
-            style={{
-              height: "38px",
-              paddingLeft: "14px",
-              paddingRight: "14px",
-              border: "1.5px solid #E5E7EB",
-              borderRadius: "10px",
-              background: "white",
-              color: "#374151",
-              cursor: "pointer",
-              fontSize: "14px",
-              display: "flex",
-              alignItems: "center",
-              gap: "6px",
-            }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-              <polyline points="7 10 12 15 17 10" />
-              <line x1="12" y1="15" x2="12" y2="3" />
-            </svg>
-            Export CSV
-          </button>
           <button
             onClick={handleExportXlsx}
             style={{
               height: "38px",
               paddingLeft: "14px",
               paddingRight: "14px",
-              border: "1.5px solid #E5E7EB",
+              border: "1.5px solid #CBD5E1",
               borderRadius: "10px",
-              background: "white",
-              color: "#374151",
+              background: "#FFFFFF",
+              color: "#1E293B",
               cursor: "pointer",
               fontSize: "14px",
+              fontWeight: 600,
               display: "flex",
               alignItems: "center",
               gap: "6px",
+              boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
             }}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -235,7 +238,7 @@ function ResultsPage() {
               <polyline points="7 10 12 15 17 10" />
               <line x1="12" y1="15" x2="12" y2="3" />
             </svg>
-            Export Excel
+            Export Excel (XLSX)
           </button>
         </div>
       </header>

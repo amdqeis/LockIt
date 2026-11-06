@@ -1,6 +1,6 @@
 export type QuestionBankStatus = "active" | "draft" | "archived";
 export type DifficultyLevel = "easy" | "medium" | "hard" | "mixed";
-export type QuestionType = "single_choice" | "multi_select" | "latex";
+export type QuestionType = "single_choice" | "multi_select" | "latex" | "short_answer";
 
 export interface QuestionBank {
   id: string;

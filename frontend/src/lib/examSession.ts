@@ -79,6 +79,8 @@ export interface InactiveSessionCheck {
   studentName?: string;
   studentNisn?: string;
   examTitle?: string;
+  showScoreToStudent?: boolean;
+  allowAnswerReview?: boolean;
 }
 
 export type SessionCheckResult = ActiveSessionCheck | InactiveSessionCheck;
@@ -181,6 +183,10 @@ export interface ExamSessionData {
     };
   };
   questions: ExamQuestion[];
+  totalQuestions?: number;
+  chunk?: number;
+  totalChunks?: number;
+  hasMore?: boolean;
   answers: ExamAnswer[];
   serverTime: string;
 }
@@ -209,10 +215,16 @@ export async function joinExam(accessCode: string, name: string, nisn: string) {
 
 /**
  * Fetch current student active exam session
+ * Supports chunked / incremental fetching (?chunk=1, ?chunk=2) for low-latency initialization
  * Restores previous answers if student reconnected
  */
-export async function fetchExamSession() {
-  return apiFetch<ExamSessionData>("/api/exam-session");
+export async function fetchExamSession(options?: { chunk?: number | string; limit?: number; offset?: number }) {
+  const params = new URLSearchParams();
+  if (options?.chunk !== undefined) params.set("chunk", String(options.chunk));
+  if (options?.limit !== undefined) params.set("limit", String(options.limit));
+  if (options?.offset !== undefined) params.set("offset", String(options.offset));
+  const queryString = params.toString() ? `?${params.toString()}` : "";
+  return apiFetch<ExamSessionData>(`/api/exam-session${queryString}`);
 }
 
 /**
@@ -283,6 +295,9 @@ export async function submitStudentExam() {
     message: string;
     studentId: string;
     submittedAt: string;
+    showScoreToStudent?: boolean;
+    allowAnswerReview?: boolean;
+    score?: number;
   }>("/api/exam-session/submit", {
     method: "POST",
   });
@@ -326,4 +341,46 @@ export interface LobbyData {
  */
 export async function fetchLobbyStatus() {
   return apiFetch<LobbyData>("/api/exam-session/lobby");
+}
+
+export interface ReviewQuestion {
+  id: string;
+  orderIndex: number;
+  type: string;
+  questionText: string;
+  imageUrl?: string | null;
+  options: any;
+  points: number;
+  studentAnswer: string | null;
+  correctAnswer?: string;
+  isCorrect?: boolean | null;
+}
+
+export interface ExamReviewData {
+  exam: {
+    id: string;
+    title: string;
+    durationMinutes: number;
+    totalQuestions: number;
+  };
+  student: {
+    id: string;
+    name: string;
+    nisn: string;
+  };
+  showScoreToStudent: boolean;
+  summary: {
+    score: number;
+    earnedPoints: number;
+    totalPoints: number;
+    correctCount: number;
+  } | null;
+  questions: ReviewQuestion[];
+}
+
+/**
+ * Fetch exam review data for submitted student
+ */
+export async function fetchExamReview() {
+  return apiFetch<ExamReviewData>("/api/exam-session/review");
 }
