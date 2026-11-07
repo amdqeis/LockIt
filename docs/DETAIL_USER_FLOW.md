@@ -1208,10 +1208,10 @@ Browser peserta mendeteksi event
 | Event | Trigger | Yang Dicatat |
 |---|---|---|
 | `fullscreen_exit` | `document.fullscreenchange` | Timestamp + durasi keluar |
-| `window_blur` | `visibilitychange` + `blur` | Timestamp + durasi |
+| `window_blur` | `blur` | Timestamp; perpindahan aplikasi tidak diklasifikasikan sebagai screenshot |
 | `tab_switch` | `visibilitychange` (hidden) | Timestamp, increment counter |
-| `copy_attempt` | `document.oncopy` | Timestamp |
-| `paste_attempt` | `document.onpaste` | Timestamp |
+| Copy/paste | Event browser diblokir | Tidak dikirim atau dihitung sebagai pelanggaran |
+| `screenshot` | Shortcut screenshot spesifik yang dikenali browser | Timestamp + metadata shortcut, jika kebijakan aktif |
 | `right_click` | `document.oncontextmenu` | Timestamp |
 | `devtools` | Resize heuristic / shortcut | Timestamp |
 | `reconnect` | Socket.io reconnect event | Timestamp, durasi disconnect |

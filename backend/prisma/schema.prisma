@@ -144,6 +144,7 @@ model Student {
   answers          Answer[]
   proctoringEvents ProctoringEvent[]
   warnings         Warning[]
+  browserLinks     BrowserStudent[]
 
   @@unique([examId, nisn])
   @@index([sessionTokenHash])
@@ -169,8 +170,33 @@ model Answer {
   @@map("answers")
 }
 
-// ─── EVENT PROCTORING ──────────────────────────────
+// ─── IDENTITAS BROWSER SISWA ────────────────────────────────────────────────
+model BrowserIdentity {
+  id        String   @id @default(uuid())
+  tokenHash String   @unique @map("token_hash")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  expiresAt DateTime @map("expires_at") @db.Timestamptz
 
+  students BrowserStudent[]
+
+  @@map("browser_identities")
+}
+
+model BrowserStudent {
+  browserId String   @map("browser_id")
+  studentId String   @map("student_id")
+  linkedAt  DateTime @default(now()) @map("linked_at") @db.Timestamptz
+
+  browser BrowserIdentity @relation(fields: [browserId], references: [id], onDelete: Cascade)
+  student Student         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@id([browserId, studentId])
+  @@index([browserId, linkedAt])
+  @@index([studentId])
+  @@map("browser_students")
+}
+
+// ─── EVENT PROCTORING ──────────────────────────────
 enum EventType {
   fullscreen_exit
   fullscreen_denied

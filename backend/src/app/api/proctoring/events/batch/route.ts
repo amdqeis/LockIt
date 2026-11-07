@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { successResponse, errorResponse, safeErrorMessage } from "@/lib/response";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { AppError } from "@/lib/errors";
+import { isScreenshotDetectionEnabled, shouldIgnoreLegacyProctoringEvent } from "@/lib/proctoring-events";
 
 const eventTypeEnum = z.enum([
   "fullscreen_exit",
@@ -62,10 +63,19 @@ export async function POST(req: NextRequest) {
     }
 
     const { events } = parsed.data;
+    const acceptedEvents = events.filter((event) => !shouldIgnoreLegacyProctoringEvent(event.eventType, event.metadata));
+    if (acceptedEvents.length === 0) {
+      return successResponse({
+        insertedCount: 0,
+        ignoredCount: events.length,
+        violationCount: student.violationCount,
+        isLocked: student.isLocked,
+      });
+    }
 
     // Save events in bulk
     await prisma.proctoringEvent.createMany({
-      data: events.map((ev) => ({
+      data: acceptedEvents.map((ev) => ({
         studentId: student.id,
         examId: exam.id,
         eventType: ev.eventType,
@@ -84,7 +94,7 @@ export async function POST(req: NextRequest) {
       switch (eventType) {
         case "copy_attempt":
         case "paste_attempt":
-          return policy.detect_copy_paste !== false;
+          return false;
         case "right_click":
           return policy.detect_right_click !== false;
         case "devtools":
@@ -96,7 +106,7 @@ export async function POST(req: NextRequest) {
         case "fullscreen_denied":
           return policy.detect_fullscreen_exit !== false;
         case "screenshot":
-          return policy.detect_screenshot !== false;
+          return isScreenshotDetectionEnabled(policy);
         case "ip_change":
           return policy.detect_ip_change !== false;
         case "reconnect":
@@ -106,8 +116,9 @@ export async function POST(req: NextRequest) {
       }
     };
 
-    const qualifyingViolationsCount = events.filter((ev) => isViolation(ev.eventType)).length;
-    const hasScreenshotViolation = events.some((ev) => ev.eventType === "screenshot") && policy.detect_screenshot !== false;
+    const qualifyingViolationsCount = acceptedEvents.filter((ev) => isViolation(ev.eventType)).length;
+    const screenshotEnabled = isScreenshotDetectionEnabled(policy);
+    const hasScreenshotViolation = acceptedEvents.some((ev) => ev.eventType === "screenshot") && screenshotEnabled;
 
     const updatedStudent = qualifyingViolationsCount > 0
       ? await prisma.student.update({
@@ -136,18 +147,23 @@ export async function POST(req: NextRequest) {
     const io = (globalThis as any).io;
     if (io) {
       try {
-        io.of("/teacher-dashboard").to(`exam:${exam.id}`).emit("student_violation_batch", {
-          studentId: student.id,
-          name: student.name,
-          nisn: student.nisn,
-          violationCount: updatedStudent.violationCount,
-          isLocked: updatedStudent.isLocked,
-          eventsCount: events.length,
-        });
+        const shouldNotifyBatch = acceptedEvents.some((ev) =>
+          ev.eventType !== "screenshot" || screenshotEnabled
+        );
+        if (shouldNotifyBatch) {
+          io.of("/teacher-dashboard").to(`exam:${exam.id}`).emit("student_violation_batch", {
+            studentId: student.id,
+            name: student.name,
+            nisn: student.nisn,
+            violationCount: updatedStudent.violationCount,
+            isLocked: updatedStudent.isLocked,
+            eventsCount: acceptedEvents.length,
+          });
+        }
 
         // Emit detail untuk event kritis (screenshot & ip_change)
-        for (const ev of events) {
-          if (ev.eventType === "screenshot" || ev.eventType === "ip_change") {
+        for (const ev of acceptedEvents) {
+          if ((ev.eventType === "screenshot" && screenshotEnabled) || ev.eventType === "ip_change") {
             io.of("/teacher-dashboard").to(`exam:${exam.id}`).emit("student_violation", {
               studentId: student.id,
               name: student.name,
@@ -179,7 +195,8 @@ export async function POST(req: NextRequest) {
     }
 
     return successResponse({
-      insertedCount: events.length,
+      insertedCount: acceptedEvents.length,
+      ignoredCount: events.length - acceptedEvents.length,
       violationCount: updatedStudent.violationCount,
       isLocked: updatedStudent.isLocked,
     });

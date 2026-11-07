@@ -1,0 +1,939 @@
+"use client";
+
+import { useState, useEffect, useRef, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
+import {
+  validateExamCode,
+  clearSessionHint,
+  initializeStudentHistory,
+  fetchStudentHistory,
+  resumeStudentHistory,
+  type StudentHistoryItem,
+} from "@/lib/examSession";
+import { useActiveSession } from "@/hooks/useActiveSession";
+import { useTeacherAuth } from "@/lib/auth";
+
+// Spec §8 & §7 Unified Design Tokens
+const T = {
+  bgPage: "#F7F8F6",
+  bgCard: "#FFFFFF",
+  bgSubtle: "#EDF3F4",
+  border: "#D7DEE3",
+  borderInput: "#8597A3",
+  textPrimary: "#25313B",
+  textSecondary: "#5F6B75",
+  textPlaceholder: "#5F6B75",
+  primary: "#4F6B80",
+  primaryHover: "#425C6F",
+  primaryActive: "#374E5E",
+  primaryRing: "rgba(27, 118, 191, 0.25)",
+  danger: "#914848",
+  dangerBg: "#F7E5E3",
+  radiusControl: "8px",
+  fontMono: "ui-monospace, SFMono-Regular, Menlo, monospace",
+};
+
+type ResultStatus = "idle" | "error" | "notice" | "rate_limited";
+
+function JoinContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  const [code, setCode] = useState("");
+  const [resultStatus, setResultStatus] = useState<ResultStatus>("idle");
+  const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [attemptCount, setAttemptCount] = useState(0);
+  const [rateLimitTimer, setRateLimitTimer] = useState(0);
+  const [isTeacherSignedIn, setIsTeacherSignedIn] = useState(false);
+
+  const { teacher, isAuthenticated } = useTeacherAuth();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+
+  const { checking, sessionCheck, sessionHint, hasActiveSession } = useActiveSession();
+  const [showResumePrompt, setShowResumePrompt] = useState(false);
+  const [submitSuccessBanner, setSubmitSuccessBanner] = useState<string | null>(null);
+  const [alreadySubmittedBanner, setAlreadySubmittedBanner] = useState<string | null>(null);
+  const [historyItems, setHistoryItems] = useState<StudentHistoryItem[]>([]);
+  const [historyCursor, setHistoryCursor] = useState<string | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyActionStudentId, setHistoryActionStudentId] = useState<string | null>(null);
+  const [historyActionError, setHistoryActionError] = useState<string | null>(null);
+  const [historyRequest, setHistoryRequest] = useState(0);
+
+  const loadHistory = async (cursor?: string, append = false) => {
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      if (!append) await initializeStudentHistory();
+      const response = await fetchStudentHistory(cursor);
+      if (!response.success || !response.data) {
+        throw new Error(response.error?.message || "Riwayat ujian tidak dapat dimuat.");
+      }
+      setHistoryItems((current) => append ? [...current, ...response.data!.items] : response.data!.items);
+      setHistoryCursor(response.data.nextCursor);
+    } catch (error) {
+      setHistoryError(error instanceof Error ? error.message : "Riwayat ujian tidak dapat dimuat.");
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  // Deteksi pengumpulan ujian dan cegah akses ulang
+  useEffect(() => {
+    if (isAuthenticated || teacher || isTeacherSignedIn) return;
+    void loadHistory();
+  }, [isAuthenticated, teacher, isTeacherSignedIn, historyRequest]);
+
+  const handleResumeHistory = async (item: StudentHistoryItem) => {
+    setHistoryActionStudentId(item.studentId);
+    setHistoryActionError(null);
+    try {
+      const response = await resumeStudentHistory(item.studentId);
+      if (!response.success || !response.data) {
+        throw new Error(response.error?.message || "Sesi tidak dapat dilanjutkan.");
+      }
+      clearSessionHint();
+      window.location.assign(response.data.nextStep === "session" ? "/exam/session" : "/exam/lobby");
+    } catch (error) {
+      setHistoryActionError(error instanceof Error ? error.message : "Sesi tidak dapat dilanjutkan.");
+      setHistoryRequest((request) => request + 1);
+    } finally {
+      setHistoryActionStudentId(null);
+    }
+  };
+
+  const formatHistoryStatus = (status: StudentHistoryItem["status"]) => ({
+    waiting: "Menunggu pengawas",
+    accepted: "Disetujui",
+    active: "Sedang dikerjakan",
+    submitted: "Selesai dikumpulkan",
+    disconnected: "Terputus",
+    kicked: "Dikeluarkan",
+  })[status];
+
+  const formatHistoryDate = (value: string) => new Intl.DateTimeFormat("id-ID", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const justSubmitted = sessionStorage.getItem("exam_just_submitted");
+    const examTitle = sessionStorage.getItem("exam_submitted_title");
+    if (justSubmitted === "true") {
+      sessionStorage.removeItem("exam_just_submitted");
+      sessionStorage.removeItem("exam_submitted_title");
+      setSubmitSuccessBanner(`Ujian "${examTitle || "Ujian"}" berhasil dikumpulkan! Jawaban Anda telah tersimpan.`);
+    }
+
+    const alreadySubmitted = sessionStorage.getItem("exam_already_submitted");
+    if (alreadySubmitted === "true") {
+      sessionStorage.removeItem("exam_already_submitted");
+      setAlreadySubmittedBanner("Kamu sudah mengerjakan ujian ini sebelumnya.");
+    }
+  }, []);
+
+  // Auto-redirect jika backend konfirmasi sesi aktif
+  useEffect(() => {
+    if (!checking && hasActiveSession) {
+      router.replace("/exam/session");
+    }
+  }, [checking, hasActiveSession, router]);
+
+  // Tampilkan resume banner jika ada hint localStorage
+  useEffect(() => {
+    if (sessionHint) setShowResumePrompt(true);
+  }, [sessionHint]);
+
+  // Tutup banner jika backend konfirmasi sesi tidak aktif
+  useEffect(() => {
+    if (!checking && sessionCheck && !sessionCheck.isActive) {
+      setShowResumePrompt(false);
+    }
+  }, [checking, sessionCheck]);
+
+  // Redirect guru yang sudah login langsung ke dashboard
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const hasCookie =
+        document.cookie.includes("hasTeacherSession=1") ||
+        document.cookie.includes("eduquas_teacher_session=active");
+      const hasLocal =
+        localStorage.getItem("eduquas_teacher_session") === "active";
+      if (hasCookie || hasLocal || isAuthenticated || Boolean(teacher)) {
+        setIsTeacherSignedIn(true);
+        router.replace("/dashboard");
+      }
+    }
+  }, [isAuthenticated, teacher, router]);
+
+  // Handle ?code=ABC1234 query parameter pre-fill
+  useEffect(() => {
+    const codeParam = searchParams.get("code");
+    if (codeParam) {
+      const normalized = codeParam.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10);
+      setCode(normalized);
+      // Move focus to the button and remove query parameter from address bar
+      setTimeout(() => {
+        buttonRef.current?.focus();
+      }, 50);
+      window.history.replaceState(null, "", window.location.pathname);
+    } else {
+      // Autofocus on desktop (pointer: fine) per Spec §3.2
+      if (typeof window !== "undefined" && window.matchMedia("(pointer: fine)").matches) {
+        inputRef.current?.focus();
+      }
+    }
+  }, [searchParams]);
+
+  // Rate limit countdown tick
+  useEffect(() => {
+    if (rateLimitTimer <= 0) return;
+    const timer = setInterval(() => {
+      setRateLimitTimer((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          setResultStatus("idle");
+          setMessage("");
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [rateLimitTimer]);
+
+  // Input normalization (Spec §3.2: uppercase, non-alphanumeric removed immediately)
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    const normalized = raw.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10);
+    setCode(normalized);
+    // Clear previous error on typing
+    if (resultStatus !== "rate_limited") {
+      setResultStatus("idle");
+      setMessage("");
+    }
+  };
+
+  const handleJoin = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (rateLimitTimer > 0) return;
+
+    // Normalization check
+    const normalized = code.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+    // Situation 1: Empty or too short (< 6 chars)
+    if (!normalized || normalized.length < 6) {
+      setResultStatus("error");
+      setMessage("Masukkan kode ujian.");
+      inputRef.current?.focus();
+      return;
+    }
+
+    setLoading(true);
+    setResultStatus("idle");
+    setMessage("");
+
+    // Minimum visible time 300 ms to avoid flicker per Spec §3.3
+    const startTime = Date.now();
+
+    // Check rate limit (simulated > 4 consecutive failed attempts)
+    if (attemptCount >= 4) {
+      const elapsed = Date.now() - startTime;
+      if (elapsed < 350) await new Promise((r) => setTimeout(r, 350 - elapsed));
+      setLoading(false);
+      setResultStatus("rate_limited");
+      setRateLimitTimer(30);
+      setMessage("Terlalu banyak percobaan. Coba lagi dalam 30 detik.");
+      setAttemptCount(0);
+      return;
+    }
+
+    try {
+      const res = await validateExamCode(normalized);
+      const elapsed = Date.now() - startTime;
+      if (elapsed < 300) await new Promise((r) => setTimeout(r, 300 - elapsed));
+      setLoading(false);
+
+      if (res.success && res.data?.exam) {
+        if (typeof window !== "undefined") {
+          sessionStorage.setItem("eduquas_exam_preview", JSON.stringify(res.data.exam));
+        }
+        router.push(`/join/identity?code=${encodeURIComponent(normalized)}`);
+        return;
+      }
+
+      // Check backend error codes
+      const errCode = res.error?.code;
+      if (errCode === "ALREADY_SUBMITTED") {
+        setResultStatus("notice");
+        setMessage("Anda sudah menyelesaikan dan mengumpulkan ujian ini.");
+      } else if (errCode === "EXAM_NOT_FOUND") {
+        setAttemptCount((prev) => prev + 1);
+        setResultStatus("error");
+        setMessage("Kode tidak ditemukan. Periksa lagi kode dari pengawas.");
+        inputRef.current?.select();
+      } else if (errCode === "EXAM_NOT_STARTED") {
+        setResultStatus("notice");
+        setMessage("Ujian belum dimulai.");
+      } else if (errCode === "EXAM_ENDED" || errCode === "EXAM_TIME_EXPIRED") {
+        setResultStatus("notice");
+        setMessage("Ujian ini sudah berakhir.");
+      } else if (errCode === "TOO_MANY_REQUESTS") {
+        setResultStatus("rate_limited");
+        setRateLimitTimer((res.error?.details as any)?.retryAfter || 30);
+        setMessage("Terlalu banyak percobaan. Coba lagi dalam beberapa saat.");
+      } else {
+        setAttemptCount((prev) => prev + 1);
+        setResultStatus("error");
+        setMessage(res.error?.message || "Kode tidak ditemukan. Periksa lagi kode dari pengawas.");
+        inputRef.current?.select();
+      }
+    } catch {
+      setLoading(false);
+      setResultStatus("error");
+      setMessage("Terjadi kesalahan jaringan. Coba lagi.");
+    }
+  };
+
+  const isError = resultStatus === "error";
+  const isNotice = resultStatus === "notice";
+  const isRateLimited = resultStatus === "rate_limited";
+
+  if (isTeacherSignedIn || isAuthenticated || Boolean(teacher)) {
+    return (
+      <div
+        style={{
+          minHeight: "100dvh",
+          background: T.bgPage,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontFamily: "var(--font-family, 'Poppins', sans-serif)",
+          color: T.textSecondary,
+        }}
+      >
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+          <div
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: "50%",
+              border: `3px solid ${T.primary}`,
+              borderTopColor: "transparent",
+              animation: "spinner-rotate 0.8s linear infinite",
+            }}
+          />
+          <div style={{ fontSize: 13, fontWeight: 500 }}>Mengalihkan ke dashboard guru…</div>
+        </div>
+        <style>{`
+          @keyframes spinner-rotate {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+          }
+        `}</style>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        minHeight: "100dvh",
+        background: T.bgPage,
+        display: "flex",
+        flexDirection: "column",
+        fontFamily: "var(--font-family, 'Poppins', sans-serif)",
+      }}
+    >
+      <style>{`
+        .eduquas-code-input {
+          width: 100%;
+          height: 56px;
+          padding: 0 16px;
+          background: #FFFFFF;
+          border: 1px solid ${isError ? T.danger : T.borderInput};
+          border-radius: ${T.radiusControl};
+          font-family: ${T.fontMono};
+          font-size: 22px;
+          line-height: 28px;
+          font-weight: 600;
+          letter-spacing: 0.12em;
+          text-align: left;
+          text-transform: uppercase;
+          color: ${T.textPrimary};
+          outline: none;
+          transition: border-color 150ms ease, box-shadow 150ms ease;
+          box-sizing: border-box;
+        }
+        .eduquas-code-input::placeholder {
+          color: ${T.textPlaceholder};
+          font-weight: 500;
+          letter-spacing: 0.12em;
+        }
+        .eduquas-code-input:focus {
+          border-color: ${isError ? T.danger : T.primary};
+          box-shadow: 0 0 0 3px ${isError ? "rgba(199, 62, 62, 0.20)" : T.primaryRing};
+        }
+        .eduquas-code-input:read-only {
+          background: ${T.bgSubtle};
+          cursor: not-allowed;
+        }
+
+        .join-btn-primary {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          height: 48px;
+          min-width: 140px;
+          padding: 0 32px;
+          border-radius: ${T.radiusControl};
+          background-color: ${T.primary};
+          color: #FFFFFF;
+          font-size: 14px;
+          font-weight: 500;
+          border: none;
+          cursor: pointer;
+          outline: none;
+          transition: background-color 150ms ease;
+          text-decoration: none;
+        }
+        .join-btn-primary:hover:not(:disabled) {
+          background-color: ${T.primaryHover};
+        }
+        .join-btn-primary:active:not(:disabled) {
+          background-color: ${T.primaryActive};
+        }
+        .join-btn-primary:focus-visible {
+          outline: 2px solid ${T.primary};
+          outline-offset: 2px;
+        }
+        .join-btn-primary:disabled {
+          background-color: ${T.borderInput};
+          cursor: not-allowed;
+          opacity: 0.7;
+        }
+
+        .teacher-switch-link {
+          font-size: 14px;
+          line-height: 20px;
+          font-weight: 500;
+          color: ${T.primary};
+          text-decoration: none;
+          outline: none;
+        }
+        .teacher-switch-link:hover {
+          text-decoration: underline;
+        }
+        .teacher-switch-link:focus-visible {
+          outline: 2px solid ${T.primary};
+          outline-offset: 2px;
+          border-radius: 4px;
+        }
+
+        @keyframes spinner-rotate {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
+
+      {/* ============================================================
+          SHARED HEADER (Spec §2: Brand top left, nothing on right, height 72px)
+          ============================================================ */}
+      <header
+        style={{
+          height: "72px",
+          padding: "0 32px",
+          display: "flex",
+          alignItems: "center",
+          flexShrink: 0,
+        }}
+      >
+        <Link
+          href="/"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "10px",
+            textDecoration: "none",
+            outline: "none",
+          }}
+          aria-label="EduQuas Beranda"
+        >
+          {/* 32px rounded square in --primary with white line-style lock (SVG, not emoji) */}
+          <div
+            style={{
+              width: "32px",
+              height: "32px",
+              background: T.primary,
+              borderRadius: "8px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+            }}
+          >
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="#FFFFFF"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+            </svg>
+          </div>
+          <span
+            style={{
+              fontSize: "16px",
+              fontWeight: 600,
+              color: T.textPrimary,
+              letterSpacing: "-0.01em",
+            }}
+          >
+            EduQuas
+          </span>
+        </Link>
+      </header>
+
+      {/* ============================================================
+          MAIN JOIN VIEW (Spec §3: No card, 360px wide, centered, ~45% top)
+          ============================================================ */}
+      <main
+        style={{
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "0 24px 64px",
+          width: "100%",
+          boxSizing: "border-box",
+        }}
+      >
+        <div
+          style={{
+            width: "100%",
+            maxWidth: "360px",
+            textAlign: "center",
+          }}
+        >
+          {/* Heading (h1): Masukkan kode untuk bergabung */}
+          <h1
+            style={{
+              margin: "0 0 8px",
+              fontSize: "26px",
+              lineHeight: "32px",
+              fontWeight: 600,
+              color: T.textPrimary,
+              letterSpacing: "-0.01em",
+            }}
+          >
+            Masukkan kode untuk bergabung
+          </h1>
+
+          {/* Help text: Kode diberikan oleh pengawas ujian. */}
+          <p
+            style={{
+              margin: "0 0 32px",
+              fontSize: "14px",
+              lineHeight: "20px",
+              color: T.textSecondary,
+            }}
+          >
+            Kode diberikan oleh pengawas ujian.
+          </p>
+
+          {/* Resume Session Banner */}
+          {showResumePrompt && sessionHint && (
+            <div
+              style={{
+                background: "linear-gradient(135deg, #E8F6FD 0%, #EDE9FE 100%)",
+                border: "1.5px solid #4F6B80",
+                borderRadius: "10px",
+                padding: "14px 16px",
+                marginBottom: "20px",
+                textAlign: "left",
+                boxShadow: "0 4px 16px rgba(41,171,226,0.10)",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "flex-start", gap: "10px" }}>
+                <span style={{ fontSize: "20px", flexShrink: 0 }}>📋</span>
+                <div style={{ flex: 1 }}>
+                  <p style={{ fontWeight: 600, fontSize: "13px", color: "#1C303D", margin: "0 0 3px 0" }}>
+                    Ada ujian yang sedang berlangsung
+                  </p>
+                  <p style={{ fontSize: "12px", color: "#3D6A7E", margin: "0 0 10px 0" }}>
+                    <strong>{sessionHint.studentName}</strong> · {sessionHint.examTitle}
+                  </p>
+                  <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                    {checking ? (
+                      <span style={{ fontSize: "12px", color: "#5A8FA8" }}>Memeriksa sesi...</span>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => router.replace("/exam/session")}
+                          style={{
+                            background: "#4F6B80", color: "white", border: "none",
+                            borderRadius: "6px", padding: "6px 14px", fontSize: "13px",
+                            fontWeight: 600, cursor: "pointer",
+                          }}
+                        >
+                          ▶ Lanjutkan Ujian
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { clearSessionHint(); setShowResumePrompt(false); }}
+                          style={{
+                            background: "transparent", color: "#5A8FA8",
+                            border: "1px solid #A8D4E8", borderRadius: "6px",
+                            padding: "6px 12px", fontSize: "12px", cursor: "pointer",
+                          }}
+                        >
+                          Abaikan
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Banner Sukses Mengumpulkan Ujian */}
+          {submitSuccessBanner && (
+            <div
+              style={{
+                background: "#ECFDF5",
+                border: "1.5px solid #10B981",
+                color: "#065F46",
+                borderRadius: "8px",
+                padding: "12px 16px",
+                marginBottom: "20px",
+                fontSize: "13px",
+                lineHeight: 1.5,
+                textAlign: "left",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "8px",
+                boxShadow: "0 2px 8px rgba(16,185,129,0.12)",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <span style={{ fontSize: "18px" }}>✅</span>
+                <span>{submitSuccessBanner}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSubmitSuccessBanner(null)}
+                style={{ background: "none", border: "none", color: "#065F46", cursor: "pointer", fontSize: "16px", padding: 0 }}
+                aria-label="Tutup notifikasi"
+              >
+                ×
+              </button>
+            </div>
+          )}
+
+          {/* Banner Peringatan Sudah Mengerjakan */}
+          {alreadySubmittedBanner && (
+            <div
+              style={{
+                background: "#F8EAD2",
+                border: "1.5px solid #F59E0B",
+                color: "#92400E",
+                borderRadius: "8px",
+                padding: "12px 16px",
+                marginBottom: "20px",
+                fontSize: "13px",
+                lineHeight: 1.5,
+                textAlign: "left",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "8px",
+                boxShadow: "0 2px 8px rgba(245,158,11,0.12)",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                <span style={{ fontSize: "18px" }}>⚠️</span>
+                <span>{alreadySubmittedBanner}</span>
+                <a
+                  href="/exam/done"
+                  style={{
+                    color: "#92400E",
+                    fontWeight: 700,
+                    textDecoration: "underline",
+                    marginLeft: "4px",
+                  }}
+                >
+                  Lihat Konfirmasi Ujian
+                </a>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAlreadySubmittedBanner(null)}
+                style={{ background: "none", border: "none", color: "#92400E", cursor: "pointer", fontSize: "16px", padding: 0 }}
+                aria-label="Tutup peringatan"
+              >
+                ×
+              </button>
+            </div>
+          )}
+
+          {/* Form */}
+          <form onSubmit={handleJoin} noValidate>
+            {/* Code Input */}
+            <div style={{ marginBottom: "8px", position: "relative" }}>
+              <input
+                ref={inputRef}
+                type="text"
+                inputMode="text"
+                autoCapitalize="characters"
+                autoComplete="off"
+                autoCorrect="off"
+                spellCheck={false}
+                enterKeyHint="go"
+                aria-label="Kode ujian"
+                aria-describedby="code-feedback-message"
+                aria-invalid={isError}
+                placeholder="ABC1234"
+                value={code}
+                onChange={handleInputChange}
+                readOnly={loading}
+                className="eduquas-code-input"
+              />
+            </div>
+
+            {/* Reserved message area (min-height 24px per Spec §3.4: nothing jumps) */}
+            <div
+              id="code-feedback-message"
+              aria-live="polite"
+              style={{
+                minHeight: "24px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                marginBottom: "24px",
+              }}
+            >
+              {(isError || isRateLimited) && (
+                <div
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    fontSize: "13px",
+                    lineHeight: "18px",
+                    color: T.danger,
+                    textAlign: "center",
+                  }}
+                >
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                    style={{ flexShrink: 0 }}
+                  >
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="12" y1="8" x2="12" y2="12" />
+                    <line x1="12" y1="16" x2="12.01" y2="16" />
+                  </svg>
+                  <span>
+                    {isRateLimited
+                      ? `Terlalu banyak percobaan. Coba lagi dalam ${rateLimitTimer} detik.`
+                      : message}
+                  </span>
+                </div>
+              )}
+
+              {isNotice && (
+                <div
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    fontSize: "13px",
+                    lineHeight: "18px",
+                    color: T.textSecondary,
+                    background: T.bgSubtle,
+                    padding: "4px 10px",
+                    borderRadius: "6px",
+                    textAlign: "center",
+                  }}
+                >
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                    style={{ flexShrink: 0 }}
+                  >
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="12" y1="16" x2="12" y2="12" />
+                    <line x1="12" y1="8" x2="12.01" y2="8" />
+                  </svg>
+                  <span>{message}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Submit Button: Gabung (Spec §3.3: never disabled while empty) */}
+            <div style={{ marginBottom: "40px" }}>
+              <button
+                ref={buttonRef}
+                type="submit"
+                disabled={loading || rateLimitTimer > 0}
+                className="join-btn-primary"
+              >
+                {loading ? (
+                  <>
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      style={{ animation: "spinner-rotate 0.8s linear infinite" }}
+                      aria-hidden="true"
+                    >
+                      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                    </svg>
+                    <span>Memeriksa…</span>
+                  </>
+                ) : (
+                  <span>Gabung</span>
+                )}
+              </button>
+            </div>
+          </form>
+
+          {/* Browser-scoped student exam history */}
+          {!isTeacherSignedIn && !isAuthenticated && !teacher && (
+            <section
+              aria-labelledby="student-history-heading"
+              aria-busy={historyLoading}
+              style={{ width: "100%", marginTop: "42px", textAlign: "left" }}
+            >
+              <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: "24px", marginBottom: "14px" }}>
+                <h2 id="student-history-heading" style={{ margin: 0, color: T.textPrimary, fontSize: "17px", lineHeight: 1.4 }}>
+                  Riwayat ujian di browser ini
+                </h2>
+                <p style={{ margin: "5px 0 0", color: T.textSecondary, fontSize: "12px", lineHeight: 1.5 }}>
+                  Keikutsertaan ujian yang pernah dibuka dari browser ini.
+                </p>
+              </div>
+
+              {historyLoading && historyItems.length === 0 && (
+                <p role="status" style={{ color: T.textSecondary, fontSize: "13px" }}>Memuat riwayat ujian…</p>
+              )}
+
+              {historyError && (
+                <div role="alert" style={{ border: `1px solid ${T.border}`, borderRadius: T.radiusControl, padding: "14px", color: T.textSecondary, fontSize: "13px" }}>
+                  <p style={{ margin: "0 0 10px" }}>{historyError}</p>
+                  <button type="button" onClick={() => setHistoryRequest((request) => request + 1)} style={{ color: T.primary, background: "transparent", border: 0, padding: 0, fontWeight: 700, cursor: "pointer" }}>Coba lagi</button>
+                </div>
+              )}
+
+              {historyActionError && <p role="alert" style={{ color: T.danger, fontSize: "13px" }}>{historyActionError}</p>}
+
+              {!historyLoading && !historyError && historyItems.length === 0 && (
+                <p style={{ color: T.textSecondary, fontSize: "13px", lineHeight: 1.6 }}>Riwayat akan muncul setelah Anda bergabung dengan ujian dari browser ini.</p>
+              )}
+
+              <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: "10px" }}>
+                {historyItems.map((item) => (
+                  <li key={item.studentId} style={{ border: `1px solid ${T.border}`, borderRadius: T.radiusControl, background: T.bgCard, padding: "14px", display: "grid", gap: "10px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px" }}>
+                      <div style={{ minWidth: 0 }}>
+                        <h3 style={{ margin: 0, color: T.textPrimary, fontSize: "14px", lineHeight: 1.4, overflowWrap: "anywhere" }}>{item.exam.title}</h3>
+                        <p style={{ margin: "4px 0 0", color: T.textSecondary, fontSize: "12px" }}>{item.studentName}</p>
+                      </div>
+                      <span style={{ flexShrink: 0, borderRadius: "999px", background: T.bgSubtle, color: T.textSecondary, padding: "4px 8px", fontSize: "10px", fontWeight: 700 }}>{formatHistoryStatus(item.status)}</span>
+                    </div>
+                    <p style={{ margin: 0, color: T.textSecondary, fontSize: "11px", lineHeight: 1.5 }}>
+                      {[item.exam.className, item.exam.examType].filter(Boolean).join(" · ")}{item.exam.className || item.exam.examType ? " · " : ""}
+                      {formatHistoryDate(item.submittedAt || item.joinedAt)}
+                      {item.score !== null ? ` · Nilai ${item.score}` : ""}
+                      {item.isLocked && item.canResume ? " · Terkunci sampai dibuka pengawas" : ""}
+                    </p>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                      {item.canResume && (
+                        <button
+                          type="button"
+                          disabled={historyActionStudentId !== null}
+                          onClick={() => void handleResumeHistory(item)}
+                          style={{ minHeight: "40px", border: 0, borderRadius: "6px", background: T.primary, color: "white", padding: "8px 12px", fontSize: "12px", fontWeight: 700, cursor: historyActionStudentId ? "wait" : "pointer", opacity: historyActionStudentId ? 0.7 : 1 }}
+                        >
+                          {historyActionStudentId === item.studentId ? "Membuka…" : item.status === "waiting" || item.status === "accepted" ? "Buka ruang tunggu" : "Lanjutkan ujian"}
+                        </button>
+                      )}
+                      {item.canReview && (
+                        <Link href={`/exam/review?studentId=${encodeURIComponent(item.studentId)}`} style={{ minHeight: "40px", display: "inline-flex", alignItems: "center", border: `1px solid ${T.border}`, borderRadius: "6px", color: T.primary, padding: "8px 12px", fontSize: "12px", fontWeight: 700, textDecoration: "none" }}>Review jawaban</Link>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+
+              {historyCursor && !historyError && (
+                <button type="button" disabled={historyLoading} onClick={() => void loadHistory(historyCursor, true)} style={{ width: "100%", minHeight: "42px", marginTop: "12px", border: `1px solid ${T.border}`, borderRadius: T.radiusControl, background: "transparent", color: T.primary, fontWeight: 700, cursor: historyLoading ? "wait" : "pointer" }}>
+                  {historyLoading ? "Memuat…" : "Muat riwayat lainnya"}
+                </button>
+              )}
+            </section>
+          )}
+
+          {/* Teacher link: 40 px under button (Spec §3.6) */}
+          <div>
+            {isTeacherSignedIn ? (
+              <Link href="/dashboard" className="teacher-switch-link">
+                Buka dashboard
+              </Link>
+            ) : (
+              <Link href="/login" className="teacher-switch-link">
+                Login sebagai guru?
+              </Link>
+            )}
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+}
+
+export default function JoinPage() {
+  return (
+    <Suspense
+      fallback={
+        <div style={{ minHeight: "100dvh", background: T.bgPage, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          Memuat…
+        </div>
+      }
+    >
+      <JoinContent />
+    </Suspense>
+  );
+}

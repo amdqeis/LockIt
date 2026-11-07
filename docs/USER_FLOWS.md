@@ -86,7 +86,7 @@ flowchart TD
     D -->|"Tidak valid"| E["Tampilkan pesan error\ndengan detail kesalahan"]
     E --> C
     D -->|"Valid"| F["Tampilkan preview soal\n(guru bisa cek isi soal)"]
-    F --> G["Atur kebijakan pelanggaran:\n- Batas pelanggaran\n- Aksi (warning/lock/review)\n- Fitur opsional (copy/paste, dll)"]
+    F --> G["Atur kebijakan pelanggaran:\n- Batas pelanggaran\n- Aksi (warning/lock/review)\n- Shortcut screenshot dan aktivitas browser"]
     G --> H["Atur pengaturan tambahan:\n- Acak urutan soal? (ya/tidak)\n- Mode tampilan soal\n  (satu per satu / semua sekaligus)"]
     H --> I["Klik 'Simpan'"]
     I --> J["Sistem generate kode akses\n(6-8 karakter, contoh: ABC123)"]
@@ -289,6 +289,10 @@ flowchart TD
 | 10 | Submit | Manual (klik tombol) atau otomatis (waktu habis) |
 | 11 | Halaman selesai | Konfirmasi bahwa jawaban sudah diterima |
 
+### Riwayat Ujian di Browser
+
+Halaman `/` menampilkan keikutsertaan ujian yang sudah dikaitkan ke browser ini. Server memberi token acak di cookie `HttpOnly` berumur 180 hari dan hanya menyimpan hash token. Join yang berhasil mengaitkan peserta ujian; sesi siswa valid juga dapat mengaitkan riwayat lama saat halaman dibuka. Setiap aksi resume/review memeriksa kepemilikan di server. Resume mempertahankan status terkunci dan ditolak untuk peserta kicked/submitted atau ujian berakhir/kedaluwarsa. Review mengikuti izin guru. Browser lain, mode privat, cookie terhapus, atau token kedaluwarsa tidak memulihkan riwayat otomatis.
+
 ---
 
 ## 7. Alur Proctoring (Sistem)
@@ -301,12 +305,13 @@ flowchart TD
     B -->|"Keluar fullscreen"| C["Catat: fullscreen_exit\n+ waktu + durasi"]
     B -->|"Pindah tab/window"| D["Catat: tab_switch\n+ waktu"]
     B -->|"Window kehilangan fokus"| E["Catat: window_blur\n+ waktu + durasi"]
-    B -->|"Copy atau paste"| F["Catat: copy_attempt\natau paste_attempt + waktu"]
+    B -->|"Copy atau paste"| F["Blokir di browser\n(tanpa event atau pelanggaran)"]
+    B -->|"Shortcut screenshot yang dikenali"| F2["Jika kebijakan aktif, catat\npercobaan shortcut + metadata"]
     B -->|"Klik kanan / buka devtools"| G["Catat: right_click\natau devtools + waktu"]
     C --> H["Kirim event ke server"]
     D --> H
     E --> H
-    F --> H
+    F2 --> H
     G --> H
     H --> I{"Berhasil terkirim?"}
     I -->|"Ya"| J["Simpan ke database"]
@@ -329,8 +334,7 @@ flowchart TD
 | `fullscreen_exit` | Peserta keluar dari mode layar penuh | Waktu keluar, berapa lama di luar fullscreen |
 | `window_blur` | Jendela browser kehilangan fokus | Waktu blur, berapa lama |
 | `tab_switch` | Peserta pindah tab atau buka jendela lain | Waktu pindah |
-| `copy_attempt` | Peserta mencoba menyalin teks | Waktu |
-| `paste_attempt` | Peserta mencoba menempel teks | Waktu |
+| `screenshot` | Shortcut screenshot spesifik dikenali browser | Waktu dan jenis shortcut; bukan bukti gambar berhasil diambil |
 | `right_click` | Peserta klik kanan di halaman ujian | Waktu |
 | `devtools` | Peserta membuka alat pengembang browser | Waktu |
 | `reconnect` | Peserta yang terputus tersambung kembali | Waktu, durasi terputus |

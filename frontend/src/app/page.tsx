@@ -3,7 +3,14 @@
 import { useState, useEffect, useRef, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { validateExamCode, clearSessionHint } from "@/lib/examSession";
+import {
+  validateExamCode,
+  clearSessionHint,
+  initializeStudentHistory,
+  fetchStudentHistory,
+  resumeStudentHistory,
+  type StudentHistoryItem,
+} from "@/lib/examSession";
 import { useActiveSession } from "@/hooks/useActiveSession";
 import { useTeacherAuth } from "@/lib/auth";
 
@@ -49,8 +56,69 @@ function JoinContent() {
   const [showResumePrompt, setShowResumePrompt] = useState(false);
   const [submitSuccessBanner, setSubmitSuccessBanner] = useState<string | null>(null);
   const [alreadySubmittedBanner, setAlreadySubmittedBanner] = useState<string | null>(null);
+  const [historyItems, setHistoryItems] = useState<StudentHistoryItem[]>([]);
+  const [historyCursor, setHistoryCursor] = useState<string | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyActionStudentId, setHistoryActionStudentId] = useState<string | null>(null);
+  const [historyActionError, setHistoryActionError] = useState<string | null>(null);
+  const [historyRequest, setHistoryRequest] = useState(0);
+
+  const loadHistory = async (cursor?: string, append = false) => {
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      if (!append) await initializeStudentHistory();
+      const response = await fetchStudentHistory(cursor);
+      if (!response.success || !response.data) {
+        throw new Error(response.error?.message || "Riwayat ujian tidak dapat dimuat.");
+      }
+      setHistoryItems((current) => append ? [...current, ...response.data!.items] : response.data!.items);
+      setHistoryCursor(response.data.nextCursor);
+    } catch (error) {
+      setHistoryError(error instanceof Error ? error.message : "Riwayat ujian tidak dapat dimuat.");
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
 
   // Deteksi pengumpulan ujian dan cegah akses ulang
+  useEffect(() => {
+    if (isAuthenticated || teacher || isTeacherSignedIn) return;
+    void loadHistory();
+  }, [isAuthenticated, teacher, isTeacherSignedIn, historyRequest]);
+
+  const handleResumeHistory = async (item: StudentHistoryItem) => {
+    setHistoryActionStudentId(item.studentId);
+    setHistoryActionError(null);
+    try {
+      const response = await resumeStudentHistory(item.studentId);
+      if (!response.success || !response.data) {
+        throw new Error(response.error?.message || "Sesi tidak dapat dilanjutkan.");
+      }
+      clearSessionHint();
+      window.location.assign(response.data.nextStep === "session" ? "/exam/session" : "/exam/lobby");
+    } catch (error) {
+      setHistoryActionError(error instanceof Error ? error.message : "Sesi tidak dapat dilanjutkan.");
+      setHistoryRequest((request) => request + 1);
+    } finally {
+      setHistoryActionStudentId(null);
+    }
+  };
+
+  const formatHistoryStatus = (status: StudentHistoryItem["status"]) => ({
+    waiting: "Menunggu pengawas",
+    accepted: "Disetujui",
+    active: "Sedang dikerjakan",
+    submitted: "Selesai dikumpulkan",
+    disconnected: "Terputus",
+    kicked: "Dikeluarkan",
+  })[status];
+
+  const formatHistoryDate = (value: string) => new Intl.DateTimeFormat("id-ID", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
   useEffect(() => {
     if (typeof window === "undefined") return;
     const justSubmitted = sessionStorage.getItem("exam_just_submitted");
@@ -761,6 +829,82 @@ function JoinContent() {
               </button>
             </div>
           </form>
+
+          {/* Browser-scoped student exam history */}
+          {!isTeacherSignedIn && !isAuthenticated && !teacher && (
+            <section
+              aria-labelledby="student-history-heading"
+              aria-busy={historyLoading}
+              style={{ width: "100%", marginTop: "42px", textAlign: "left" }}
+            >
+              <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: "24px", marginBottom: "14px" }}>
+                <h2 id="student-history-heading" style={{ margin: 0, color: T.textPrimary, fontSize: "17px", lineHeight: 1.4 }}>
+                  Riwayat ujian di browser ini
+                </h2>
+                <p style={{ margin: "5px 0 0", color: T.textSecondary, fontSize: "12px", lineHeight: 1.5 }}>
+                  Keikutsertaan ujian yang pernah dibuka dari browser ini.
+                </p>
+              </div>
+
+              {historyLoading && historyItems.length === 0 && (
+                <p role="status" style={{ color: T.textSecondary, fontSize: "13px" }}>Memuat riwayat ujian…</p>
+              )}
+
+              {historyError && (
+                <div role="alert" style={{ border: `1px solid ${T.border}`, borderRadius: T.radiusControl, padding: "14px", color: T.textSecondary, fontSize: "13px" }}>
+                  <p style={{ margin: "0 0 10px" }}>{historyError}</p>
+                  <button type="button" onClick={() => setHistoryRequest((request) => request + 1)} style={{ color: T.primary, background: "transparent", border: 0, padding: 0, fontWeight: 700, cursor: "pointer" }}>Coba lagi</button>
+                </div>
+              )}
+
+              {historyActionError && <p role="alert" style={{ color: T.danger, fontSize: "13px" }}>{historyActionError}</p>}
+
+              {!historyLoading && !historyError && historyItems.length === 0 && (
+                <p style={{ color: T.textSecondary, fontSize: "13px", lineHeight: 1.6 }}>Riwayat akan muncul setelah Anda bergabung dengan ujian dari browser ini.</p>
+              )}
+
+              <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: "10px" }}>
+                {historyItems.map((item) => (
+                  <li key={item.studentId} style={{ border: `1px solid ${T.border}`, borderRadius: T.radiusControl, background: T.bgCard, padding: "14px", display: "grid", gap: "10px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px" }}>
+                      <div style={{ minWidth: 0 }}>
+                        <h3 style={{ margin: 0, color: T.textPrimary, fontSize: "14px", lineHeight: 1.4, overflowWrap: "anywhere" }}>{item.exam.title}</h3>
+                        <p style={{ margin: "4px 0 0", color: T.textSecondary, fontSize: "12px" }}>{item.studentName}</p>
+                      </div>
+                      <span style={{ flexShrink: 0, borderRadius: "999px", background: T.bgSubtle, color: T.textSecondary, padding: "4px 8px", fontSize: "10px", fontWeight: 700 }}>{formatHistoryStatus(item.status)}</span>
+                    </div>
+                    <p style={{ margin: 0, color: T.textSecondary, fontSize: "11px", lineHeight: 1.5 }}>
+                      {[item.exam.className, item.exam.examType].filter(Boolean).join(" · ")}{item.exam.className || item.exam.examType ? " · " : ""}
+                      {formatHistoryDate(item.submittedAt || item.joinedAt)}
+                      {item.score !== null ? ` · Nilai ${item.score}` : ""}
+                      {item.isLocked && item.canResume ? " · Terkunci sampai dibuka pengawas" : ""}
+                    </p>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                      {item.canResume && (
+                        <button
+                          type="button"
+                          disabled={historyActionStudentId !== null}
+                          onClick={() => void handleResumeHistory(item)}
+                          style={{ minHeight: "40px", border: 0, borderRadius: "6px", background: T.primary, color: "white", padding: "8px 12px", fontSize: "12px", fontWeight: 700, cursor: historyActionStudentId ? "wait" : "pointer", opacity: historyActionStudentId ? 0.7 : 1 }}
+                        >
+                          {historyActionStudentId === item.studentId ? "Membuka…" : item.status === "waiting" || item.status === "accepted" ? "Buka ruang tunggu" : "Lanjutkan ujian"}
+                        </button>
+                      )}
+                      {item.canReview && (
+                        <Link href={`/exam/review?studentId=${encodeURIComponent(item.studentId)}`} style={{ minHeight: "40px", display: "inline-flex", alignItems: "center", border: `1px solid ${T.border}`, borderRadius: "6px", color: T.primary, padding: "8px 12px", fontSize: "12px", fontWeight: 700, textDecoration: "none" }}>Review jawaban</Link>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+
+              {historyCursor && !historyError && (
+                <button type="button" disabled={historyLoading} onClick={() => void loadHistory(historyCursor, true)} style={{ width: "100%", minHeight: "42px", marginTop: "12px", border: `1px solid ${T.border}`, borderRadius: T.radiusControl, background: "transparent", color: T.primary, fontWeight: 700, cursor: historyLoading ? "wait" : "pointer" }}>
+                  {historyLoading ? "Memuat…" : "Muat riwayat lainnya"}
+                </button>
+              )}
+            </section>
+          )}
 
           {/* Teacher link: 40 px under button (Spec §3.6) */}
           <div>

@@ -51,7 +51,7 @@ const VIOLATION_CONFIG: Record<string, { label: string; color: string; ring: str
   devtools_open:   { label: "Buka DevTools",       shortLabel: "DevTools",   color: "#0F172A", ring: "#020617", icon: "🔧" },
   right_click:     { label: "Klik Kanan",          shortLabel: "RightClick", color: "#6B7280", ring: "#4B5563", icon: "🖱️" },
   ip_change:       { label: "Perubahan IP",        shortLabel: "IP Ganti",   color: "#DC2626", ring: "#991B1B", icon: "🌐" },
-  screenshot:      { label: "Screenshot / PrintScreen", shortLabel: "Screenshot", color: "#E11D48", ring: "#BE123C", icon: "📸" },
+  screenshot:      { label: "Percobaan shortcut screenshot", shortLabel: "Screenshot", color: "#E11D48", ring: "#BE123C", icon: "📸" },
 };
 
 const VIOLATION_PRIORITY: ViolationKey[] = [
@@ -1883,7 +1883,6 @@ function MonitorPageContent() {
     violationPolicy: {
       maxViolations: 3,
       action: "auto-lock",
-      detectCopyPaste: true,
       detectRightClick: true,
       detectDevTools: true,
     },
@@ -1944,7 +1943,6 @@ function MonitorPageContent() {
             violationPolicy: {
               maxViolations: beExam.violationPolicy?.max_violations ?? prev.violationPolicy.maxViolations,
               action: beExam.violationPolicy?.action ?? prev.violationPolicy.action,
-              detectCopyPaste: beExam.violationPolicy?.detect_copy_paste ?? prev.violationPolicy.detectCopyPaste,
               detectRightClick: beExam.violationPolicy?.detect_right_click ?? prev.violationPolicy.detectRightClick,
               detectDevTools: beExam.violationPolicy?.detect_devtools ?? prev.violationPolicy.detectDevTools,
             },
@@ -2055,7 +2053,7 @@ function MonitorPageContent() {
         setUrgentToast({
           id: String(Date.now()),
           type: "screenshot",
-          title: "📸 Percobaan Screenshot Terdeteksi!",
+          title: "📸 Percobaan shortcut screenshot",
           desc: `${data.name} (NISN: ${data.nisn}) mencoba melakukan tangkapan layar.`,
           studentId: data.studentId,
         });
@@ -2078,7 +2076,7 @@ function MonitorPageContent() {
       setUrgentToast({
         id: String(Date.now()),
         type: "screenshot",
-        title: "📸 Percobaan Screenshot Terdeteksi!",
+        title: "📸 Percobaan shortcut screenshot",
         desc: `${data.name} (NISN: ${data.nisn}) mencoba mengambil tangkapan layar.`,
         studentId: data.studentId,
       });
@@ -2291,7 +2289,6 @@ function MonitorPageContent() {
           <div style={{ fontSize: 11, color: "#8A8F99" }}>Maks. pelanggaran: {exam.violationPolicy.maxViolations} · Tindakan: {exam.violationPolicy.action === "auto-lock" ? "Auto-lock" : exam.violationPolicy.action}</div>
         </div>
         {[
-          { label: "Deteksi Copy-Paste", value: exam.violationPolicy.detectCopyPaste ? "Aktif" : "Nonaktif", active: exam.violationPolicy.detectCopyPaste },
           { label: "Deteksi Klik Kanan", value: exam.violationPolicy.detectRightClick ? "Aktif" : "Nonaktif", active: exam.violationPolicy.detectRightClick },
           { label: "Deteksi DevTools",   value: exam.violationPolicy.detectDevTools ? "Aktif" : "Nonaktif", active: exam.violationPolicy.detectDevTools },
         ].map(meta => (

@@ -122,13 +122,12 @@ Menyimpan informasi ujian yang dibuat oleh guru.
 {
   "max_violations": 5,
   "action": "warning",
-  "detect_copy_paste": true,
   "detect_right_click": false
 }
 ```
 - `max_violations` → berapa kali pelanggaran sebelum aksi diambil
 - `action` → apa yang terjadi: `"warning"` (beri peringatan), `"lock"` (kunci peserta), `"review"` (tandai untuk ditinjau)
-- `detect_copy_paste` → deteksi copy/paste atau tidak
+- `detect_copy_paste` lama diabaikan; copy/paste diblokir di browser tanpa event pelanggaran. Enum dan log lama dipertahankan untuk audit.
 - `detect_right_click` → deteksi klik kanan atau tidak
 
 **Contoh isi `settings`:**
@@ -209,6 +208,10 @@ Menyimpan data mahasiswa yang join ujian. Mahasiswa **tidak perlu** membuat akun
 - `violation_count` di-update setiap ada event proctoring baru (supaya tidak perlu hitung ulang dari tabel events)
 - `is_locked` diset `true` kalau pelanggaran melebihi batas dan kebijakan guru = "lock"
 
+### 3.5a `browser_identities` dan `browser_students` — Riwayat Browser
+
+`browser_identities` menyimpan hash token acak browser (bukan token mentah), waktu pembuatan, dan kedaluwarsa 180 hari. Token diberikan lewat cookie `HttpOnly`, `SameSite=Strict`, serta `Secure` di produksi. `browser_students` mengaitkan identitas tersebut ke peserta ujian; pasangan browser/peserta unik dan pencarian peserta diindeks. Cookie tidak dibuat dari IP atau user-agent. Migrasi `20261106_add_browser_history` menambahkan kedua tabel secara aditif.
+
 ---
 
 ### 3.6 `answers` — Jawaban Peserta
@@ -254,8 +257,8 @@ Menyimpan setiap aktivitas mencurigakan yang terdeteksi selama ujian.
 | `fullscreen_exit` | Peserta keluar dari mode layar penuh | ✅ (berapa lama di luar fullscreen) |
 | `window_blur` | Jendela browser kehilangan fokus | ✅ (berapa lama tidak fokus) |
 | `tab_switch` | Peserta pindah tab atau buka jendela lain | ❌ |
-| `copy_attempt` | Peserta mencoba menyalin teks | ❌ |
-| `paste_attempt` | Peserta mencoba menempel teks | ❌ |
+| `screenshot` | Shortcut screenshot spesifik yang dikenali browser (metadata mengidentifikasi shortcut) | ❌ |
+| `copy_attempt`, `paste_attempt` | Event historis; event baru dari client lama diabaikan server | ❌ |
 | `right_click` | Peserta klik kanan di halaman ujian | ❌ |
 | `devtools` | Peserta membuka alat pengembang browser | ❌ |
 | `reconnect` | Peserta tersambung kembali setelah terputus | ❌ |

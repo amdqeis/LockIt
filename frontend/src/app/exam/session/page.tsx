@@ -16,6 +16,7 @@ import {
 } from "@/lib/examSession";
 import { io } from "socket.io-client";
 import { SkeletonBase, SkeletonQuestionCard } from "@/app/components/skeleton";
+import { matchScreenshotShortcut } from "@/lib/screenshot-shortcuts";
 
 type AutoSaveStatus = "saved" | "saving" | "failed";
 type Question = any;
@@ -498,7 +499,6 @@ export default function ExamSessionPage() {
   const [isCheckingUnlock, setIsCheckingUnlock] = useState<boolean>(false);
   const [totalExpectedQuestions, setTotalExpectedQuestions] = useState<number>(0);
   const [isChunk2Loading, setIsChunk2Loading] = useState<boolean>(false);
-  const blurTimestampRef = useRef<number>(0);
   const [studentProfile, setStudentProfile] = useState<{ name: string; nisn: string } | null>(null);
   const [warningBanner, setWarningBanner] = useState<string | null>(null);
   const [timeExpiredOverlay, setTimeExpiredOverlay] = useState(false);
@@ -964,183 +964,48 @@ export default function ExamSessionPage() {
   useEffect(() => {
     if (submitted) return;
 
-    const triggerScreenshotViolation = (trigger: string, details?: Record<string, any>) => {
-      try {
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText("");
-        }
-      } catch {
-        // ignore clipboard error
-      }
-      sendProctoringEvent("screenshot", { trigger, ...details });
-      setIsLocked(true);
-      setScreenshotLockReason(`Percobaan tangkapan layar (screenshot) terdeteksi (${trigger}). Sesi ujian dikunci sementara demi keamanan.`);
+    const triggerScreenshotViolation = (shortcut: "print_screen" | "windows_snipping" | "macos_capture") => {
+      void sendProctoringEvent("screenshot", { source: "keyboard_shortcut", shortcut }).then((response) => {
+        if (!response.success || !response.data?.screenshotEnforced) return;
+        setIsLocked(true);
+        setScreenshotLockReason(`Percobaan shortcut tangkapan layar (${shortcut.replaceAll("_", " ")}) terdeteksi. Sesi ujian dikunci demi keamanan.`);
+      });
     };
 
     const handleVisibilityChange = () => {
       if (document.hidden) {
-        blurTimestampRef.current = Date.now();
         setIsShieldActive(true);
         sendProctoringEvent("tab_switch");
       } else {
         setIsShieldActive(false);
-        const blurTime = blurTimestampRef.current;
-        const now = Date.now();
-        if (blurTime > 0) {
-          const gap = now - blurTime;
-          blurTimestampRef.current = 0;
-          // Jeda micro capture screenshot pada HP (Power+VolDown) & Windows Snipping: 150ms - 2800ms
-          if (gap >= 150 && gap <= 2800) {
-            triggerScreenshotViolation("Tangkapan layar OS/HP terdeteksi (Jeda overlay screenshot)", { gapMs: gap });
-            return;
-          }
-        }
       }
     };
 
     const handleBlur = () => {
-      blurTimestampRef.current = Date.now();
       setIsShieldActive(true);
       sendProctoringEvent("window_blur");
-      // Purge clipboard saat kehilangan fokus agar screenshot OS tidak tersimpan
-      try {
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText("").catch(() => {});
-        }
-      } catch {}
     };
 
-    const handleFocus = async () => {
+    const handleFocus = () => {
       setIsShieldActive(false);
-      // Purge clipboard saat kembali fokus
-      try {
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText("").catch(() => {});
-        }
-      } catch {}
-
-      const blurTime = blurTimestampRef.current;
-      const now = Date.now();
-      if (blurTime > 0) {
-        const gap = now - blurTime;
-        blurTimestampRef.current = 0;
-        // Jeda overlay screenshot di Android/iOS & Windows Snipping: 150ms - 2800ms
-        if (gap >= 150 && gap <= 2800) {
-          triggerScreenshotViolation("Tangkapan layar OS/HP terdeteksi (Jeda capture screen)", { gapMs: gap });
-          return;
-        }
-      }
-
-      // Deteksi jika pengguna baru saja mengambil screenshot via tool eksternal OS
-      if (navigator.clipboard && navigator.clipboard.read) {
-        try {
-          const items = await navigator.clipboard.read();
-          for (const item of items) {
-            if (item.types.some((t) => t.startsWith("image/"))) {
-              triggerScreenshotViolation("Tangkapan layar terdeteksi pada clipboard sistem");
-              navigator.clipboard.writeText("").catch(() => {});
-              break;
-            }
-          }
-        } catch {
-          // Izin clipboard mungkin diblokir browser, abaikan
-        }
-      }
     };
 
     const handleCopy = (e: ClipboardEvent) => {
       e.preventDefault();
-      sendProctoringEvent("copy_attempt");
     };
 
     const handlePaste = (e: ClipboardEvent) => {
       e.preventDefault();
-      const items = e.clipboardData?.items;
-      let hasImage = false;
-      if (items) {
-        for (let i = 0; i < items.length; i++) {
-          if (items[i].type.startsWith("image/")) {
-            hasImage = true;
-            break;
-          }
-        }
-      }
-      if (hasImage) {
-        triggerScreenshotViolation("Percobaan menempelkan (paste) gambar screenshot");
-      } else {
-        sendProctoringEvent("paste_attempt");
-      }
-    };
-
-    const isPrintScreenKey = (e: KeyboardEvent) => {
-      const k = (e.key || "").toLowerCase();
-      const c = (e.code || "").toLowerCase();
-      const w = e.which || e.keyCode || 0;
-      return (
-        k === "printscreen" ||
-        k === "snapshot" ||
-        k === "print" ||
-        c === "printscreen" ||
-        c === "snapshot" ||
-        w === 44 ||
-        w === 42
-      );
-    };
-
-    const checkScreenshotKeys = (e: KeyboardEvent, phase: "keydown" | "keyup"): boolean => {
-      // 1. Tombol PrintScreen / Snapshot (Linux, Windows, Web standards)
-      if (isPrintScreenKey(e)) {
-        e.preventDefault();
-        e.stopPropagation();
-        triggerScreenshotViolation(`Tombol PrintScreen (${phase})`, { key: e.key, code: e.code, which: e.which });
-        return true;
-      }
-
-      // 2. Windows Snipping Tool: Win/Ctrl/Alt + Shift + S
-      if (
-        (e.metaKey || e.ctrlKey || e.altKey) &&
-        e.shiftKey &&
-        ((e.key || "").toLowerCase() === "s" || e.code === "KeyS")
-      ) {
-        e.preventDefault();
-        e.stopPropagation();
-        triggerScreenshotViolation(`Windows Snipping Tool (Win/Ctrl+Shift+S) (${phase})`, { key: e.key, code: e.code });
-        return true;
-      }
-
-      // 3. macOS Screenshot: Cmd + Shift + 3/4/5/6
-      const isMacNum = ["3", "4", "5", "6"].includes(e.key);
-      const isMacDigitCode = ["digit3", "digit4", "digit5", "digit6", "numpad3", "numpad4", "numpad5", "numpad6"].includes(
-        (e.code || "").toLowerCase()
-      );
-      if (e.metaKey && e.shiftKey && (isMacNum || isMacDigitCode)) {
-        e.preventDefault();
-        e.stopPropagation();
-        triggerScreenshotViolation(`macOS Screenshot (Cmd+Shift+${e.key || e.code}) (${phase})`, { key: e.key, code: e.code });
-        return true;
-      }
-
-      // 4. Print dialog / Save PDF attempt: Ctrl/Cmd + P
-      if ((e.ctrlKey || e.metaKey) && ((e.key || "").toLowerCase() === "p" || e.code === "KeyP")) {
-        e.preventDefault();
-        e.stopPropagation();
-        triggerScreenshotViolation(`Print / Save PDF (Ctrl/Cmd+P) (${phase})`, { key: e.key, code: e.code });
-        return true;
-      }
-
-      // 5. Windows Game Bar / Capture: Win + G
-      if ((e.metaKey || e.ctrlKey) && ((e.key || "").toLowerCase() === "g" || e.code === "KeyG")) {
-        e.preventDefault();
-        e.stopPropagation();
-        triggerScreenshotViolation(`Screen Recorder / Game Bar (Win+G) (${phase})`, { key: e.key, code: e.code });
-        return true;
-      }
-
-      return false;
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (checkScreenshotKeys(e, "keydown")) return;
+      const screenshotShortcut = e.isTrusted && !e.repeat ? matchScreenshotShortcut(e) : null;
+      if (screenshotShortcut) {
+        e.preventDefault();
+        e.stopPropagation();
+        triggerScreenshotViolation(screenshotShortcut);
+        return;
+      }
 
       const isF12 = e.key === "F12" || e.code === "F12" || e.keyCode === 123;
       const isDevTools =
@@ -1154,14 +1019,6 @@ export default function ExamSessionPage() {
       }
     };
 
-    const handleKeyUp = (e: KeyboardEvent) => {
-      checkScreenshotKeys(e, "keyup");
-    };
-
-    const handleBeforePrint = (e: Event) => {
-      e.preventDefault();
-      triggerScreenshotViolation("window.beforeprint event");
-    };
 
     const handleContextMenu = (e: MouseEvent) => {
       e.preventDefault();
@@ -1189,10 +1046,6 @@ export default function ExamSessionPage() {
     document.addEventListener("paste", handlePaste, captureOptions);
     document.addEventListener("selectstart", handleSelectStart, captureOptions);
     window.addEventListener("keydown", handleKeyDown, captureOptions);
-    document.addEventListener("keydown", handleKeyDown, captureOptions);
-    window.addEventListener("keyup", handleKeyUp, captureOptions);
-    document.addEventListener("keyup", handleKeyUp, captureOptions);
-    window.addEventListener("beforeprint", handleBeforePrint);
     document.addEventListener("contextmenu", handleContextMenu, captureOptions);
 
     return () => {
@@ -1203,10 +1056,6 @@ export default function ExamSessionPage() {
       document.removeEventListener("paste", handlePaste, captureOptions);
       document.removeEventListener("selectstart", handleSelectStart, captureOptions);
       window.removeEventListener("keydown", handleKeyDown, captureOptions);
-      document.removeEventListener("keydown", handleKeyDown, captureOptions);
-      window.removeEventListener("keyup", handleKeyUp, captureOptions);
-      document.removeEventListener("keyup", handleKeyUp, captureOptions);
-      window.removeEventListener("beforeprint", handleBeforePrint);
       document.removeEventListener("contextmenu", handleContextMenu, captureOptions);
     };
   }, [submitted]);

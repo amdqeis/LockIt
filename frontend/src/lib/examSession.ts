@@ -273,9 +273,11 @@ export async function markStudentWarningAsRead(warningId: string) {
  */
 export async function sendProctoringEvent(eventType: string, metadata?: Record<string, any>) {
   return apiFetch<{
-    eventId: string;
+    eventId: string | null;
     violationCount: number;
     isLocked: boolean;
+    ignored?: boolean;
+    screenshotEnforced?: boolean;
   }>("/api/proctoring/event", {
     method: "POST",
     body: JSON.stringify({
@@ -284,6 +286,36 @@ export async function sendProctoringEvent(eventType: string, metadata?: Record<s
       metadata,
     }),
   });
+}
+
+export interface StudentHistoryItem {
+  studentId: string;
+  studentName: string;
+  status: "waiting" | "accepted" | "active" | "submitted" | "disconnected" | "kicked";
+  joinedAt: string;
+  submittedAt: string | null;
+  linkedAt: string;
+  exam: { id: string; title: string; status: string; className: string | null; examType: string | null };
+  isLocked: boolean;
+  score: number | null;
+  canResume: boolean;
+  canReview: boolean;
+}
+
+export async function initializeStudentHistory() {
+  return apiFetch<{ initialized: boolean }>("/api/student-history", { method: "POST" });
+}
+
+export async function fetchStudentHistory(cursor?: string) {
+  const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+  return apiFetch<{ items: StudentHistoryItem[]; nextCursor: string | null }>(`/api/student-history${query}`);
+}
+
+export async function resumeStudentHistory(studentId: string) {
+  return apiFetch<{ studentId: string; nextStep: "session" | "waiting_room"; isLocked: boolean }>(
+    `/api/student-history/${encodeURIComponent(studentId)}/resume`,
+    { method: "POST" }
+  );
 }
 
 /**
@@ -381,6 +413,9 @@ export interface ExamReviewData {
 /**
  * Fetch exam review data for submitted student
  */
-export async function fetchExamReview() {
-  return apiFetch<ExamReviewData>("/api/exam-session/review");
+export async function fetchExamReview(studentId?: string) {
+  const endpoint = studentId
+    ? `/api/student-history/${encodeURIComponent(studentId)}/review`
+    : "/api/exam-session/review";
+  return apiFetch<ExamReviewData>(endpoint);
 }

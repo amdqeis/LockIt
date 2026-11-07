@@ -3,11 +3,10 @@
  * (NO camera, face detection, or physical device detection)
  */
 
-export type FlagKey = "tab_switch" | "copy_paste" | "devtools" | "reconnect";
+export type FlagKey = "tab_switch" | "devtools" | "reconnect";
 
 export const FLAG_LABELS: Record<FlagKey, string> = {
   tab_switch: "Pindah Tab",
-  copy_paste: "Copy/Paste",
   devtools: "Buka DevTools",
   reconnect: "Terputus / IP Change",
 };
@@ -21,12 +20,6 @@ export const FLAG_CONFIG: Record<
     shortLabel: "Tab",
     color: "#EF6F6C",
     icon: "🔀",
-  },
-  copy_paste: {
-    label: "Copy/Paste",
-    shortLabel: "Salin",
-    color: "#F5A24B",
-    icon: "📋",
   },
   devtools: {
     label: "Buka DevTools",
@@ -50,9 +43,6 @@ export function eventTypeToFlagKey(eventType: string): FlagKey | null {
     case "fullscreen_exit":
     case "fullscreen_denied":
       return "tab_switch";
-    case "copy_attempt":
-    case "paste_attempt":
-      return "copy_paste";
     case "devtools":
       return "devtools";
     case "reconnect":
@@ -66,7 +56,6 @@ export function eventTypeToFlagKey(eventType: string): FlagKey | null {
 export function aggregateFlags(events: Array<{ eventType: string }>): Record<FlagKey, number> {
   const flags: Record<FlagKey, number> = {
     tab_switch: 0,
-    copy_paste: 0,
     devtools: 0,
     reconnect: 0,
   };

@@ -12,7 +12,8 @@ export default function ExamReviewPage() {
 
   useEffect(() => {
     let isMounted = true;
-    fetchExamReview()
+    const studentId = new URLSearchParams(window.location.search).get("studentId") || undefined;
+    fetchExamReview(studentId)
       .then((res) => {
         if (!isMounted) return;
         if (res.success && res.data) {

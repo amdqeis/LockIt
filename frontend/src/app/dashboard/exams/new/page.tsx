@@ -130,7 +130,6 @@ interface FormState {
   passingScore: string;
   maxViolations: number;
   actionAtLimit: "warn" | "lock" | "auto_end";
-  detectCopyPaste: boolean;
   detectRightClick: boolean;
   detectDevTools: boolean;
   detectTabSwitch: boolean;
@@ -316,7 +315,6 @@ export default function NewExamPage() {
     passingScore: "",
     maxViolations: 3,
     actionAtLimit: "lock",
-    detectCopyPaste: true,
     detectRightClick: true,
     detectDevTools: true,
     detectTabSwitch: true,
@@ -425,7 +423,7 @@ export default function NewExamPage() {
     auto_end: `Pada pelanggaran ke-${form.maxViolations}, ujian peserta diakhiri dan jawaban yang sudah ada langsung dinilai.`,
   };
 
-  const allDetectionsOff = !form.detectCopyPaste && !form.detectRightClick && !form.detectDevTools && !form.detectTabSwitch && !form.detectFullscreenExit && !form.detectScreenshot && !form.detectIpChange;
+  const allDetectionsOff = !form.detectRightClick && !form.detectDevTools && !form.detectTabSwitch && !form.detectFullscreenExit && !form.detectScreenshot && !form.detectIpChange;
 
   // ── Validation ──────────────────────────────────────────────────────────────
   const validate = (mode: "draft" | "save") => {
@@ -476,7 +474,6 @@ export default function NewExamPage() {
           violationPolicy: {
             max_violations: form.maxViolations || 3,
             action: form.actionAtLimit === "lock" ? "lock" : "warning",
-            detect_copy_paste: form.detectCopyPaste,
             detect_right_click: form.detectRightClick,
             detect_devtools: form.detectDevTools,
             detect_tab_switch: form.detectTabSwitch,
@@ -1160,13 +1157,6 @@ export default function NewExamPage() {
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                 <ToggleRow
-                  id={`${uid}-cp`}
-                  label="Deteksi copy-paste"
-                  helper="Catat jika peserta mencoba menyalin teks"
-                  checked={form.detectCopyPaste}
-                  onChange={v => set("detectCopyPaste", v)}
-                />
-                <ToggleRow
                   id={`${uid}-rc`}
                   label="Deteksi klik kanan"
                   helper="Catat jika peserta klik kanan di halaman ujian"
@@ -1196,8 +1186,8 @@ export default function NewExamPage() {
                 />
                 <ToggleRow
                   id={`${uid}-ss`}
-                  label="Deteksi screenshot / tangkapan layar"
-                  helper="Catat dan kunci sementara jika peserta mencoba mengambil tangkapan layar (PrintScreen)"
+                  label="Deteksi percobaan shortcut screenshot"
+                  helper="Catat dan kunci jika browser menerima shortcut screenshot tertentu"
                   checked={form.detectScreenshot}
                   onChange={v => set("detectScreenshot", v)}
                 />

@@ -88,7 +88,6 @@ function ExamDetailPage() {
           violationPolicy: {
             maxViolations: beExam.violationPolicy?.max_violations || 3,
             action: beExam.violationPolicy?.action === "lock" ? "auto-lock" : "warning",
-            detectCopyPaste: beExam.violationPolicy?.detect_copy_paste ?? true,
             detectRightClick: beExam.violationPolicy?.detect_right_click ?? false,
             detectDevTools: beExam.violationPolicy?.detect_devtools ?? false,
             detectTabSwitch: beExam.violationPolicy?.detect_tab_switch ?? true,
@@ -627,7 +626,6 @@ function ExamDetailPage() {
                     <span style={{ background: "#FEF3C7", color: "#92400E", padding: "3px 10px", borderRadius: "100px", fontSize: "12px", fontWeight: 500 }}>
                       {exam.violationPolicy.action === "auto-lock" ? "Auto-lock" : exam.violationPolicy.action === "warning" ? "Beri Peringatan" : "Review Manual"}
                     </span>
-                    {exam.violationPolicy.detectCopyPaste && <span style={{ background: "#FEF9C3", color: "#78350F", padding: "3px 10px", borderRadius: "100px", fontSize: "12px" }}>Copy-Paste ✓</span>}
                     {exam.violationPolicy.detectRightClick && <span style={{ background: "#FEF9C3", color: "#78350F", padding: "3px 10px", borderRadius: "100px", fontSize: "12px" }}>Klik Kanan ✓</span>}
                     {exam.violationPolicy.detectDevTools && <span style={{ background: "#FEF9C3", color: "#78350F", padding: "3px 10px", borderRadius: "100px", fontSize: "12px" }}>DevTools ✓</span>}
                     {exam.violationPolicy.detectTabSwitch && <span style={{ background: "#FEF9C3", color: "#78350F", padding: "3px 10px", borderRadius: "100px", fontSize: "12px" }}>Pindah Tab ✓</span>}

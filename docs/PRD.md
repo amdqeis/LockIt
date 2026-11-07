@@ -194,7 +194,8 @@ stateDiagram-v2
 | FR-05.2 | Fullscreen denied detection | Deteksi saat peserta menolak request fullscreen saat awal ujian. Catat sebagai event `fullscreen_denied` |
 | FR-05.3 | Window blur detection | Deteksi saat window kehilangan fokus via `visibilitychange` dan `blur` event. Catat timestamp + duration |
 | FR-05.4 | Tab switch counter | Hitung jumlah kali peserta switch tab/window. Threshold pelanggaran ditentukan guru via violation_policy |
-| FR-05.5 | Copy/paste detection | (Opsional, diatur guru) Deteksi attempt copy dan paste via `oncopy`/`onpaste`. Catat timestamp |
+| FR-05.5 | Blokir copy/paste | Browser mencegah copy/paste pada halaman ujian. Percobaan tidak dicatat sebagai pelanggaran; event legacy diabaikan server-side |
+| FR-05.5a | Screenshot shortcut | Catat percobaan shortcut yang didukung browser (`PrintScreen`, `Win+Shift+S`, `Cmd+Shift+3/4/5`) bila kebijakan aktif. Tidak menyimpulkan screenshot dari blur, perpindahan aplikasi, visibility, atau clipboard; browser tidak menjamin deteksi screenshot HP |
 | FR-05.6 | Right-click/devtools detection | (Opsional) Deteksi right-click (`oncontextmenu`) dan shortcut devtools (Ctrl+Shift+I, F12). Best-effort, mudah di-bypass |
 | FR-05.7 | Geolocation detection | (Opsional, diatur guru) Request lokasi peserta saat mulai ujian. Jika ditolak, dicatat sebagai `location_denied`. Jika diizinkan, dicatat sebagai `location_granted` dengan koordinat |
 | FR-05.8 | Event logging | Setiap event proctoring disimpan ke database dengan: `student_id`, `exam_id`, `event_type`, `timestamp`, `metadata` (detail tambahan) |
@@ -582,6 +583,10 @@ Field `settings` di tabel EXAMS menyimpan konfigurasi tampilan dan perilaku ujia
 | POST | `/api/exam-session/submit` | Submit final. Server set student.status = submitted | Session cookie |
 | POST | `/api/exam-session/heartbeat` | Heartbeat peserta (fallback jika WebSocket tidak tersedia) | Session cookie |
 | GET | `/api/exam-session/reconnect` | Cek session cookie → resume sesi jika valid | Session cookie |
+| POST | `/api/student-history` | Inisialisasi identitas browser dan kaitkan sesi siswa valid | Session cookie (opsional) |
+| GET | `/api/student-history` | Riwayat browser privat, 20 entri per halaman dengan cursor | Cookie browser httpOnly |
+| POST | `/api/student-history/:studentId/resume` | Verifikasi kepemilikan dan kelayakan, lalu terbitkan sesi ujian | Cookie browser httpOnly |
+| GET | `/api/student-history/:studentId/review` | Review jawaban milik browser sesuai izin guru | Cookie browser httpOnly |
 
 ### Proctoring
 

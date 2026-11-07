@@ -5,6 +5,7 @@ import { generateStudentSessionToken, verifyStudentSessionToken, hashStudentToke
 import { successResponse, errorResponse, safeErrorMessage } from "@/lib/response";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 import { createRequestLogger } from "@/lib/logger";
+import { associateStudentWithBrowser } from "@/lib/browser-identity";
 
 const joinSchema = z.object({
   accessCode: z.string().min(4, "Kode akses tidak valid").max(10).trim(),
@@ -277,6 +278,7 @@ export async function POST(req: NextRequest) {
         serverTime: new Date().toISOString(),
       },
     });
+    await associateStudentWithBrowser(req, student.id, response);
 
     // Bug fix: gunakan freshToken (JWT asli), BUKAN student.sessionTokenHash.
     // Hash hanya disimpan di DB untuk verifikasi; browser butuh JWT asli untuk autentikasi.

@@ -15,7 +15,7 @@ const createExamSchema = z.object({
     .object({
       max_violations: z.number().int().min(1).default(3),
       action: z.enum(["warning", "lock", "review", "auto_end"]).default("lock"),
-      detect_copy_paste: z.boolean().default(true),
+      detect_copy_paste: z.boolean().optional(),
       detect_right_click: z.boolean().default(true),
       detect_devtools: z.boolean().default(true),
       detect_tab_switch: z.boolean().default(true),
@@ -27,7 +27,7 @@ const createExamSchema = z.object({
     .default({
       max_violations: 3,
       action: "lock",
-      detect_copy_paste: true,
+      detect_copy_paste: false,
       detect_right_click: true,
       detect_devtools: true,
       detect_tab_switch: true,
@@ -125,7 +125,7 @@ export async function POST(req: NextRequest) {
           durationMinutes,
           accessCode,
           status: "draft",
-          violationPolicy: violationPolicy as any,
+          violationPolicy: { ...violationPolicy, detect_copy_paste: false } as any,
           settings: settings as any,
         },
       });

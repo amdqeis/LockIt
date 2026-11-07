@@ -56,3 +56,18 @@ npx prisma migrate dev
 ```bash
 docker-compose up --build
 ```
+
+## Frontend redesign
+
+`frontend-new` menggunakan workflow dan backend yang sama dengan `frontend`, dengan penyesuaian tampilan Scholastic Sky. Jalankan backend sesuai konfigurasi proyek, lalu jalankan:
+
+```bash
+npm install
+npm run dev:frontend-new
+```
+
+Untuk menjalankan backend dan `frontend-new` sekaligus, gunakan `./start.sh` dari root proyek.
+
+Buka `http://localhost:3002`. Login dan data ujian menggunakan akun serta database backend yang dikonfigurasi; tindakan di frontend ini memengaruhi data yang sama dengan frontend lama. Permintaan `/api` diteruskan ke backend melalui konfigurasi Next.js yang sama dengan frontend lama.
+
+Socket.IO juga diteruskan melalui origin frontend, sehingga browser tidak perlu mengakses port backend secara langsung. Secara default proxy menuju `http://127.0.0.1:3001`; atur `INTERNAL_BACKEND_URL` pada lingkungan frontend jika backend berada di alamat lain. Mulai ulang frontend setelah mengubah alamat tersebut. Pengaturan database dan kredensial tetap mengikuti petunjuk proyek di atas.

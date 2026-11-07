@@ -101,13 +101,16 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     }
 
     const updateData: any = {};
+    const normalizedViolationPolicy = parsed.data.violationPolicy
+      ? { ...parsed.data.violationPolicy, detect_copy_paste: false }
+      : undefined;
 
     if (exam.status === "active") {
       // When exam is active, only violation policy and settings can be modified
-      if (parsed.data.violationPolicy) {
+      if (normalizedViolationPolicy) {
         updateData.violationPolicy = {
           ...(typeof exam.violationPolicy === "object" && exam.violationPolicy !== null ? exam.violationPolicy : {}),
-          ...parsed.data.violationPolicy,
+          ...normalizedViolationPolicy,
         };
       }
       if (parsed.data.settings) {
@@ -121,7 +124,13 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       if (parsed.data.title !== undefined) updateData.title = parsed.data.title;
       if (parsed.data.description !== undefined) updateData.description = parsed.data.description;
       if (parsed.data.durationMinutes !== undefined) updateData.durationMinutes = parsed.data.durationMinutes;
-      if (parsed.data.violationPolicy !== undefined) updateData.violationPolicy = parsed.data.violationPolicy as any;
+      if (normalizedViolationPolicy !== undefined) {
+        updateData.violationPolicy = {
+          ...(typeof exam.violationPolicy === "object" && exam.violationPolicy !== null ? exam.violationPolicy : {}),
+          ...normalizedViolationPolicy,
+          detect_copy_paste: false,
+        } as any;
+      }
       if (parsed.data.settings !== undefined) {
         updateData.settings = {
           ...(typeof exam.settings === "object" && exam.settings !== null ? exam.settings : {}),

@@ -121,7 +121,6 @@ interface FormState {
   passingScore: string;
   maxViolations: number;
   actionAtLimit: "warn" | "lock" | "auto_end";
-  detectCopyPaste: boolean;
   detectRightClick: boolean;
   detectDevTools: boolean;
   detectTabSwitch: boolean;
@@ -311,7 +310,6 @@ function EditExamPage() {
     passingScore: "",
     maxViolations: 3,
     actionAtLimit: "lock",
-    detectCopyPaste: true,
     detectRightClick: true,
     detectDevTools: true,
     detectTabSwitch: true,
@@ -349,7 +347,6 @@ function EditExamPage() {
           allowAnswerReview: beExam.settings?.allow_answer_review === true,
           maxViolations: beExam.violationPolicy?.max_violations ?? prev.maxViolations,
           actionAtLimit: beExam.violationPolicy?.action === "lock" ? "lock" : "warn",
-          detectCopyPaste: beExam.violationPolicy?.detect_copy_paste ?? prev.detectCopyPaste,
           detectRightClick: beExam.violationPolicy?.detect_right_click ?? prev.detectRightClick,
           detectDevTools: beExam.violationPolicy?.detect_devtools ?? prev.detectDevTools,
           detectTabSwitch: beExam.violationPolicy?.detect_tab_switch ?? prev.detectTabSwitch,
@@ -463,7 +460,7 @@ function EditExamPage() {
     auto_end: `Pada pelanggaran ke-${form.maxViolations}, ujian peserta diakhiri dan jawaban yang sudah ada langsung dinilai.`,
   };
 
-  const allDetectionsOff = !form.detectCopyPaste && !form.detectRightClick && !form.detectDevTools && !form.detectTabSwitch && !form.detectFullscreenExit && !form.detectScreenshot && !form.detectIpChange;
+  const allDetectionsOff = !form.detectRightClick && !form.detectDevTools && !form.detectTabSwitch && !form.detectFullscreenExit && !form.detectScreenshot && !form.detectIpChange;
 
   // ── Validation ──────────────────────────────────────────────────────────────
   const validate = () => {
@@ -508,7 +505,6 @@ function EditExamPage() {
         violationPolicy: {
           max_violations: form.maxViolations || 3,
           action: form.actionAtLimit === "lock" ? "lock" : "warning",
-          detect_copy_paste: form.detectCopyPaste,
           detect_right_click: form.detectRightClick,
           detect_devtools: form.detectDevTools,
           detect_tab_switch: form.detectTabSwitch,
@@ -1234,12 +1230,11 @@ function EditExamPage() {
                 Aktivitas yang dicatat
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                <ToggleRow id={`${uid}-cp`} label="Deteksi copy-paste" helper="Catat jika peserta mencoba menyalin teks" checked={form.detectCopyPaste} onChange={v => set("detectCopyPaste", v)} />
                 <ToggleRow id={`${uid}-rc`} label="Deteksi klik kanan" helper="Catat jika peserta klik kanan di halaman ujian" checked={form.detectRightClick} onChange={v => set("detectRightClick", v)} />
                 <ToggleRow id={`${uid}-dt`} label="Deteksi DevTools" helper="Catat jika peserta membuka developer tools" checked={form.detectDevTools} onChange={v => set("detectDevTools", v)} />
                 <ToggleRow id={`${uid}-tab`} label="Deteksi pindah tab atau keluar aplikasi" helper="Catat jika peserta meninggalkan halaman ujian" checked={form.detectTabSwitch} onChange={v => set("detectTabSwitch", v)} />
                 <ToggleRow id={`${uid}-fs`} label="Deteksi keluar layar penuh" helper="Catat jika peserta keluar dari mode layar penuh" checked={form.detectFullscreenExit} onChange={v => set("detectFullscreenExit", v)} />
-                <ToggleRow id={`${uid}-ss`} label="Deteksi screenshot / tangkapan layar" helper="Catat dan kunci sementara jika peserta mencoba mengambil tangkapan layar (PrintScreen)" checked={form.detectScreenshot} onChange={v => set("detectScreenshot", v)} />
+                <ToggleRow id={`${uid}-ss`} label="Deteksi percobaan shortcut screenshot" helper="Catat dan kunci jika browser menerima shortcut screenshot tertentu" checked={form.detectScreenshot} onChange={v => set("detectScreenshot", v)} />
                 <ToggleRow id={`${uid}-ip`} label="Deteksi perubahan IP address" helper="Catat jika peserta berganti jaringan atau alamat IP saat ujian berlangsung" checked={form.detectIpChange} onChange={v => set("detectIpChange", v)} />
               </div>
 

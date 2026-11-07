@@ -52,7 +52,6 @@ export const mockExams = [
     violationPolicy: {
       maxViolations: 3,
       action: "auto-lock",
-      detectCopyPaste: true,
       detectRightClick: true,
       detectDevTools: false,
     },
@@ -73,7 +72,6 @@ export const mockExams = [
     violationPolicy: {
       maxViolations: 3,
       action: "auto-lock",
-      detectCopyPaste: true,
       detectRightClick: true,
       detectDevTools: true,
     },
@@ -94,7 +92,6 @@ export const mockExams = [
     violationPolicy: {
       maxViolations: 5,
       action: "warning",
-      detectCopyPaste: false,
       detectRightClick: false,
       detectDevTools: false,
     },
@@ -114,7 +111,6 @@ export const mockExams = [
     violationPolicy: {
       maxViolations: 3,
       action: "review",
-      detectCopyPaste: true,
       detectRightClick: false,
       detectDevTools: true,
     },
@@ -134,7 +130,6 @@ export const mockExams = [
     violationPolicy: {
       maxViolations: 3,
       action: "auto-lock",
-      detectCopyPaste: true,
       detectRightClick: true,
       detectDevTools: true,
     },

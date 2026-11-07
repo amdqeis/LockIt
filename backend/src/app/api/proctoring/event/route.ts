@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { successResponse, errorResponse, safeErrorMessage } from "@/lib/response";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { AppError } from "@/lib/errors";
+import { isScreenshotDetectionEnabled, shouldIgnoreLegacyProctoringEvent } from "@/lib/proctoring-events";
 
 const eventTypeEnum = z.enum([
   "fullscreen_exit",
@@ -59,6 +60,14 @@ export async function POST(req: NextRequest) {
     }
 
     const { eventType, timestamp, durationMs, metadata } = parsed.data;
+    if (shouldIgnoreLegacyProctoringEvent(eventType, metadata)) {
+      return successResponse({
+        eventId: null,
+        ignored: true,
+        violationCount: student.violationCount,
+        isLocked: student.isLocked,
+      });
+    }
 
     // 1. Save proctoring event
     const event = await prisma.proctoringEvent.create({
@@ -81,7 +90,7 @@ export async function POST(req: NextRequest) {
       switch (eventType) {
         case "copy_attempt":
         case "paste_attempt":
-          return policy.detect_copy_paste !== false;
+          return false;
         case "right_click":
           return policy.detect_right_click !== false;
         case "devtools":
@@ -93,7 +102,7 @@ export async function POST(req: NextRequest) {
         case "fullscreen_denied":
           return policy.detect_fullscreen_exit !== false;
         case "screenshot":
-          return policy.detect_screenshot !== false;
+          return isScreenshotDetectionEnabled(policy);
         case "ip_change":
           return policy.detect_ip_change !== false;
         case "reconnect":
@@ -116,7 +125,7 @@ export async function POST(req: NextRequest) {
         });
 
     // Evaluasi lock: lock jika limit tercapai atau deteksi screenshot
-    const isScreenshotLock = eventType === "screenshot" && policy.detect_screenshot !== false;
+    const isScreenshotLock = eventType === "screenshot" && isScreenshotDetectionEnabled(policy);
     const shouldLock =
       (isScreenshotLock || (updatedStudent.violationCount >= maxViolations && policyAction === "lock")) &&
       !updatedStudent.isLocked;
@@ -131,7 +140,7 @@ export async function POST(req: NextRequest) {
 
     // 3. Emit real-time violation event to Teacher Dashboard via Socket.IO
     const io = (globalThis as any).io;
-    if (io) {
+    if (io && (eventType !== "screenshot" || isScreenshotLock)) {
       try {
         io.of("/teacher-dashboard").to(`exam:${exam.id}`).emit("student_violation", {
           studentId: student.id,
@@ -148,7 +157,7 @@ export async function POST(req: NextRequest) {
           },
         });
 
-        if (eventType === "screenshot") {
+        if (isScreenshotLock) {
           io.of("/teacher-dashboard").to(`exam:${exam.id}`).emit("screenshot_detected", {
             studentId: student.id,
             name: student.name,
@@ -166,6 +175,7 @@ export async function POST(req: NextRequest) {
       eventId: event.id,
       violationCount: updatedStudent.violationCount,
       isLocked: updatedStudent.isLocked,
+      screenshotEnforced: isScreenshotLock,
     });
   } catch (err: any) {
     if (err instanceof AppError) {

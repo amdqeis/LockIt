@@ -41,7 +41,6 @@ const T = {
   statusFinished: "#5B6778",
   statusArchived: "#A8B2C0",
   flagTabSwitch: "#EF6F6C",
-  flagCopyPaste: "#F5A24B",
   flagDevtools: "#D470DD",
   flagReconnect: "#F2DC3D",
   radiusCard: "8px",
@@ -661,24 +660,6 @@ function DashboardContent() {
                     }}
                   />
                   <span style={{ fontWeight: 600 }}>{activeSession.flags.tab_switch}</span>
-                </span>
-
-                {/* 2. Copy Paste */}
-                <span
-                  title={`Copy/Paste: ${activeSession.flags.copy_paste}`}
-                  style={{ display: "inline-flex", alignItems: "center", gap: "5px", cursor: "help" }}
-                  aria-label={`Copy/Paste: ${activeSession.flags.copy_paste}`}
-                >
-                  <span
-                    style={{
-                      width: "8px",
-                      height: "8px",
-                      borderRadius: "50%",
-                      backgroundColor: T.flagCopyPaste,
-                      display: "inline-block",
-                    }}
-                  />
-                  <span style={{ fontWeight: 600 }}>{activeSession.flags.copy_paste}</span>
                 </span>
 
                 {/* 3. DevTools */}
