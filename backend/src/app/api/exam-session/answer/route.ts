@@ -49,6 +49,9 @@ export async function POST(req: NextRequest) {
     if (student.isLocked) {
       return errorResponse("STUDENT_LOCKED", "Sesi Anda sedang terkunci karena pelanggaran. Hubungi pengawas.", 403);
     }
+    if (!["active", "disconnected"].includes(student.status)) {
+      return errorResponse("EXAM_NOT_STARTED", "Peserta belum memulai ujian atau tidak lagi diizinkan mengerjakan.", 403);
+    }
 
     const body = await req.json().catch(() => null);
     if (!body) {

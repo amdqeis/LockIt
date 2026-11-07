@@ -35,6 +35,10 @@ export async function POST(
     if (!student || student.examId !== id) {
       return errorResponse("NOT_FOUND", "Data peserta tidak ditemukan di ujian ini", 404);
     }
+    if (!["draft", "active"].includes(exam.status)) return errorResponse("INVALID_STATE", "Ujian tidak dapat dimulai dalam status saat ini", 400);
+    if (student.status !== "accepted") return errorResponse("INVALID_STATE", "Terima peserta sebelum memulai ujian", 409);
+    if (student.isLocked) return errorResponse("STUDENT_LOCKED", "Buka kunci peserta sebelum memulai ujian", 409);
+    if (exam.endTime && exam.endTime <= new Date()) return errorResponse("EXAM_TIME_EXPIRED", "Waktu ujian telah berakhir", 400);
 
     const now = new Date();
     const io = (globalThis as any).io;

@@ -18,7 +18,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const summaries = await autoGradeExam(id);
 
     // Build CSV content
-    const header = ["Nama", "NISN", "Nilai", "Jumlah Pelanggaran", "Status", "Waktu Selesai"];
+    const header = ["Nama", "NISN", "Nilai", "Jumlah Pelanggaran", "Status", "Waktu Selesai", "Penilaian Manual Tertunda"];
     const rows = summaries.map((s) => [
       `"${s.name.replace(/"/g, '""')}"`,
       `"${s.nisn}"`,
@@ -26,6 +26,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       s.violationCount,
       s.status,
       s.submittedAt ? `"${s.submittedAt.toISOString()}"` : '"Belum Submit"',
+      s.pendingManualCount,
     ]);
 
     const csvContent = [header.join(","), ...rows.map((r) => r.join(","))].join("\r\n");

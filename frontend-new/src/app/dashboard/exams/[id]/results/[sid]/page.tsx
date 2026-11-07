@@ -5,17 +5,24 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { apiClient } from "@/lib/apiClient";
 import DashboardShell from "@/app/components/DashboardShell";
+import LatexRenderer from "@/app/components/LatexRenderer";
+import StructuredQuestionContent from "@/app/components/StructuredQuestionContent";
+import PrivateMediaImage from "@/app/components/PrivateMediaImage";
+import type { JSONContent } from "@tiptap/core";
 
 interface QuestionDetail {
   id: string;
   number: number;
   text: string;
+  content?: JSONContent | null;
+  imageUrl?: string | null;
+  imageAlt?: string | null;
   points: number;
   correctAnswer: string;
   selectedAnswer: string | null;
   isCorrect: boolean | null;
   type?: string;
-  options: { id: string; text: string }[];
+  options: { id: string; text: string; content?: JSONContent | null; imageUrl?: string | null; imageAlt?: string | null }[];
 }
 
 function ResultDetailPage() {
@@ -32,9 +39,15 @@ function ResultDetailPage() {
     total: 0,
     violations: 0,
     submittedAt: "-",
+    pendingManualCount: 0,
+    status: "",
   });
 
   const [questions, setQuestions] = useState<QuestionDetail[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [gradingId, setGradingId] = useState<string | null>(null);
+  const [gradingError, setGradingError] = useState("");
 
   useEffect(() => {
     let isMounted = true;
@@ -53,6 +66,8 @@ function ResultDetailPage() {
               correct: summary.correctCount ?? 0,
               total: summary.totalQuestions ?? 0,
               violations: summary.violationCount ?? 0,
+              pendingManualCount: summary.pendingManualCount ?? 0,
+              status: summary.status ?? "",
               submittedAt: summary.submittedAt
                 ? new Date(summary.submittedAt).toLocaleTimeString("id-ID", {
                     hour: "2-digit",
@@ -64,20 +79,23 @@ function ResultDetailPage() {
 
           if (Array.isArray(answers) && answers.length > 0) {
             const mappedQuestions: QuestionDetail[] = answers.map((a: any, idx: number) => {
-              let parsedOptions: { id: string; text: string }[] = [];
+              let parsedOptions: QuestionDetail["options"] = [];
               if (Array.isArray(a.options)) {
                 parsedOptions = a.options.map((opt: any, optIdx: number) => {
                   if (typeof opt === "string") {
                     return { id: String.fromCharCode(97 + optIdx), text: opt };
                   }
-                  return { id: (opt.id || opt.key || opt.label || "").toLowerCase(), text: opt.text || "" };
+                  return { id: (opt.id || opt.key || opt.label || "").toLowerCase(), text: opt.text || "", content: opt.content, imageUrl: opt.imageUrl, imageAlt: opt.imageAlt };
                 });
               }
 
               return {
                 id: a.questionId || String(idx),
-                number: a.orderIndex !== undefined ? a.orderIndex + 1 : idx + 1,
+                number: idx + 1,
                 text: a.questionText || "",
+                content: a.content,
+                imageUrl: a.imageUrl,
+                imageAlt: a.imageAlt,
                 points: a.points || 1,
                 correctAnswer: a.type === "short_answer" ? (a.correctAnswer || "") : (a.correctAnswer || "").toLowerCase(),
                 selectedAnswer: a.type === "short_answer" ? (a.selectedOption || null) : (a.selectedOption ? a.selectedOption.toLowerCase() : null),
@@ -88,9 +106,11 @@ function ResultDetailPage() {
             });
             setQuestions(mappedQuestions);
           }
-        }
+        } else setLoadError(res.error?.message || "Hasil peserta tidak dapat dimuat.");
       } catch (err) {
-        console.error("Failed to load real student result detail, using fallback", err);
+        if (isMounted) setLoadError(err instanceof Error ? err.message : "Hasil peserta tidak dapat dimuat.");
+      } finally {
+        if (isMounted) setLoading(false);
       }
     };
 
@@ -99,6 +119,20 @@ function ResultDetailPage() {
       isMounted = false;
     };
   }, [examId, sid]);
+
+  const gradeAnswer = async (questionId: string, isCorrect: boolean | null) => {
+    setGradingId(questionId); setGradingError("");
+    try {
+      const response = await apiClient.patch<{ summary: { finalScore: number; correctCount: number; pendingManualCount: number } }>(`/api/exams/${examId}/results/${sid}`, { questionId, isCorrect });
+      if (!response.success || !response.data) throw new Error(response.error?.message || "Penilaian belum dapat disimpan.");
+      setQuestions(previous => previous.map(question => question.id === questionId ? { ...question, isCorrect } : question));
+      const summary = response.data.summary;
+      setResult(previous => ({ ...previous, score: Math.round(summary.finalScore), correct: summary.correctCount, pendingManualCount: summary.pendingManualCount }));
+    } catch (error) { setGradingError(error instanceof Error ? error.message : "Penilaian belum dapat disimpan."); }
+    finally { setGradingId(null); }
+  };
+
+  if (loading || loadError) return <DashboardShell><div style={{ padding: "32px" }} role={loadError ? "alert" : "status"}>{loadError || "Memuat hasil peserta…"}{loadError && <> <Link href={`/dashboard/exams/${examId}/results`}>Kembali ke hasil ujian</Link></>}</div></DashboardShell>;
 
   return (
     <DashboardShell>
@@ -173,7 +207,7 @@ function ResultDetailPage() {
                   fontWeight: 600,
                 }}
               >
-                ✅ {result.correct} benar
+                {result.correct} benar
               </span>
               <span
                 style={{
@@ -185,7 +219,7 @@ function ResultDetailPage() {
                   fontWeight: 600,
                 }}
               >
-                ❌ {Math.max(0, result.total - result.correct)} salah
+                {result.total} soal
               </span>
               {result.violations > 0 && (
                 <span
@@ -198,7 +232,7 @@ function ResultDetailPage() {
                     fontWeight: 600,
                   }}
                 >
-                  ⚠ {result.violations} pelanggaran
+                  {result.violations} pelanggaran
                 </span>
               )}
             </div>
@@ -209,17 +243,19 @@ function ResultDetailPage() {
                 fontSize: "52px",
                 fontWeight: 800,
                 lineHeight: 1,
-                color: result.score >= 70 ? "#42654F" : "#DC2626",
+                color: result.pendingManualCount > 0 ? "#79531E" : result.score >= 70 ? "#42654F" : "#914848",
               }}
             >
               {result.score}
               <span style={{ fontSize: "26px", color: "#D1D5DB" }}>/100</span>
             </div>
             <div style={{ fontSize: "13px", color: "#9CA3AF", marginTop: "4px" }}>Submit: {result.submittedAt}</div>
+            {result.pendingManualCount > 0 && <div style={{ fontSize: 13, color: "#79531E" }}>Nilai sementara · {result.pendingManualCount} jawaban menunggu penilaian</div>}
           </div>
         </div>
 
         {/* Question List */}
+        {gradingError && <p role="alert" style={{ color: "#914848" }}>{gradingError}</p>}
         <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
           {questions.map((q) => {
             const isCorrect = q.isCorrect;
@@ -272,7 +308,7 @@ function ResultDetailPage() {
                           fontWeight: 600,
                         }}
                       >
-                        {notAnswered ? "— Tidak Dijawab" : "Jawaban Singkat (Dinilai Manual)"}
+                        {notAnswered ? "Tidak dijawab" : isCorrect === null ? "Belum dinilai" : isCorrect ? "Benar" : "Salah"}
                       </span>
                     ) : notAnswered ? (
                       <span
@@ -318,9 +354,10 @@ function ResultDetailPage() {
                 </div>
 
                 <div style={{ padding: "16px 20px" }}>
-                  <p style={{ fontSize: "15px", color: "#111827", marginBottom: "16px", lineHeight: 1.7 }}>
-                    {q.text}
-                  </p>
+                  <div style={{ fontSize: "15px", color: "#111827", marginBottom: "16px", lineHeight: 1.7 }}>
+                    {q.content ? <StructuredQuestionContent content={q.content} /> : <LatexRenderer text={q.text} />}
+                    {q.imageUrl && <PrivateMediaImage src={q.imageUrl} alt={q.imageAlt || "Gambar soal"} style={{ display: "block", maxWidth: "100%", maxHeight: 300 }} />}
+                  </div>
 
                   {/* Options or Short Answer Content */}
                   {q.type === "short_answer" ? (
@@ -343,9 +380,7 @@ function ResultDetailPage() {
                       >
                         {notAnswered ? "(Siswa tidak mengisi jawaban untuk soal ini)" : q.selectedAnswer}
                       </div>
-                      <div style={{ fontSize: "12px", color: "#64748B", marginTop: "2px" }}>
-                        ℹ️ Tipe soal jawaban singkat tidak dinilai secara otomatis. Poin dapat dinilai manual oleh pengawas.
-                      </div>
+                      {!notAnswered && result.status === "submitted" && <fieldset className="grade-controls" disabled={gradingId !== null}><legend>Penilaian jawaban</legend><button type="button" aria-pressed={isCorrect === true} onClick={() => void gradeAnswer(q.id, true)}>Benar · {q.points} poin</button><button type="button" aria-pressed={isCorrect === false} onClick={() => void gradeAnswer(q.id, false)}>Salah · 0 poin</button>{isCorrect !== null && <button type="button" onClick={() => void gradeAnswer(q.id, null)}>Batalkan penilaian</button>}{gradingId === q.id && <span role="status">Menyimpan…</span>}</fieldset>}
                     </div>
                   ) : (
                   <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
@@ -425,7 +460,7 @@ function ResultDetailPage() {
                           >
                             {opt.id.toUpperCase()}
                           </span>
-                          <span style={{ flex: 1, color: "#374151" }}>{opt.text}</span>
+                          <span style={{ flex: 1, color: "#374151" }}>{opt.content ? <StructuredQuestionContent content={opt.content} /> : <LatexRenderer text={opt.text} />}{opt.imageUrl && <PrivateMediaImage src={opt.imageUrl} alt={opt.imageAlt || `Gambar pilihan ${opt.id.toUpperCase()}`} style={{ display: "block", maxWidth: "100%", maxHeight: 180 }} />}</span>
                           {suffix}
                         </div>
                       );

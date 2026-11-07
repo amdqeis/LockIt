@@ -55,7 +55,11 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
               examId: id,
               orderIndex: norm.orderIndex,
               questionText: norm.questionText,
+              content: norm.content === undefined ? undefined : norm.content as any,
               imageUrl: norm.imageUrl,
+              imageAlt: norm.imageAlt,
+              hint: norm.hint,
+              hintContent: norm.hintContent === undefined ? undefined : norm.hintContent as any,
               type: norm.type || "single_choice",
               options: norm.options as any,
               correctAnswer: norm.correctAnswer,
@@ -97,9 +101,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         },
       });
 
-      // Update semua siswa yang ada di lobby (status: "waiting" atau "accepted") menjadi "active"
+      // Mulai hanya peserta yang sudah diterima pengawas.
       await prisma.student.updateMany({
-        where: { examId: id, status: { in: ["waiting", "accepted"] } },
+        where: { examId: id, status: "accepted", isLocked: false },
         data: { status: "active" },
       });
 

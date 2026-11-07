@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { fetchExamReview, ExamReviewData, ReviewQuestion } from "@/lib/examSession";
 import LatexRenderer from "@/app/components/LatexRenderer";
+import StructuredQuestionContent from "@/app/components/StructuredQuestionContent";
 
 export default function ExamReviewPage() {
   const [data, setData] = useState<ExamReviewData | null>(null);
@@ -197,7 +198,7 @@ export default function ExamReviewPage() {
                 textAlign: "right",
               }}>
                 <div style={{ fontSize: "10px", fontWeight: 700, color: "#0369A1", textTransform: "uppercase" }}>
-                  Skor Anda
+                  {summary.pendingManualCount ? "Skor sementara" : "Skor Anda"}
                 </div>
                 <div style={{ fontSize: "20px", fontWeight: 800, color: "#0284C7", lineHeight: 1.1 }}>
                   {summary.score} <span style={{ fontSize: "12px", fontWeight: 600 }}>/ 100</span>
@@ -345,7 +346,7 @@ export default function ExamReviewPage() {
                           padding: "3px 10px",
                           borderRadius: "99px",
                         }}>
-                          {hasAnswer ? "Dinilai Manual" : "— Tidak Dijawab"}
+                          {!hasAnswer ? "Tidak dijawab" : isCorrect === null ? "Menunggu penilaian" : isCorrect ? "Benar" : "Salah"}
                         </span>
                       ) : !hasAnswer ? (
                         <span style={{
@@ -400,7 +401,7 @@ export default function ExamReviewPage() {
                 <div style={{ padding: "18px 20px" }}>
                   {/* Question Text */}
                   <div style={{ fontSize: "15px", color: "#0F172A", lineHeight: 1.7, marginBottom: "16px" }}>
-                    <LatexRenderer text={q.questionText} block />
+                    {q.content?.type === "doc" ? <StructuredQuestionContent content={q.content} /> : <LatexRenderer text={q.questionText} block />}
                   </div>
 
                   {/* Question Image */}
@@ -408,7 +409,7 @@ export default function ExamReviewPage() {
                     <div style={{ marginBottom: "16px" }}>
                       <img
                         src={q.imageUrl}
-                        alt="Lampiran Soal"
+                        alt={q.imageAlt || "Lampiran soal"}
                         loading="lazy"
                         decoding="async"
                         style={{ maxWidth: "100%", maxHeight: "260px", objectFit: "contain", borderRadius: "8px", border: "1px solid #E2E8F0" }}
@@ -526,7 +527,8 @@ export default function ExamReviewPage() {
                               {optLabel}
                             </span>
                             <div style={{ flex: 1, color: "#1E293B" }}>
-                              <LatexRenderer text={optText} />
+                              {opt.content?.type === "doc" ? <StructuredQuestionContent content={opt.content} /> : <LatexRenderer text={optText} />}
+                              {opt.imageUrl && <img src={opt.imageUrl} alt={opt.imageAlt || `Gambar pilihan ${optLabel}`} style={{ display: "block", maxWidth: "100%", maxHeight: 180, objectFit: "contain" }} />}
                             </div>
                             {tagLabel}
                           </div>

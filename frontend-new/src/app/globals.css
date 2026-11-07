@@ -1913,12 +1913,58 @@ a[aria-label="EduQuas Beranda"]::before, a[aria-label="EduQuas Dashboard"]::befo
 .login-academic h2 { font-size: clamp(27px, 3vw, 38px); line-height: 1.2; letter-spacing: -.025em; margin-bottom: 14px; }
 .login-academic p { color: #f1f5f5; font-size: 16px; line-height: 1.6; }
 .login-form-column { flex: 0 1 400px; }
+.bank-summary-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.batch-page { max-width: 1500px; }
+.batch-layout { display: grid; grid-template-columns: minmax(200px, 260px) minmax(0, 1fr); align-items: start; gap: 18px; margin-top: 26px; }
+.batch-layout.with-preview { grid-template-columns: minmax(170px, 220px) minmax(0, 1fr) minmax(240px, 320px); }
+.batch-list-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.batch-list nav { display: grid; gap: 6px; margin-top: 16px; max-height: 60vh; overflow-y: auto; }
+.batch-page .batch-question { display: grid; gap: 4px; width: 100%; text-align: left; font-size: 13px; font-weight: 400; border-color: transparent; }
+.batch-question strong { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.batch-question span { color: #5f6b75; font-size: 12px; }
+.batch-page .batch-question.is-current { border-color: #7fa9c9; background: #dce8f0; }
+.batch-fields { display: grid; gap: 24px; border: 0; padding: 0; margin: 24px 0 0; min-width: 0; }
+.batch-label { display: grid; gap: 8px; font-size: 14px; font-weight: 600; margin-top: 16px; }
+.batch-label textarea { width: 100%; padding: 12px; border: 1px solid #9eacb5; border-radius: 6px; font: inherit; resize: vertical; }
+.batch-options { display: grid; gap: 12px; }
+.batch-option { display: grid; gap: 8px; padding: 14px; border: 1px solid #d7dee3; border-radius: 6px; }
+.batch-option label { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; }
+.batch-option label input { width: auto; min-height: 0; accent-color: #4f6b80; }
+.batch-options, .batch-option, .equation-editor { min-width: 0; }
+.batch-option label:has(input[type="file"]) { display: grid; }
+.batch-option label input[type="file"] { width: 100%; min-width: 0; max-width: 100%; }
+.batch-option > button { justify-self: start; font-size: 13px; }
+.batch-preview-body { display: grid; gap: 12px; margin-top: 20px; overflow-wrap: anywhere; }
+.batch-preview-option { display: flex; align-items: flex-start; gap: 10px; padding: 12px; border: 1px solid #d7dee3; border-radius: 6px; }
+.equation-editor { border: 1px solid #9eacb5; background: #fffefa; border-radius: 6px; overflow: visible; font-weight: 400; }
+.equation-editor-toolbar { padding: 8px; border-bottom: 1px solid #d7dee3; background: #f3f7fa; }
+.batch-page .equation-editor-toolbar button { font-size: 13px; min-height: 36px; }
+.equation-editor-toolbar span { color: #5f6b75; font-size: 12px; margin-left: 8px; }
+.equation-prose { min-height: 90px; padding: 12px; line-height: 1.6; outline-offset: -3px; }
+.equation-prose p { color: #25313b; }
+.equation-node { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 5px; padding: 5px; margin: 3px; border: 1px solid #7fa9c9; border-radius: 5px; background: #f3f7fa; }
+.equation-node math-field { display: inline-block; min-width: 90px; padding: 5px; font-size: 18px; background: #fffefa; }
+.equation-caption { font-size: 11px; font-weight: 600; color: #355568; }
+.equation-tools { display: flex; flex-wrap: wrap; gap: 3px; }
+.batch-page .equation-tools button { min-height: 30px; padding: 3px 6px; font-size: 11px; }
+.equation-advanced { display: flex; align-items: center; gap: 6px; width: 100%; font-size: 12px; }
+.batch-page > header, .batch-list-head { flex-wrap: wrap; }
+@media (max-width: 1100px) {
+  .batch-layout, .batch-layout.with-preview { grid-template-columns: minmax(0, 1fr); }
+  .batch-list nav { max-height: 180px; }
+}
+.card { background: var(--bg-card); border: 1px solid var(--border); box-shadow: none; }
+.form-input::placeholder, .form-textarea::placeholder { color: #5f6b75; opacity: 1; }
+.btn:focus-visible, .modal-close:focus-visible, .dashboard-menu-toggle:focus-visible { outline: 3px solid #4f6b80; outline-offset: 2px; }
 .dashboard-menu-toggle, .dashboard-menu-backdrop { display: none; }
 @media (max-width: 900px) {
+  .bank-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .login-layout { gap: 32px; padding: 24px 32px 56px !important; }
   .login-academic { min-height: 440px; }
 }
 @media (max-width: 700px) {
+  .batch-layout { grid-template-columns: minmax(0, 1fr); }
+  .batch-list nav { max-height: 180px; }
   .login-layout { flex-direction: column !important; padding: 12px 20px 48px !important; align-items: center; }
   .login-academic { align-self: stretch; flex: none; min-height: 200px; padding: 24px; }
   .login-academic h2 { font-size: 25px; }
@@ -1934,3 +1980,14 @@ a[aria-label="EduQuas Beranda"]::before, a[aria-label="EduQuas Dashboard"]::befo
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: .01ms !important; }
 }
 
+.grade-controls { border: 0; padding: 0; margin: 8px 0 0; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.grade-controls legend { font-size: 13px; font-weight: 600; margin-bottom: 8px; color: #25313b; }
+.grade-controls button { border: 1px solid #9eacb5; border-radius: 6px; background: #fffefa; color: #25313b; padding: 9px 12px; min-height: 42px; cursor: pointer; }
+.grade-controls button[aria-pressed="true"] { background: #dce8f0; border-color: #4f6b80; color: #25313b; }
+.grade-controls button:focus-visible { outline: 3px solid #4f6b80; outline-offset: 2px; }
+.grade-controls:disabled button { opacity: .6; cursor: wait; }
+@media (max-width: 500px) {
+  .monitor-page-header { height: auto !important; flex-wrap: wrap; padding: 10px 16px !important; }
+  .monitor-page-actions { flex-basis: 100%; margin-left: 0 !important; flex-wrap: wrap; }
+  .monitor-page-toolbar { position: static !important; }
+}

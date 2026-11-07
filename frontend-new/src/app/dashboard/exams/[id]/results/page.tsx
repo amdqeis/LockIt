@@ -17,6 +17,7 @@ interface ResultRow {
   name: string;
   nisn: string;
   score: number;
+  pendingManualCount: number;
   correct: number;
   total: number;
   violations: number;
@@ -95,6 +96,7 @@ function ResultsPage() {
             name: item.name,
             nisn: item.nisn || "-",
             score: Math.round(item.finalScore ?? item.score ?? 0),
+            pendingManualCount: item.pendingManualCount ?? 0,
             correct: item.correctCount ?? item.correct ?? 0,
             total: item.totalQuestions ?? item.total ?? 0,
             violations: item.violationCount ?? item.violations ?? 0,
@@ -244,6 +246,7 @@ function ResultsPage() {
       </header>
 
       <div style={{ padding: "24px 32px" }}>
+        {resultsList.some(result => result.pendingManualCount > 0) && <p role="status" style={{ color: "#79531E" }}>Statistik mencakup nilai sementara. Periksa jawaban singkat yang belum dinilai.</p>}
         {/* Stats */}
         {loading ? (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "14px", marginBottom: "24px" }}>
@@ -512,11 +515,12 @@ function ResultsPage() {
                       style={{
                         fontWeight: 800,
                         fontSize: "16px",
-                        color: r.score < passingScore ? "#DC2626" : "#42654F",
+                        color: r.pendingManualCount ? "#79531E" : r.score < passingScore ? "#914848" : "#42654F",
                       }}
                     >
                       {r.score}
                     </span>
+                    {r.pendingManualCount > 0 && <div style={{ color: "#79531E", fontSize: 12 }}>Sementara · {r.pendingManualCount} belum dinilai</div>}
                   </td>
                   <td style={{ padding: "12px 16px", fontSize: "13px", color: "#374151" }}>
                     {r.correct}/{r.total}

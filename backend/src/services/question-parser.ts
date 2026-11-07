@@ -7,12 +7,18 @@ export interface ParsedOption {
   text: string;
   imageUrl?: string | null;
   isCorrect?: boolean;
+  imageAlt?: string | null;
+  content?: unknown;
 }
 
 export interface ParsedQuestion {
   orderIndex: number;
   questionText: string;
   imageUrl?: string | null;
+  imageAlt?: string | null;
+  content?: unknown;
+  hint?: string | null;
+  hintContent?: unknown;
   type?: string;
   options: ParsedOption[];
   correctAnswer: string;
@@ -218,6 +224,8 @@ export function normalizeQuestionForDb(q: any, idx: number): ParsedQuestion {
       label,
       text: optText.toString(),
       imageUrl: optImage,
+      imageAlt: typeof opt === "object" ? (opt.imageAlt || null) : null,
+      content: typeof opt === "object" ? opt.content : undefined,
     };
   });
 
@@ -272,6 +280,10 @@ export function normalizeQuestionForDb(q: any, idx: number): ParsedQuestion {
     orderIndex,
     questionText: text,
     imageUrl,
+    imageAlt: q.imageAlt || null,
+    content: q.content,
+    hint: q.hint || null,
+    hintContent: q.hintContent,
     type,
     options,
     correctAnswer: finalCorrectAnswer,

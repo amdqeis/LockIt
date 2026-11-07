@@ -93,7 +93,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     });
 
     // 3. Table Headers
-    const headers = ["No", "Nama Siswa", "NISN", "Nilai Akhir", "Pelanggaran", "Status", "Waktu Selesai"];
+    const headers = ["No", "Nama Siswa", "NISN", "Nilai", "Pelanggaran", "Status", "Waktu Selesai", "Penilaian Manual Tertunda"];
     const headerRow = sheet.getRow(7);
     headerRow.values = headers;
     headerRow.height = 24;
@@ -124,6 +124,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         s.violationCount,
         s.status === "submitted" ? "Selesai" : "Belum Submit",
         s.submittedAt ? s.submittedAt.toLocaleString("id-ID") : "-",
+        s.pendingManualCount,
       ]);
 
       row.height = 20;
@@ -170,6 +171,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       { width: 14 }, // Pelanggaran
       { width: 16 }, // Status
       { width: 22 }, // Waktu Selesai
+      { width: 26 }, // Penilaian manual
     ];
 
     // 5. Worksheet Rincian Jawaban Per Butir Soal

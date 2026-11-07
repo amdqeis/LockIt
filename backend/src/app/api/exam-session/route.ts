@@ -47,6 +47,7 @@ export async function GET(req: NextRequest) {
     if (student.status === "kicked") {
       return errorResponse("STUDENT_KICKED", `Kamu telah dikeluarkan dari ujian ini: ${student.kickReason || "oleh pengawas"}`, 403);
     }
+    if (student.isLocked) return errorResponse("STUDENT_LOCKED", "Sesi Anda terkunci. Hubungi pengawas.", 403);
 
     // Parallel fetch: questions and student answers concurrently
     const [fetchedQuestions, answers] = await Promise.all([
@@ -58,7 +59,11 @@ export async function GET(req: NextRequest) {
           orderIndex: true,
           type: true,
           questionText: true,
+          content: true,
           imageUrl: true,
+          imageAlt: true,
+          hint: true,
+          hintContent: true,
           options: true,
           points: true,
           // correctAnswer is intentionally excluded for security

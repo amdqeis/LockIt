@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import LatexRenderer from "@/app/components/LatexRenderer";
+import StructuredQuestionContent from "@/app/components/StructuredQuestionContent";
 import { hasNaturalOrLatexMath } from "@/lib/naturalMath";
 import DOMPurify from "dompurify";
 import {
@@ -22,7 +23,7 @@ type AutoSaveStatus = "saved" | "saving" | "failed";
 type Question = any;
 
 function normalizeQuestion(q: any, idx: number) {
-  let opts: { id: string; text: string }[] = [];
+  let opts: { id: string; text: string; imageUrl?: string | null; imageAlt?: string | null; content?: any }[] = [];
   if (Array.isArray(q.options)) {
     opts = q.options.map((opt: any, optIdx: number) => {
       const letter = String.fromCharCode(97 + optIdx); // 'a', 'b', 'c', ...
@@ -32,6 +33,9 @@ function normalizeQuestion(q: any, idx: number) {
       return {
         id: (opt.id || opt.key || opt.label || letter).toLowerCase(),
         text: opt.text || opt.label || opt.content || opt.value || "",
+        imageUrl: opt.imageUrl || null,
+        imageAlt: opt.imageAlt || null,
+        content: opt.content,
       };
     });
   } else if (q.options && typeof q.options === "object") {
@@ -46,10 +50,13 @@ function normalizeQuestion(q: any, idx: number) {
     number: q.orderIndex || idx + 1,
     type: (q.type || "single_choice") as "single_choice" | "multi_select" | "latex" | "short_answer",
     text: q.questionText || q.text || "",
+    content: q.content,
     image: q.imageUrl || q.image || null,
+    imageAlt: q.imageAlt || null,
     options: opts,
     points: q.points || 10,
-    hint: null,
+    hint: q.hint || null,
+    hintContent: q.hintContent,
   };
 }
 
@@ -1939,7 +1946,9 @@ export default function ExamSessionPage() {
 
               {/* Question text */}
               <div style={{ fontSize: isMobile ? "14px" : "16px", color: "#1C303D", lineHeight: 1.9, marginBottom: "20px", fontWeight: 400 }}>
-                {isLatexQ
+                {question.content?.type === "doc"
+                  ? <StructuredQuestionContent content={question.content} />
+                  : isLatexQ
                   ? <LatexRenderer text={question.text} block />
                   : question.text
                 }
@@ -1972,7 +1981,7 @@ export default function ExamSessionPage() {
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#7C3AED" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: "1px" }}><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
                   <div style={{ fontSize: "12px", color: "#5B21B6" }}>
                     <strong>Petunjuk: </strong>
-                    <LatexRenderer text={question.hint} />
+                    {question.hintContent ? <StructuredQuestionContent content={question.hintContent} /> : <LatexRenderer text={question.hint} />}
                   </div>
                 </div>
               )}
@@ -2066,10 +2075,13 @@ export default function ExamSessionPage() {
                           </span>
                         )}
                         <span style={{ flex: 1, color: isSelected ? "white" : "#2F4655" }}>
-                          {(optHasLatex || question.type === "latex")
+                          {opt.content?.type === "doc"
+                            ? <StructuredQuestionContent content={opt.content} />
+                            : (optHasLatex || question.type === "latex")
                             ? <LatexRenderer key={`${question.id}-${opt.id}`} text={opt.text} style={{ color: "inherit" }} />
                             : opt.text
                           }
+                          {opt.imageUrl && <img src={opt.imageUrl} alt={opt.imageAlt || `Gambar pilihan ${String.fromCharCode(65 + optIdx)}`} style={{ display: "block", maxWidth: "100%", maxHeight: 220, objectFit: "contain", marginTop: 8 }} />}
                         </span>
                         {isMulti && isSelected && (
                           <span style={{ fontSize: "11px", background: "rgba(255,255,255,0.2)", padding: "2px 8px", borderRadius: "999px", flexShrink: 0 }}>✓</span>

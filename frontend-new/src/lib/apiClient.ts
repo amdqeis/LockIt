@@ -64,6 +64,17 @@ export interface ApiRequestOptions extends RequestInit {
   skipAuth?: boolean;
 }
 
+export async function fetchPrivateMedia(url: string): Promise<Response> {
+  const send = (token: string | null) => fetch(url, { credentials: "include", headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  const token = getAccessToken();
+  let response = await send(token);
+  if ((response.status === 401 || response.status === 404) && token) {
+    const refreshed = await refreshAccessToken();
+    if (refreshed) response = await send(refreshed);
+  }
+  return response;
+}
+
 export interface ApiResponse<T = any> {
   success: boolean;
   data?: T;

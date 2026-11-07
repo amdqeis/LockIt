@@ -92,6 +92,8 @@ function formatQuestionXml(
     if (opt.imageUrl) {
       optionsXml += `${i3}  <imageUrl>${wrapCData(opt.imageUrl)}</imageUrl>\n`;
     }
+    if (opt.imageAlt) optionsXml += `${i3}  <imageAlt>${wrapCData(opt.imageAlt)}</imageAlt>\n`;
+    if (opt.content) optionsXml += `${i3}  <contentJson>${wrapCData(JSON.stringify(opt.content))}</contentJson>\n`;
     optionsXml += `${i3}</option>\n`;
   });
   optionsXml += `${i2}</options>`;
@@ -103,7 +105,7 @@ function formatQuestionXml(
       q.correctAnswers.map(ans => `${i3}<answer>${escapeXmlAttr(ans.toLowerCase())}</answer>`).join("\n") +
       `\n${i2}</correctAnswers>`;
   } else {
-    correctAnsXml = `${i2}<correctAnswer>${escapeXmlAttr((q.correctAnswer || "a").toLowerCase())}</correctAnswer>`;
+    correctAnsXml = `${i2}<correctAnswer>${escapeXmlAttr((q.correctAnswer || "").toLowerCase())}</correctAnswer>`;
   }
 
   return [
@@ -112,9 +114,11 @@ function formatQuestionXml(
     `${i2}<orderIndex>${q.orderIndex || 1}</orderIndex>`,
     `${i2}<points>${q.points || 10}</points>`,
     `${i2}<questionText>${wrapCData(q.questionText || "")}</questionText>`,
+    q.content ? `${i2}<contentJson>${wrapCData(JSON.stringify(q.content))}</contentJson>` : null,
     q.imageUrl ? `${i2}<imageUrl>${wrapCData(q.imageUrl)}</imageUrl>` : null,
     q.imageAlt ? `${i2}<imageAlt>${wrapCData(q.imageAlt)}</imageAlt>` : null,
     q.hint ? `${i2}<hint>${wrapCData(q.hint)}</hint>` : null,
+    q.hintContent ? `${i2}<hintContentJson>${wrapCData(JSON.stringify(q.hintContent))}</hintContentJson>` : null,
     correctAnsXml,
     optionsXml,
     `${indent}</question>`,

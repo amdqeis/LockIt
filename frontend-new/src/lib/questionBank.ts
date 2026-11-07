@@ -23,6 +23,8 @@ export interface BankQuestionOption {
   label: string; // 'A', 'B', 'C', ...
   text: string;
   imageUrl?: string | null;
+  imageAlt?: string | null;
+  content?: import("@tiptap/core").JSONContent | null;
 }
 
 export interface BankQuestion {
@@ -31,6 +33,7 @@ export interface BankQuestion {
   orderIndex: number;
   type: QuestionType;
   questionText: string;
+  content?: import("@tiptap/core").JSONContent | null;
   imageUrl?: string | null;
   imageAlt?: string | null;
   options: BankQuestionOption[];
@@ -38,6 +41,7 @@ export interface BankQuestion {
   correctAnswers?: string[] | null; // Untuk multi_select (['a', 'c'])
   points: number;
   hint?: string | null;
+  hintContent?: import("@tiptap/core").JSONContent | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -578,17 +582,14 @@ const STORAGE_BANKS_KEY = "eduquas_question_banks_v2";
 const STORAGE_QUESTIONS_KEY = "eduquas_bank_questions_v2";
 
 export function getStoredQuestionBanks(): QuestionBank[] {
-  if (typeof window === "undefined") return defaultQuestionBanks;
+  if (typeof window === "undefined") return [];
   try {
     const raw = localStorage.getItem(STORAGE_BANKS_KEY) || localStorage.getItem("lockit_question_banks_v2");
-    if (!raw) {
-      localStorage.setItem(STORAGE_BANKS_KEY, JSON.stringify(defaultQuestionBanks));
-      return defaultQuestionBanks;
-    }
+    if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) && parsed.length > 0 ? parsed : defaultQuestionBanks;
+    return Array.isArray(parsed) ? parsed : [];
   } catch {
-    return defaultQuestionBanks;
+    return [];
   }
 }
 
@@ -607,21 +608,20 @@ export function saveStoredQuestionBanks(banks: QuestionBank[]): boolean {
 
 export function getStoredQuestions(bankId?: string): BankQuestion[] {
   if (typeof window === "undefined") {
-    return bankId ? defaultBankQuestions.filter(q => q.bankId === bankId) : defaultBankQuestions;
+    return [];
   }
   try {
     const raw = localStorage.getItem(STORAGE_QUESTIONS_KEY) || localStorage.getItem("lockit_bank_questions_v2");
     let allQuestions: BankQuestion[];
     if (!raw) {
-      allQuestions = defaultBankQuestions;
-      localStorage.setItem(STORAGE_QUESTIONS_KEY, JSON.stringify(defaultBankQuestions));
+      allQuestions = [];
     } else {
       const parsed = JSON.parse(raw);
-      allQuestions = Array.isArray(parsed) ? parsed : defaultBankQuestions;
+      allQuestions = Array.isArray(parsed) ? parsed : [];
     }
     return bankId ? allQuestions.filter(q => q.bankId === bankId) : allQuestions;
   } catch {
-    return bankId ? defaultBankQuestions.filter(q => q.bankId === bankId) : defaultBankQuestions;
+    return [];
   }
 }
 

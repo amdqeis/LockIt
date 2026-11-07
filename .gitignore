@@ -28,6 +28,7 @@ next-env.d.ts
 # Abaikan file upload ujian pengguna, simpan folder strukturnya
 public/uploads/*
 !public/uploads/.gitkeep
+/backend/storage/question-bank/
 
 # ─── LOGS & DEBUGGING ───────────────────────────────────────
 logs/

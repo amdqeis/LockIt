@@ -83,9 +83,12 @@ function DashboardContent() {
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [openMenuExamId, setOpenMenuExamId] = useState<string | null>(null);
   const [confirmModal, setConfirmModal] = useState<{ type: "delete" | "archive" | "restore" | "duplicate"; exam: ExamItem } | null>(null);
-  const [liveCountdown, setLiveCountdown] = useState<number>(1440);
+  const [liveCountdown, setLiveCountdown] = useState<number | null>(null);
   const [examsList, setExamsList] = useState<ExamItem[]>([]);
   const [loadingExams, setLoadingExams] = useState(true);
+  const [examLoadError, setExamLoadError] = useState("");
+  const [questionDrafts, setQuestionDrafts] = useState<Array<{ id: string; bankId: string; updatedAt: string; bank: { title: string } }>>([]);
+  const [draftLoadFailed, setDraftLoadFailed] = useState(false);
   const [activeSession, setActiveSession] = useState<{
     examId: string;
     title: string;
@@ -116,7 +119,7 @@ function DashboardContent() {
   // Live timer tick for live strip
   useEffect(() => {
     const interval = setInterval(() => {
-      setLiveCountdown((prev) => (prev > 0 ? prev - 1 : 0));
+      setLiveCountdown((prev) => (prev === null ? null : prev > 0 ? prev - 1 : 0));
     }, 1000);
     return () => clearInterval(interval);
   }, []);
@@ -157,8 +160,10 @@ function DashboardContent() {
   }, []);
 
   const fetchExams = useCallback(async () => {
+    setExamLoadError("");
     try {
       const res = await apiFetch<any[]>("/api/exams");
+      if (!res.success || !Array.isArray(res.data)) throw new Error(res.error?.message || "Daftar ujian tidak dapat dimuat.");
       if (res.success && Array.isArray(res.data) && res.data.length > 0) {
         const mapped: ExamItem[] = res.data.map((e: any) => ({
           id: e.id,
@@ -178,8 +183,8 @@ function DashboardContent() {
       } else {
         setExamsList([]);
       }
-    } catch {
-      setExamsList([]);
+    } catch (err) {
+      setExamLoadError(err instanceof Error ? err.message : "Daftar ujian tidak dapat dimuat.");
     } finally {
       setLoadingExams(false);
     }
@@ -189,11 +194,22 @@ function DashboardContent() {
     fetchExams();
   }, [fetchExams]);
 
+  useEffect(() => {
+    let active = true;
+    apiFetch<typeof questionDrafts>("/api/question-banks/drafts").then(result => {
+      if (!active) return;
+      if (result.success && result.data) setQuestionDrafts(result.data);
+      else setDraftLoadFailed(true);
+    });
+    return () => { active = false; };
+  }, []);
+
   // Live session stats polling if active exam exists
   useEffect(() => {
     const activeExam = examsList.find((e) => e.status === "active");
     if (!activeExam) {
       setActiveSession(null);
+      setLiveCountdown(null);
       return;
     }
 
@@ -211,7 +227,7 @@ function DashboardContent() {
               Math.floor((new Date(res.data.exam.endTime).getTime() - new Date(res.data.serverTime).getTime()) / 1000)
             );
             setLiveCountdown(diff);
-          }
+          } else setLiveCountdown(null);
 
           setActiveSession({
             examId: activeExam.id,
@@ -272,6 +288,8 @@ function DashboardContent() {
       el.scrollIntoView({ behavior: "smooth", block: "start" });
     }
   };
+
+  if (examLoadError) return <DashboardShell><div style={{ padding: "32px", color: T.textPrimary }}><h1>Dashboard guru</h1><p role="alert">{examLoadError}</p><button type="button" onClick={() => void fetchExams()}>Coba lagi</button> <Link href="/dashboard/question-bank">Buka bank soal</Link></div></DashboardShell>;
 
   return (
     <DashboardShell>
@@ -521,7 +539,7 @@ function DashboardContent() {
                 letterSpacing: "-0.01em",
               }}
             >
-              Selamat datang, Ahmad
+              {teacher?.fullName ? `Selamat datang, ${teacher.fullName}` : "Dashboard guru"}
             </h1>
             <div
               style={{
@@ -546,6 +564,14 @@ function DashboardContent() {
             </Link>
           </div>
         </header>
+
+        <section aria-label="Pekerjaan bank soal" style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radiusCard, padding: "16px 20px", marginBottom: 20 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <h2 style={{ fontSize: 16, margin: 0, color: T.textPrimary }}>Bank soal</h2>
+            <Link href="/dashboard/question-bank">Buka bank soal</Link>
+          </div>
+          {draftLoadFailed ? <p style={{ color: T.textSecondary, marginBottom: 0 }}>Draf belum dapat dimuat. Buka bank soal untuk mencoba lagi.</p> : questionDrafts.length > 0 && <div style={{ display: "grid", gap: 8, marginTop: 12 }}>{questionDrafts.map(draft => <Link key={draft.id} href={`/dashboard/question-bank/${draft.bankId}/drafts/${draft.id}`}>Lanjutkan draf · {draft.bank.title}</Link>)}</div>}
+        </section>
 
         {/* ============================================================
             2. LIVE STRIP (Spec §4.3: only rendered when active exam exists)
@@ -701,7 +727,7 @@ function DashboardContent() {
               </div>
 
               {/* Time remaining countdown */}
-              <div
+              {liveCountdown !== null && <div
                 style={{
                   fontSize: "13px",
                   color: T.textSecondary,
@@ -712,7 +738,7 @@ function DashboardContent() {
                 <span style={{ color: T.textPrimary, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
                   {formatCountdown(liveCountdown)}
                 </span>
-              </div>
+              </div>}
 
               {/* Primary action: 'Buka monitoring' */}
               <div>
@@ -919,9 +945,9 @@ function DashboardContent() {
               Semua ujian
             </h2>
 
-            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", maxWidth: "100%" }}>
               {/* Search input: height 44px, line search icon, placeholder 'Cari ujian' */}
-              <div style={{ position: "relative", width: "280px" }}>
+              <div style={{ position: "relative", width: "280px", maxWidth: "100%" }}>
                 <span
                   style={{
                     position: "absolute",

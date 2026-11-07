@@ -13,17 +13,20 @@ export async function POST(req: NextRequest) {
     if (student.status === "submitted") {
       return errorResponse("ALREADY_SUBMITTED", "Ujian telah selesai dikumpulkan sebelumnya", 400);
     }
+    if (!["active", "disconnected"].includes(student.status)) return errorResponse("EXAM_NOT_STARTED", "Peserta belum memulai ujian atau tidak lagi diizinkan mengumpulkan.", 403);
+    if (student.isLocked) return errorResponse("STUDENT_LOCKED", "Sesi Anda terkunci. Hubungi pengawas.", 403);
 
     const now = new Date();
 
     // 1. Update Student status to submitted
-    const updatedStudent = await prisma.student.update({
-      where: { id: student.id },
+    const updatedStudent = await prisma.student.updateMany({
+      where: { id: student.id, status: { in: ["active", "disconnected"] }, isLocked: false },
       data: {
         status: "submitted",
         submittedAt: now,
       },
     });
+    if (!updatedStudent.count) return errorResponse("INVALID_STATE", "Sesi berubah atau ujian sudah dikumpulkan", 409);
 
     // 2. Trigger auto-grading for this student immediately (RISK-14)
     let scoreSummary = null;
@@ -51,6 +54,7 @@ export async function POST(req: NextRequest) {
           nisn: student.nisn,
           submittedAt: now.toISOString(),
           score: scoreSummary?.finalScore ?? null,
+          pendingManualCount: scoreSummary?.pendingManualCount ?? null,
           answeredCount,
         });
       } catch (socketErr) {
@@ -64,11 +68,11 @@ export async function POST(req: NextRequest) {
 
     const response = successResponse({
       message: "Ujian berhasil dikumpulkan. Terima kasih telah mengerjakan!",
-      studentId: updatedStudent.id,
+      studentId: student.id,
       submittedAt: now.toISOString(),
       showScoreToStudent,
       allowAnswerReview,
-      ...(showScoreToStudent && scoreSummary ? { score: scoreSummary.finalScore } : {}),
+      ...(showScoreToStudent && scoreSummary ? { score: scoreSummary.finalScore, pendingManualCount: scoreSummary.pendingManualCount } : {}),
     });
 
     // Pertahankan cookie studentSession agar request berikutnya (dan halaman /exam/done)

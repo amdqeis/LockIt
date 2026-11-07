@@ -46,11 +46,11 @@ export async function executeExamEnd(examId: string, ioInstance?: any) {
     data: { status: "ended" },
   });
 
-  // 2. Auto-submit all non-submitted students
+  // 2. Kumpulkan hanya peserta yang sudah memulai; jangan hidupkan kembali peserta yang dikeluarkan.
   const unsubmittedStudents = await prisma.student.findMany({
     where: {
       examId,
-      status: { not: "submitted" },
+      status: { in: ["active", "disconnected"] },
     },
   });
 
@@ -58,7 +58,7 @@ export async function executeExamEnd(examId: string, ioInstance?: any) {
     await prisma.student.updateMany({
       where: {
         examId,
-        status: { not: "submitted" },
+        status: { in: ["active", "disconnected"] },
       },
       data: {
         status: "submitted",

@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { AppError } from "@/lib/errors";
+import { calculateScore } from "./score-calculation";
 
 type ReviewStudent = {
   id: string;
@@ -36,7 +37,9 @@ export async function buildStudentReview(student: ReviewStudent) {
         orderIndex: true,
         type: true,
         questionText: true,
+        content: true,
         imageUrl: true,
+        imageAlt: true,
         options: true,
         points: true,
         correctAnswer: showScoreToStudent,
@@ -60,7 +63,9 @@ export async function buildStudentReview(student: ReviewStudent) {
       orderIndex: question.orderIndex,
       type: question.type,
       questionText: question.questionText,
+      content: question.content,
       imageUrl: question.imageUrl,
+      imageAlt: question.imageAlt,
       options: question.options,
       points: question.points,
       studentAnswer: answer?.selectedOption ?? null,
@@ -71,24 +76,12 @@ export async function buildStudentReview(student: ReviewStudent) {
     };
   });
 
-  let summary: { score: number; earnedPoints: number; totalPoints: number; correctCount: number } | null = null;
+  let summary: { score: number; earnedPoints: number; totalPoints: number; correctCount: number; pendingManualCount: number } | null = null;
   if (showScoreToStudent) {
-    let earnedPoints = 0;
-    let totalPoints = 0;
-    let correctCount = 0;
-    for (const question of questions) {
-      if (question.type === "short_answer") continue;
-      totalPoints += question.points;
-      if (answersByQuestion.get(question.id)?.isCorrect) {
-        earnedPoints += question.points;
-        correctCount += 1;
-      }
-    }
+    const { finalScore, ...score } = calculateScore(questions, answers.map(answer => ({ ...answer, isCorrect: answer.isCorrect ?? null })));
     summary = {
-      score: totalPoints > 0 ? Math.round((earnedPoints / totalPoints) * 100) : 0,
-      earnedPoints,
-      totalPoints,
-      correctCount,
+      score: finalScore,
+      ...score,
     };
   }
 

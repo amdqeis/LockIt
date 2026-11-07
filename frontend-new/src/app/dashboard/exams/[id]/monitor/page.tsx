@@ -2159,7 +2159,7 @@ function MonitorPageContent() {
       <div style={{ height: 4, background: "linear-gradient(90deg, #C9C3F2, #A8B4F8, #7FA9C9, #A8B4F8, #C9C3F2)", flexShrink: 0 }} />
 
       {/* Page Header */}
-      <header style={{
+      <header className="monitor-page-header" style={{
         background: "white", borderBottom: "1px solid #E3E5EA",
         height: 48, display: "flex", alignItems: "center",
         padding: "0 24px", gap: 12, flexShrink: 0,
@@ -2172,7 +2172,7 @@ function MonitorPageContent() {
           <h1 style={{ fontSize: 15, fontWeight: 700, color: "#1F2430", margin: 0, lineHeight: 1.1 }}>Proctoring – Live Feed</h1>
           <div style={{ fontSize: 11, color: "#8A8F99", marginTop: 1 }}>{exam.title}</div>
         </div>
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
+        <div className="monitor-page-actions" style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
           {/* Ruang Tunggu / Lobby Button with popup trigger */}
           <button
             onClick={() => setLobbyModalOpen(true)}
@@ -2295,7 +2295,7 @@ function MonitorPageContent() {
       </div>
 
       {/* Toolbar */}
-      <div style={{
+      <div className="monitor-page-toolbar" style={{
         background: "white", borderBottom: "1px solid #E3E5EA",
         padding: "0 24px", display: "flex", alignItems: "center", gap: 12,
         minHeight: 48, flexShrink: 0, flexWrap: "wrap",

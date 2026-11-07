@@ -38,7 +38,7 @@ function DashboardShellInner({ children }: Props) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const teacherName = teacher?.fullName || "Guru / Pengawas";
-  const teacherEmail = teacher?.email || "guru@eduquas.id";
+  const teacherEmail = teacher?.email || "";
   const teacherInitials = teacher?.fullName
     ? teacher.fullName
         .split(" ")
@@ -59,8 +59,6 @@ function DashboardShellInner({ children }: Props) {
 
   // RBAC: tampilkan menu Admin hanya untuk role ADMIN
   const isAdmin = teacher?.role === "ADMIN";
-
-  const activeCount = 1;
 
   return (
     <div
@@ -368,42 +366,6 @@ function DashboardShellInner({ children }: Props) {
             </span>
             <span style={{ flex: 1, whiteSpace: "nowrap" }}>Monitoring live</span>
 
-            {/* Badge: dot + count only, right-aligned, hidden at 0 per spec §4.1 */}
-            {activeCount > 0 && (
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "5px",
-                  marginLeft: "auto",
-                  padding: "1px 6px",
-                  borderRadius: "10px",
-                  background: isMonitor ? "rgba(27,118,191,0.12)" : T.bgSubtle,
-                  flexShrink: 0,
-                }}
-                aria-label={`${activeCount} ujian aktif`}
-              >
-                <span
-                  style={{
-                    width: "6px",
-                    height: "6px",
-                    borderRadius: "50%",
-                    background: T.success,
-                    display: "inline-block",
-                  }}
-                />
-                <span
-                  style={{
-                    fontSize: "12px",
-                    fontWeight: 600,
-                    color: isMonitor ? T.primary : T.textSecondary,
-                    lineHeight: 1,
-                  }}
-                >
-                  {activeCount}
-                </span>
-              </span>
-            )}
           </Link>
 
           {/* 5. Rekap hasil */}

@@ -4,7 +4,8 @@ import { useState, useRef, useCallback, useEffect, useId } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import DashboardShell from "@/app/components/DashboardShell";
-import { defaultQuestionBanks, QuestionBank, getStoredQuestionBanks, getStoredQuestions } from "@/lib/questionBank";
+import { QuestionBank } from "@/lib/questionBank";
+import { loadSharedBanks, request, type SharedBank, type SharedQuestion } from "@/lib/sharedQuestionBank";
 import { apiFetch } from "@/lib/apiClient";
 
 // ─── Design tokens (spec §10) ─────────────────────────────────────────────────
@@ -323,28 +324,42 @@ export default function NewExamPage() {
     detectIpChange: true,
   });
 
+  const [isDirty, setIsDirty] = useState(false);
   const set = useCallback(<K extends keyof FormState>(key: K, val: FormState[K]) => {
     setForm(f => ({ ...f, [key]: val }));
     setIsDirty(true);
   }, []);
 
   // Bank soal state
-  const [allBanks, setAllBanks] = useState<QuestionBank[]>(defaultQuestionBanks);
+  const [allBanks, setAllBanks] = useState<QuestionBank[]>([]);
   const [selectedBank, setSelectedBank] = useState<QuestionBank | null>(null);
+  const [bankQuestions, setBankQuestions] = useState<SharedQuestion[]>([]);
+  const [selectedQuestionIds, setSelectedQuestionIds] = useState<string[]>([]);
+  const [questionLoading, setQuestionLoading] = useState(false);
+  const [bankError, setBankError] = useState("");
   const [bankSearch, setBankSearch] = useState("");
   const [bankFilter, setBankFilter] = useState("all");
   const [bankVisible, setBankVisible] = useState(5);
-  const [bankLoading] = useState(false);
+  const [bankLoading, setBankLoading] = useState(true);
 
   useEffect(() => {
-    setAllBanks(getStoredQuestionBanks());
+    loadSharedBanks().then(setAllBanks).catch(err => setBankError(err.message)).finally(() => setBankLoading(false));
   }, []);
+  useEffect(() => {
+    if (!selectedBank) return;
+    let active = true;
+    setQuestionLoading(true); setBankError("");
+    request<SharedBank>(`/api/question-banks/${selectedBank.id}`).then(bank => {
+      if (!active) return;
+      const list = bank.questions || []; setBankQuestions(list); setSelectedQuestionIds(list.map(q => q.id!).filter(Boolean));
+    }).catch(err => { if (active) { setBankError(err.message); setBankQuestions([]); setSelectedQuestionIds([]); } }).finally(() => { if (active) setQuestionLoading(false); });
+    return () => { active = false; };
+  }, [selectedBank]);
 
   // UI state
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ type: "success" | "error"; msg: string } | null>(null);
-  const [isDirty, setIsDirty] = useState(false);
   const [showLeaveDialog, setShowLeaveDialog] = useState(false);
   const [leaveTarget, setLeaveTarget] = useState<string | null>(null);
 
@@ -434,6 +449,7 @@ export default function NewExamPage() {
 
     if (mode === "save") {
       if (!selectedBank) e.bank = "Pilih satu bank soal.";
+      else if (questionLoading || !selectedQuestionIds.length) e.bank = "Pilih minimal satu soal yang sudah dimuat.";
       if (!form.startsAt) e.startsAt = "Jadwal mulai wajib diisi.";
       if (!form.endsAt) e.endsAt = "Jadwal selesai wajib diisi.";
       if (form.startsAt && form.endsAt) {
@@ -463,7 +479,8 @@ export default function NewExamPage() {
     setErrors({});
     setSaving(true);
     try {
-      const bankQuestions = selectedBank ? getStoredQuestions(selectedBank.id) : [];
+      const chosenQuestions = bankQuestions.filter(q => q.id && selectedQuestionIds.includes(q.id));
+      if (selectedBank && (questionLoading || !chosenQuestions.length)) throw new Error("Pilih minimal satu soal yang sudah dimuat.");
 
       const res = await apiFetch<any>("/api/exams", {
         method: "POST",
@@ -493,7 +510,7 @@ export default function NewExamPage() {
             allow_answer_review: form.allowAnswerReview,
             auto_save_interval_seconds: 30,
           },
-          questions: bankQuestions,
+          questions: chosenQuestions,
         }),
       });
 
@@ -802,6 +819,7 @@ export default function NewExamPage() {
                 <div role="alert" style={{ ...errorStyle, marginBottom: "12px" }}><IconAlert />{errors.bank}</div>
               )}
 
+              {bankError && <div role="alert" style={errorStyle}>{bankError}</div>}
               {bankLoading ? (
                 <div role="status" aria-label="Memuat bank soal" style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                   {[1,2,3,4,5].map(i => <SkeletonRow key={i} />)}
@@ -922,6 +940,13 @@ export default function NewExamPage() {
                   </div>
                 </>
               )}
+              {selectedBank && <fieldset style={{ border: `1px solid ${T.border}`, borderRadius: 8, marginTop: 18, padding: 16 }}>
+                <legend style={{ fontWeight: 600 }}>Soal terpilih dari {selectedBank.title}</legend>
+                {questionLoading ? <p role="status">Memuat soal…</p> : bankQuestions.length ? <>
+                  <p style={{ fontSize: 13, color: T.textSecondary, marginBottom: 10 }}>{selectedQuestionIds.length} dari {bankQuestions.length} soal dipilih.</p>
+                  <div style={{ display: "grid", gap: 8, maxHeight: 280, overflowY: "auto" }}>{bankQuestions.map((q, index) => <label key={q.id} style={{ display: "flex", alignItems: "flex-start", gap: 10, fontSize: 14 }}><input type="checkbox" checked={!!q.id && selectedQuestionIds.includes(q.id)} onChange={event => { if (!q.id) return; setSelectedQuestionIds(previous => event.target.checked ? [...previous, q.id!] : previous.filter(id => id !== q.id)); setIsDirty(true); }} /><span>{index + 1}. {q.questionText}</span></label>)}</div>
+                </> : <p>Bank ini belum memiliki soal.</p>}
+              </fieldset>}
             </section>
 
             {/* ─────────────────────────────────────────────────────────── */}

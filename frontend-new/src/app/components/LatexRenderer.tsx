@@ -25,7 +25,7 @@ interface Props {
  * - We build a DocumentFragment entirely offline, then swap in ONE atomic operation
  * - If the component unmounts mid-flight (quick question navigation), cancelRef
  *   stops the swap — preventing blank state from a stale update
- * - KaTeX CSS is injected via CDN link tag once, lazily
+ * - KaTeX CSS is loaded from the local application bundle
  */
 export default function LatexRenderer({ text, block = false, style, className }: Props) {
   const ref = useRef<HTMLElement>(null);
@@ -41,15 +41,6 @@ export default function LatexRenderer({ text, block = false, style, className }:
   useEffect(() => {
     if (!mounted) return;
     cancelRef.current = false;
-
-    // Inject KaTeX CSS once if not already present
-    if (!document.getElementById("katex-css")) {
-      const link = document.createElement("link");
-      link.id = "katex-css";
-      link.rel = "stylesheet";
-      link.href = "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css";
-      document.head.appendChild(link);
-    }
 
     // Split text into segments: $$...$$, $...$, and plain text
     const processedText = formatNaturalMath(text);

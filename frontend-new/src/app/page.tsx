@@ -876,7 +876,7 @@ function JoinContent() {
                     <p style={{ margin: 0, color: T.textSecondary, fontSize: "11px", lineHeight: 1.5 }}>
                       {[item.exam.className, item.exam.examType].filter(Boolean).join(" · ")}{item.exam.className || item.exam.examType ? " · " : ""}
                       {formatHistoryDate(item.submittedAt || item.joinedAt)}
-                      {item.score !== null ? ` · Nilai ${item.score}` : ""}
+                      {item.score !== null ? ` · Nilai${item.pendingManualCount ? " sementara" : ""} ${item.score}` : ""}
                       {item.isLocked && item.canResume ? " · Terkunci sampai dibuka pengawas" : ""}
                     </p>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>

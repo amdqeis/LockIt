@@ -41,22 +41,25 @@ export async function POST(
     }
 
     const now = new Date();
-    const endTime = new Date(now.getTime() + exam.durationMinutes * 60 * 1000);
+    const startTime = exam.status === "active" && exam.startTime ? exam.startTime : now;
+    const endTime = exam.status === "active" && exam.endTime ? exam.endTime : new Date(now.getTime() + exam.durationMinutes * 60 * 1000);
+    if (endTime <= now) return errorResponse("EXAM_TIME_EXPIRED", "Waktu ujian telah berakhir", 400);
 
     const updatedExam = await prisma.exam.update({
       where: { id: examId },
       data: {
         status: "active",
-        startTime: now,
+        startTime,
         endTime,
       },
     });
 
-    // Update semua siswa yang ada di lobby (status: "waiting" atau "accepted") menjadi "active"
+    // Peserta menunggu harus diterima pengawas sebelum dapat dimulai.
     const updatedStudents = await prisma.student.updateMany({
       where: {
         examId,
-        status: { in: ["waiting", "accepted"] },
+        status: "accepted",
+        isLocked: false,
       },
       data: {
         status: "active",
@@ -69,7 +72,7 @@ export async function POST(
         // Emit ke namespace peserta ujian
         io.of("/student-session").to(`exam:${examId}`).emit("exam_started", {
           examId,
-          startTime: now.toISOString(),
+          startTime: startTime.toISOString(),
           endTime: endTime.toISOString(),
           durationMinutes: exam.durationMinutes,
         });
@@ -77,7 +80,7 @@ export async function POST(
         // Emit ke dashboard guru
         io.of("/teacher-dashboard").to(`exam:${examId}`).emit("exam_started", {
           examId,
-          startTime: now.toISOString(),
+          startTime: startTime.toISOString(),
           endTime: endTime.toISOString(),
           activeStudentsCount: updatedStudents.count,
         });
@@ -92,7 +95,7 @@ export async function POST(
     return successResponse({
       examId,
       status: "active",
-      startTime: now.toISOString(),
+      startTime: startTime.toISOString(),
       endTime: endTime.toISOString(),
       activatedStudentsCount: updatedStudents.count,
       message: "Ujian berhasil dimulai",

@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { motion, AnimatePresence } from "motion/react";
+import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 
 export interface MotionFadeProps {
   children: React.ReactNode;
@@ -18,12 +18,13 @@ export const MotionFade: React.FC<MotionFadeProps> = ({
   className = "",
   style,
 }) => {
+  const reducedMotion = useReducedMotion();
   return (
     <motion.div
-      initial={{ opacity: 0, y: 6 }}
+      initial={reducedMotion ? false : { opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -6 }}
-      transition={{ duration, delay, ease: "easeOut" }}
+      exit={reducedMotion ? undefined : { opacity: 0, y: -6 }}
+      transition={{ duration: reducedMotion ? 0 : duration, delay: reducedMotion ? 0 : delay, ease: "easeOut" }}
       className={className}
       style={style}
     >

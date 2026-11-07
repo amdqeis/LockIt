@@ -5,6 +5,7 @@
  */
 
 import { apiFetch } from "./apiClient";
+import type { JSONContent } from "@tiptap/core";
 
 // ─── Session Hint (localStorage) ─────────────────────────────────────────────
 // Menyimpan informasi non-sensitif sesi aktif di localStorage.
@@ -142,10 +143,14 @@ export interface ExamQuestion {
   id: string;
   orderIndex: number;
   questionText: string;
+  content?: JSONContent | null;
   imageUrl?: string | null;
+  imageAlt?: string | null;
+  hint?: string | null;
+  hintContent?: JSONContent | null;
   options: any; // string[] | Record<string, string> | QuestionOption[]
   points: number;
-  type?: "single_choice" | "multi_select" | "latex";
+  type?: "single_choice" | "multi_select" | "latex" | "short_answer";
 }
 
 export interface ExamAnswer {
@@ -298,6 +303,7 @@ export interface StudentHistoryItem {
   exam: { id: string; title: string; status: string; className: string | null; examType: string | null };
   isLocked: boolean;
   score: number | null;
+  pendingManualCount?: number;
   canResume: boolean;
   canReview: boolean;
 }
@@ -380,7 +386,9 @@ export interface ReviewQuestion {
   orderIndex: number;
   type: string;
   questionText: string;
+  content?: JSONContent | null;
   imageUrl?: string | null;
+  imageAlt?: string | null;
   options: any;
   points: number;
   studentAnswer: string | null;
@@ -402,6 +410,7 @@ export interface ExamReviewData {
   };
   showScoreToStudent: boolean;
   summary: {
+    pendingManualCount?: number;
     score: number;
     earnedPoints: number;
     totalPoints: number;

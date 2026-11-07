@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { calculateScore } from "@/services/score-calculation";
 import { authenticateStudent } from "@/lib/middleware/auth";
 import { AppError } from "@/lib/errors";
 import { errorResponse, successResponse } from "@/lib/response";
@@ -63,7 +64,7 @@ export async function GET(req: NextRequest) {
                 questions: { select: { id: true, type: true, points: true } },
               },
             },
-            answers: { select: { questionId: true, isCorrect: true } },
+            answers: { select: { questionId: true, isCorrect: true, selectedOption: true } },
           },
         },
       },
@@ -83,15 +84,11 @@ export async function GET(req: NextRequest) {
         endTime: student.exam.endTime,
       });
       let score: number | null = null;
+      let pendingManualCount = 0;
       if (student.status === "submitted" && showScoreToStudent) {
-        const answers = new Map(student.answers.map((answer) => [answer.questionId, answer.isCorrect]));
-        const gradedQuestions = student.exam.questions.filter((question) => question.type !== "short_answer");
-        const totalPoints = gradedQuestions.reduce((total, question) => total + question.points, 0);
-        const earnedPoints = gradedQuestions.reduce(
-          (total, question) => total + (answers.get(question.id) === true ? question.points : 0),
-          0
-        );
-        score = totalPoints > 0 ? Math.round((earnedPoints / totalPoints) * 1000) / 10 : 0;
+        const calculated = calculateScore(student.exam.questions, student.answers);
+        score = calculated.finalScore;
+        pendingManualCount = calculated.pendingManualCount;
       }
       const examSettings = settings;
       return {
@@ -110,6 +107,7 @@ export async function GET(req: NextRequest) {
         },
         isLocked: student.isLocked,
         score,
+        ...(showScoreToStudent ? { pendingManualCount } : {}),
         canResume,
         canReview: student.status === "submitted" && allowAnswerReview,
       };

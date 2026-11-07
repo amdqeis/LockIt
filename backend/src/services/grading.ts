@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { calculateScore } from "./score-calculation";
 
 export interface StudentScoreSummary {
   studentId: string;
@@ -9,6 +10,7 @@ export interface StudentScoreSummary {
   earnedPoints: number;
   finalScore: number; // Scaled 0 - 100
   correctCount: number;
+  pendingManualCount: number;
   totalQuestions: number;
   violationCount: number;
   submittedAt: Date | null;
@@ -41,9 +43,6 @@ export async function autoGradeStudent(studentId: string): Promise<StudentScoreS
   const questions = student.exam.questions;
   const answerMap = new Map(student.answers.map((a) => [a.questionId, a]));
 
-  let earnedPoints = 0;
-  let totalPoints = 0;
-  let correctCount = 0;
   const answerUpdates: { id: string; isCorrect: boolean }[] = [];
 
   for (const q of questions) {
@@ -52,16 +51,10 @@ export async function autoGradeStudent(studentId: string): Promise<StudentScoreS
       continue;
     }
 
-    totalPoints += q.points;
     const answer = answerMap.get(q.id);
 
     if (answer && answer.selectedOption) {
       const isCorrect = checkAnswerCorrect(answer.selectedOption, q.correctAnswer);
-      if (isCorrect) {
-        earnedPoints += q.points;
-        correctCount += 1;
-      }
-
       // Collect answer updates if not yet evaluated or changed
       if (answer.isCorrect !== isCorrect) {
         answerUpdates.push({ id: answer.id, isCorrect });
@@ -73,6 +66,9 @@ export async function autoGradeStudent(studentId: string): Promise<StudentScoreS
       }
     }
   }
+
+  const updatesById = new Map(answerUpdates.map(update => [update.id, update.isCorrect]));
+  const scoringAnswers = student.answers.map(answer => updatesById.has(answer.id) ? { ...answer, isCorrect: updatesById.get(answer.id)! } : answer);
 
   // Batch execute answer updates in parallel (eliminating N+1 query loop)
   if (answerUpdates.length > 0) {
@@ -86,17 +82,14 @@ export async function autoGradeStudent(studentId: string): Promise<StudentScoreS
     );
   }
 
-  const finalScore = totalPoints > 0 ? Math.round((earnedPoints / totalPoints) * 1000) / 10 : 0;
+  const score = calculateScore(questions, scoringAnswers);
 
   return {
     studentId: student.id,
     name: student.name,
     nisn: student.nisn,
     status: student.status,
-    totalPoints,
-    earnedPoints,
-    finalScore,
-    correctCount,
+    ...score,
     totalQuestions: questions.length,
     violationCount: student.violationCount,
     submittedAt: student.submittedAt,
@@ -115,9 +108,7 @@ export async function autoGradeExam(examId: string): Promise<StudentScoreSummary
     }),
   ]);
 
-  const questionMap = new Map(allQuestions.map((q) => [q.id, q]));
   const autoGradableQuestions = allQuestions.filter((q) => q.type !== "short_answer");
-  const totalPoints = autoGradableQuestions.reduce((sum, q) => sum + q.points, 0);
 
   // Collect answer updates to do in bulk
   const answerUpdates: { id: string; isCorrect: boolean }[] = [];
@@ -125,37 +116,32 @@ export async function autoGradeExam(examId: string): Promise<StudentScoreSummary
 
   for (const student of allStudents) {
     const answerMap = new Map(student.answers.map((a) => [a.questionId, a]));
-    let earnedPoints = 0;
-    let correctCount = 0;
+    const studentUpdates = new Map<string, boolean>();
 
     for (const q of autoGradableQuestions) {
       const answer = answerMap.get(q.id);
 
       if (answer && answer.selectedOption) {
         const isCorrect = checkAnswerCorrect(answer.selectedOption, q.correctAnswer);
-        if (isCorrect) {
-          earnedPoints += q.points;
-          correctCount += 1;
-        }
         if (answer.isCorrect !== isCorrect) {
           answerUpdates.push({ id: answer.id, isCorrect });
+          studentUpdates.set(answer.id, isCorrect);
         }
       } else if (answer && answer.isCorrect !== false) {
         answerUpdates.push({ id: answer.id, isCorrect: false });
+        studentUpdates.set(answer.id, false);
       }
     }
 
-    const finalScore = totalPoints > 0 ? Math.round((earnedPoints / totalPoints) * 1000) / 10 : 0;
+    const scoringAnswers = student.answers.map(answer => studentUpdates.has(answer.id) ? { ...answer, isCorrect: studentUpdates.get(answer.id)! } : answer);
+    const score = calculateScore(allQuestions, scoringAnswers);
 
     results.push({
       studentId: student.id,
       name: student.name,
       nisn: student.nisn,
       status: student.status,
-      totalPoints,
-      earnedPoints,
-      finalScore,
-      correctCount,
+      ...score,
       totalQuestions: allQuestions.length,
       violationCount: student.violationCount,
       submittedAt: student.submittedAt,
@@ -191,32 +177,17 @@ export async function readStudentGradingSummaries(examId: string): Promise<Stude
     }),
   ]);
 
-  const questionPointsMap = new Map(allQuestions.map((q) => [q.id, q.points]));
-  const totalPoints = allQuestions.filter((q) => q.type !== "short_answer").reduce((sum, q) => sum + q.points, 0);
   const results: StudentScoreSummary[] = [];
 
   for (const student of allStudents) {
-    let earnedPoints = 0;
-    let correctCount = 0;
-
-    for (const answer of student.answers) {
-      if (answer.isCorrect === true) {
-        earnedPoints += questionPointsMap.get(answer.questionId) ?? 0;
-        correctCount += 1;
-      }
-    }
-
-    const finalScore = totalPoints > 0 ? Math.round((earnedPoints / totalPoints) * 1000) / 10 : 0;
+    const score = calculateScore(allQuestions, student.answers);
 
     results.push({
       studentId: student.id,
       name: student.name,
       nisn: student.nisn,
       status: student.status,
-      totalPoints,
-      earnedPoints,
-      finalScore,
-      correctCount,
+      ...score,
       totalQuestions: allQuestions.length,
       violationCount: student.violationCount,
       submittedAt: student.submittedAt,

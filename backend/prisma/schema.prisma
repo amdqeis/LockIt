@@ -96,7 +96,11 @@ model Question {
   examId       String   @map("exam_id")
   orderIndex   Int      @map("order_index")
   questionText String   @map("question_text")
+  content      Json?
   imageUrl     String?  @map("image_url")
+  imageAlt     String?  @map("image_alt")
+  hint         String?
+  hintContent  Json?    @map("hint_content")
   type         String   @default("single_choice")
   options      Json
   correctAnswer String  @map("correct_answer")
@@ -108,6 +112,74 @@ model Question {
 
   @@index([examId])
   @@map("questions")
+}
+
+// Bank soal dapat digunakan bersama oleh guru dan admin. Soal ujian tetap snapshot.
+model QuestionBank {
+  id          String             @id @default(uuid())
+  title       String
+  subject     String
+  description String?
+  tags        Json               @default("[]")
+  difficulty  String             @default("mixed")
+  status      String             @default("draft")
+  revision    Int                @default(1)
+  createdBy   String             @map("created_by")
+  updatedBy   String             @map("updated_by")
+  importKey   String?            @unique @map("import_key")
+  createdAt   DateTime           @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime           @updatedAt @map("updated_at") @db.Timestamptz
+  questions   BankQuestion[]
+  drafts      QuestionBankDraft[]
+  @@index([subject, status])
+  @@map("question_banks")
+}
+
+model BankQuestion {
+  id            String       @id @default(uuid())
+  bankId        String       @map("bank_id")
+  orderIndex    Int          @map("order_index")
+  type          String
+  questionText  String       @map("question_text")
+  content       Json?
+  imageUrl      String?      @map("image_url")
+  imageAlt      String?      @map("image_alt")
+  options       Json
+  correctAnswer String?      @map("correct_answer")
+  correctAnswers Json?       @map("correct_answers")
+  points        Int          @default(10)
+  hint          String?
+  hintContent   Json?        @map("hint_content")
+  createdAt     DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime     @updatedAt @map("updated_at") @db.Timestamptz
+  bank          QuestionBank @relation(fields: [bankId], references: [id], onDelete: Cascade)
+  @@index([bankId, orderIndex])
+  @@map("bank_questions")
+}
+
+model QuestionBankDraft {
+  id          String       @id @default(uuid())
+  bankId      String       @map("bank_id")
+  createdBy   String       @map("created_by")
+  updatedBy   String       @map("updated_by")
+  revision    Int          @default(1)
+  content     Json
+  committedAt DateTime?    @map("committed_at") @db.Timestamptz
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz
+  bank        QuestionBank @relation(fields: [bankId], references: [id], onDelete: Cascade)
+  @@index([bankId, updatedAt])
+  @@map("question_bank_drafts")
+}
+
+model QuestionBankMedia {
+  id         String   @id @default(uuid())
+  filename   String   @unique
+  mimeType   String   @map("mime_type")
+  size       Int
+  uploadedBy String   @map("uploaded_by")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+  @@map("question_bank_media")
 }
 
 // ─── PESERTA ───────────────────────────────────────

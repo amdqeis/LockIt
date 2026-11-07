@@ -16,6 +16,7 @@ export async function POST(
     if (!exam || (teacher.role !== "ADMIN" && exam.teacherId !== teacher.teacherId)) {
       return errorResponse("NOT_FOUND", "Ujian tidak ditemukan", 404);
     }
+    if (!["draft", "active"].includes(exam.status) || (exam.endTime && exam.endTime <= new Date())) return errorResponse("INVALID_STATE", "Ujian tidak menerima peserta saat ini", 409);
 
     const updated = await prisma.student.updateMany({
       where: { examId: id, status: "waiting" },

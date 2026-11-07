@@ -16,6 +16,7 @@ export async function POST(
     if (!exam || (teacher.role !== "ADMIN" && exam.teacherId !== teacher.teacherId)) {
       return errorResponse("NOT_FOUND", "Ujian tidak ditemukan", 404);
     }
+    if (!["draft", "active"].includes(exam.status) || (exam.endTime && exam.endTime <= new Date())) return errorResponse("INVALID_STATE", "Ujian tidak menerima peserta saat ini", 409);
 
     const student = await prisma.student.findUnique({
       where: { id: sid },
@@ -25,13 +26,15 @@ export async function POST(
       return errorResponse("NOT_FOUND", "Data peserta tidak ditemukan di ujian ini", 404);
     }
 
-    const updated = await prisma.student.update({
-      where: { id: sid },
+    const changed = await prisma.student.updateMany({
+      where: { id: sid, examId: id, status: "waiting" },
       data: {
         status: "accepted",
         acceptedAt: new Date(),
       },
     });
+    if (!changed.count) return errorResponse("INVALID_STATE", "Hanya peserta yang menunggu dapat diterima", 409);
+    const updated = { ...student, status: "accepted" as const };
 
     const io = (globalThis as any).io;
     if (io) {

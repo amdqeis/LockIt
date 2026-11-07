@@ -3,6 +3,7 @@ import { authenticateTeacher } from "@/lib/middleware/auth";
 import { prisma } from "@/lib/prisma";
 import { successResponse, errorResponse, safeErrorMessage } from "@/lib/response";
 import { AppError } from "@/lib/errors";
+import { calculateScore } from "@/services/score-calculation";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -62,9 +63,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       }),
     ]);
 
-    const questionPointsMap = new Map(questions.map((q) => [q.id, q.points]));
-    const autoGradableQuestions = questions.filter((q) => q.type !== "short_answer");
-    const totalPoints = autoGradableQuestions.reduce((sum, q) => sum + q.points, 0);
     const totalQuestions = questions.length;
 
     const formattedStudents = students.map((s) => {
@@ -74,13 +72,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
       let score: number | null = null;
       if (s.status === "submitted") {
-        let earnedPoints = 0;
-        for (const a of s.answers) {
-          if (a.isCorrect === true) {
-            earnedPoints += questionPointsMap.get(a.questionId) ?? 0;
-          }
-        }
-        score = totalPoints > 0 ? Math.round((earnedPoints / totalPoints) * 1000) / 10 : 0;
+        score = calculateScore(questions, s.answers).finalScore;
       }
 
       return {
