@@ -130,3 +130,13 @@
 - Keputusan: Workflow `.github/workflows/deploy.yml` hanya berjalan pada event `push` ke branch `production`.
 - Alasan: Menjalankan pipeline dan deploy produksi hanya ketika perubahan masuk ke branch rilis yang dituju.
 - Ditolak: Trigger `pull_request`, push ke `integration`, atau branch lain karena berada di luar permintaan trigger khusus production.
+
+### 2026-11-09 — Deploy production paralel dengan CI
+- Keputusan: Menghapus `needs: ci` dari job `deploy` dan mengganti nama langkah deploy agar tidak mengklaim commit sudah diverifikasi CI.
+- Alasan: Push ke `production` langsung memulai deploy tanpa menunggu backend test atau job CI lainnya; CI tetap berjalan paralel.
+- Ditolak: Menonaktifkan tes backend atau seluruh job CI karena pipeline tetap perlu memberi hasil pemeriksaan kualitas.
+
+### 2026-11-09 — Hapus database disposable dari workflow deploy
+- Keputusan: Menghapus seluruh job `ci` dari workflow production, termasuk PostgreSQL `eduquas_test`, URL database lokal, kredensial dummy, dan langkah test/build terkait; deployment tetap hanya berjalan pada push `production`.
+- Alasan: Workflow deployment tidak boleh membuat atau memakai database test lokal; migrasi dijalankan oleh Docker Compose di server dengan `backend/.env` production.
+- Ditolak: Mengarahkan test ke database production karena test dapat mengubah atau menghapus data asli.

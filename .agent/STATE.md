@@ -5,4 +5,6 @@
 - Verifikasi Teknis: 12 unit test pada `backend/src/services/score-calculation.test.ts` lulus 100%, 15 unit test pustaka backend lulus 100%, `npm run type-check --prefix frontend` lulus 0 error, `npm run lint --prefix frontend` lulus 0 error/warning, dan detektor Impeccable mengonfirmasi 0 pelanggaran.
 - Next steps: Pemantauan umpan balik dari pengawas dan guru pada sesi ujian dengan ragam tipe soal campuran.
 - CI/CD: Workflow `.github/workflows/deploy.yml` kini hanya terpicu oleh push ke branch `production`; trigger pull request dan branch lain dihapus.
-- Verifikasi workflow: Perubahan trigger diperiksa melalui diff; job CI dan deploy belum dijalankan oleh GitHub Actions.
+- CI/CD: Job CI beserta PostgreSQL disposable `eduquas_test` dan kredensial dummy dihapus; workflow kini hanya deploy pada push `production`.
+- Database deploy memakai `backend/.env` yang tersedia di server production lewat `docker-compose.yml`; file kredensial server tidak dibaca atau ditampilkan.
+- Verifikasi workflow: Perubahan diperiksa melalui diff; deploy production belum dijalankan oleh GitHub Actions.
