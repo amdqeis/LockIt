@@ -3,6 +3,7 @@ import { MotionButton } from "@/components/MotionButton";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import type { JSONContent } from "@tiptap/core";
 import { useSearchParams } from "next/navigation";
+import { motion, useReducedMotion } from "framer-motion";
 import { Dialog } from "@/components/Dialog";
 import { QuestionContent } from "@/components/QuestionContent";
 import { staffApi, staffSend } from "@/lib/staff-api";
@@ -11,38 +12,1590 @@ import { ErrorText, Icon, message } from "./Dashboard";
 import type { Bank, BankOption, BankQuestion, Subject } from "./types";
 import { exportBankXml, importBankXml, readBankXml, type Backup } from "./bankXml";
 
-const blankDoc = (text = ""): JSONContent => ({ type: "doc", content: [{ type: "paragraph", content: text ? [{ type: "text", text }] : [] }] });
-const newQuestion = (): BankQuestion => ({ type: "single_choice", questionText: "", content: blankDoc(), options: ["A", "B", "C", "D"].map(id => ({ id, label: id, text: "", content: blankDoc() })), correctAnswer: null, correctAnswers: [], points: 10 });
-function editable(q: BankQuestion): BankQuestion { return { ...q, sourceQuestionId: q.id, content: q.content || blankDoc(q.questionText), options: q.options.map(o => ({ ...o, content: o.content || blankDoc(o.text) })) }; }
+const blankDoc = (text = ""): JSONContent => ({
+  type: "doc",
+  content: [{ type: "paragraph", content: text ? [{ type: "text", text }] : [] }],
+});
+
+const newQuestion = (): BankQuestion => ({
+  type: "single_choice",
+  questionText: "",
+  content: blankDoc(),
+  options: ["A", "B", "C", "D"].map((id) => ({ id, label: id, text: "", content: blankDoc() })),
+  correctAnswer: null,
+  correctAnswers: [],
+  points: 10,
+});
+
+function editable(q: BankQuestion): BankQuestion {
+  return {
+    ...q,
+    sourceQuestionId: q.id,
+    content: q.content || blankDoc(q.questionText),
+    options: q.options.map((o) => ({ ...o, content: o.content || blankDoc(o.text) })),
+  };
+}
+
+const stepNames = ["Buat Soal", "Pratinjau Siswa", "Konfirmasi Unggah"];
+
 export function Banks({ teacherId }: { teacherId: string }) {
   const searchParams = useSearchParams();
-  const [subjects, setSubjects] = useState<Subject[]>([]); const [banks, setBanks] = useState<Bank[]>([]); const [folder, setFolder] = useState<string | null>(() => searchParams.get("folder") || null); const [folderOpen, setFolderOpen] = useState(false); const [bankOpen, setBankOpen] = useState(false); const [folderName, setFolderName] = useState(""); const [bankName, setBankName] = useState(""); const [error, setError] = useState(""); const [busy, setBusy] = useState(false); const [selected, setSelected] = useState<Bank | null>(null); const [editor, setEditor] = useState(false); const [questions, setQuestions] = useState<BankQuestion[]>([]); const [draftId, setDraftId] = useState<string | null>(null); const [draftRevision, setDraftRevision] = useState(0); const [xmlFile, setXmlFile] = useState<File | null>(null); const [backup, setBackup] = useState<Backup | null>(null); const [notice, setNotice] = useState(""); const [discard, setDiscard] = useState(false); const [deleteFolder, setDeleteFolder] = useState(false); const [moveBank, setMoveBank] = useState<Bank | null>(null); const [destination, setDestination] = useState(""); const [cursors, setCursors] = useState<(string | null)[]>([null]); const [cursorIndex, setCursorIndex] = useState(0); const [nextCursor, setNextCursor] = useState<string | null>(null); const [listLoading, setListLoading] = useState(true); const listRequest = useRef(0);
-  const load = useCallback(async () => { const request = ++listRequest.current; setListLoading(true); try { const params = new URLSearchParams({ limit: "25" }); if (folder) params.set("subjectId", folder); const cursor = cursors[cursorIndex]; if (cursor) params.set("cursor", cursor); const [s,b] = await Promise.all([staffApi<Subject[]>("/api/subjects"), folder ? staffApi<{ items: Bank[]; nextCursor: string | null }>(`/api/question-banks?${params}`) : Promise.resolve({ items: [], nextCursor: null })]); if (request === listRequest.current) { setSubjects(s); setBanks(b.items); setNextCursor(b.nextCursor); setError(""); } } catch(e) { if (request === listRequest.current) setError(message(e)); } finally { if (request === listRequest.current) setListLoading(false); } }, [folder, cursors, cursorIndex]);
-  useEffect(() => { window.history.replaceState(window.history.state, "", `/dashboard/bank-soal${folder ? `?folder=${encodeURIComponent(folder)}` : ""}`); const timer = window.setTimeout(() => void load(), 0); const counter = listRequest; return () => { window.clearTimeout(timer); counter.current++; }; }, [folder, load]);
-  function switchFolder(value: string | null) { setFolder(value); setCursors([null]); setCursorIndex(0); }
+  const reduceMotion = useReducedMotion();
 
-  async function createFolder(e: FormEvent) { e.preventDefault(); setBusy(true); setError(""); try { const s = await staffSend<Subject>("/api/subjects", "POST", { name: folderName }); switchFolder(s.id); setFolderName(""); setFolderOpen(false); await load(); } catch(e) { setError(message(e)); } finally { setBusy(false); } }
-  async function removeFolder() { if (!folder || folder === "unassigned") return; setBusy(true); setError(""); try { await staffSend(`/api/subjects/${folder}`, "DELETE"); setDeleteFolder(false); switchFolder(null); setNotice("Mata pelajaran dihapus."); } catch(e) { setError(message(e)); } finally { setBusy(false); } }
-  async function move(e: FormEvent) { e.preventDefault(); if (!moveBank || !destination) return; setBusy(true); setError(""); try { await staffSend(`/api/question-banks/${moveBank.id}`, "PATCH", { revision: moveBank.revision, subjectId: destination }); setMoveBank(null); setNotice("Bank soal berhasil dipindahkan."); await load(); } catch(e) { setError(message(e)); } finally { setBusy(false); } }
-  async function createBank(e: FormEvent) { e.preventDefault(); const subject = subjects.find(s => s.id === folder); if (!subject) return; setBusy(true); setError(""); try { await staffSend("/api/question-banks", "POST", { title: bankName, subject: subject.name, subjectId: subject.id }); setBankName(""); setBankOpen(false); await load(); } catch(e) { setError(message(e)); } finally { setBusy(false); } }
-  async function openBank(id: string, edit: boolean, add = false) { setError(""); try { const detail = await staffApi<Bank>(`/api/question-banks/${id}`); setSelected(detail); setDraftId(null); setDraftRevision(0); let qs = (detail.questions || []).map(editable); if (edit) { const savedDraft = detail.drafts?.find(d => d.createdBy === teacherId); if (savedDraft) { qs = savedDraft.content.questions; setDraftId(savedDraft.id); setDraftRevision(savedDraft.revision); } try { const local = localStorage.getItem(`eduquas:bank-draft:${teacherId}:${id}`); if (local) { const saved = JSON.parse(local) as { questions: BankQuestion[]; draftId?: string; revision?: number }; qs = saved.questions; setDraftId(saved.draftId || null); setDraftRevision(saved.revision || 0); } } catch {} if (add || !qs.length) qs.push(newQuestion()); } setQuestions(qs); setEditor(edit); if (edit && add) setTimeout(() => document.getElementById("staff-last-question")?.scrollIntoView({ behavior: "smooth", block: "start" }), 180); } catch(e) { setError(message(e)); } }
-  function updateQuestions(next: BankQuestion[]) { setQuestions(next); if (selected) { try { localStorage.setItem(`eduquas:bank-draft:${teacherId}:${selected.id}`, JSON.stringify({ questions: next, draftId, revision: draftRevision })); } catch {} } }
-  function updateQuestion(index: number, patch: Partial<BankQuestion>) { updateQuestions(questions.map((q,i) => i === index ? { ...q, ...patch } : q)); }
-  async function saveDraft(commit: boolean) { if (!selected) return; setBusy(true); setError(""); try { const content = { questions, bankRevision: selected.revision }; let draft: { id: string; revision: number }; if (draftId) draft = await staffSend(`/api/question-banks/${selected.id}/drafts/${draftId}`, "PUT", { revision: draftRevision, content }); else draft = await staffSend(`/api/question-banks/${selected.id}/drafts`, "POST", content); setDraftId(draft.id); setDraftRevision(draft.revision); try { localStorage.setItem(`eduquas:bank-draft:${teacherId}:${selected.id}`, JSON.stringify({ questions, draftId: draft.id, revision: draft.revision })); } catch {} if (commit) { await staffSend(`/api/question-banks/${selected.id}/drafts/${draft.id}/commit`, "POST", { revision: draft.revision }); try { localStorage.removeItem(`eduquas:bank-draft:${teacherId}:${selected.id}`); } catch {} setSelected(null); setEditor(false); await load(); } } catch(e) { setError(message(e)); } finally { setBusy(false); } }
-  async function discardDraft() { if (!selected) return; setBusy(true); setError(""); try { if (draftId) await staffSend(`/api/question-banks/${selected.id}/drafts/${draftId}`, "DELETE", { revision: draftRevision }); try { localStorage.removeItem(`eduquas:bank-draft:${teacherId}:${selected.id}`); } catch {} setDiscard(false); const id = selected.id; setSelected(null); setEditor(false); await openBank(id, true); } catch(e) { setError(message(e)); } finally { setBusy(false); } }
-  async function upload(file: File, index: number, optionIndex?: number) { setError(""); try { const data = new FormData(); data.append("image", file); const result = await staffApi<{ url: string }>("/api/question-banks/media", { method: "POST", body: data }); const q = questions[index]; if (optionIndex === undefined) updateQuestion(index, { imageUrl: result.url }); else updateQuestion(index, { options: q.options.map((o,i) => i === optionIndex ? { ...o, imageUrl: result.url } : o) }); } catch(e) { setError(message(e)); } }
-  async function prepareXml(file: File) { setError(""); try { setBackup(await readBankXml(file)); setXmlFile(file); } catch(e) { setError(message(e)); } }
-  async function confirmImport() { const subject = subjects.find(s => s.id === folder); if (!subject || !backup || !xmlFile) return; setBusy(true); setError(""); try { const result = await importBankXml(xmlFile, subject); setBackup(null); setXmlFile(null); await load(); if (result.alreadyImported && result.draftId && !result.draftOwnedByCaller) { setNotice("XML sudah diimpor oleh guru lain dan drafnya belum disimpan ke bank."); return; } setNotice(result.alreadyImported ? "XML ini sudah pernah diimpor ke folder ini." : "XML diimpor sebagai draf. Periksa soal sebelum menyimpan ke bank."); await openBank(result.bankId, true); } catch(e) { setError(message(e)); } finally { setBusy(false); } }
-  async function exportXml(bank: Bank) { try { setError(""); const external = await exportBankXml(bank); setNotice(external ? "XML diunduh. Gambar eksternal tetap membutuhkan jaringan." : "XML bank soal berhasil diunduh."); } catch(e) { setError(message(e)); } }
+  const [subjects, setSubjects] = useState<Subject[]>([]);
+  const [banks, setBanks] = useState<Bank[]>([]);
+  const [folder, setFolder] = useState<string | null>(() => searchParams.get("folder") || null);
+  const [folderOpen, setFolderOpen] = useState(false);
+  const [bankOpen, setBankOpen] = useState(false);
+  const [folderName, setFolderName] = useState("");
+  const [bankName, setBankName] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  // In-place bank editor states
+  const [selected, setSelected] = useState<Bank | null>(null);
+  const [editor, setEditor] = useState(false);
+  const [isNewBank, setIsNewBank] = useState(false);
+  const [newBankTitle, setNewBankTitle] = useState("");
+  const [newBankSubject, setNewBankSubject] = useState("");
+  const [newBankSubjectId, setNewBankSubjectId] = useState("");
+
+  const [activeStep, setActiveStep] = useState(0);
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  const [questions, setQuestions] = useState<BankQuestion[]>([]);
+  const [draftId, setDraftId] = useState<string | null>(null);
+  const [draftRevision, setDraftRevision] = useState(0);
+
+  // Pop-up preview modal for entire bank
+  const [viewingBank, setViewingBank] = useState<Bank | null>(null);
+
+  // XML Import/Export states
+  const [xmlFile, setXmlFile] = useState<File | null>(null);
+  const [backup, setBackup] = useState<Backup | null>(null);
+  const [notice, setNotice] = useState("");
+  const [discard, setDiscard] = useState(false);
+  const [deleteFolder, setDeleteFolder] = useState(false);
+  const [moveBank, setMoveBank] = useState<Bank | null>(null);
+  const [destination, setDestination] = useState("");
+  const [cursors, setCursors] = useState<(string | null)[]>([null]);
+  const [cursorIndex, setCursorIndex] = useState(0);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [listLoading, setListLoading] = useState(true);
+  const listRequest = useRef(0);
+
+  const load = useCallback(async () => {
+    const request = ++listRequest.current;
+    setListLoading(true);
+    try {
+      const params = new URLSearchParams({ limit: "25" });
+      if (folder && folder !== "unassigned") params.set("subjectId", folder);
+      else if (folder === "unassigned") params.set("subjectId", "unassigned");
+      const cursor = cursors[cursorIndex];
+      if (cursor) params.set("cursor", cursor);
+      const [s, b] = await Promise.all([
+        staffApi<Subject[]>("/api/subjects"),
+        staffApi<{ items: Bank[]; nextCursor: string | null }>(`/api/question-banks?${params}`),
+      ]);
+      if (request === listRequest.current) {
+        setSubjects(s);
+        setBanks(b.items);
+        setNextCursor(b.nextCursor);
+        setError("");
+      }
+    } catch (e) {
+      if (request === listRequest.current) setError(message(e));
+    } finally {
+      if (request === listRequest.current) setListLoading(false);
+    }
+  }, [folder, cursors, cursorIndex]);
+
+  useEffect(() => {
+    window.history.replaceState(
+      window.history.state,
+      "",
+      `/dashboard/bank-soal${folder ? `?folder=${encodeURIComponent(folder)}` : ""}`
+    );
+    const timer = window.setTimeout(() => void load(), 0);
+    const counter = listRequest;
+    return () => {
+      window.clearTimeout(timer);
+      counter.current++;
+    };
+  }, [folder, load]);
+
+  function switchFolder(value: string | null) {
+    setFolder(value);
+    setCursors([null]);
+    setCursorIndex(0);
+  }
+
+  async function createFolder(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const s = await staffSend<Subject>("/api/subjects", "POST", { name: folderName });
+      switchFolder(s.id);
+      setFolderName("");
+      setFolderOpen(false);
+      await load();
+    } catch (e) {
+      setError(message(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeFolder() {
+    if (!folder || folder === "unassigned") return;
+    setBusy(true);
+    setError("");
+    try {
+      await staffSend(`/api/subjects/${folder}`, "DELETE");
+      setDeleteFolder(false);
+      switchFolder(null);
+      setNotice("Mata pelajaran berhasil dihapus.");
+    } catch (e) {
+      setError(message(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function move(e: FormEvent) {
+    e.preventDefault();
+    if (!moveBank || !destination) return;
+    setBusy(true);
+    setError("");
+    try {
+      await staffSend(`/api/question-banks/${moveBank.id}`, "PATCH", {
+        revision: moveBank.revision,
+        subjectId: destination,
+      });
+      setMoveBank(null);
+      setNotice("Bank soal berhasil dipindahkan.");
+      await load();
+    } catch (e) {
+      setError(message(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createBank(e: FormEvent) {
+    e.preventDefault();
+    const subject = subjects.find((s) => s.id === folder);
+    if (!subject) return;
+    setBusy(true);
+    setError("");
+    try {
+      await staffSend("/api/question-banks", "POST", {
+        title: bankName,
+        subject: subject.name,
+        subjectId: subject.id,
+      });
+      setBankName("");
+      setBankOpen(false);
+      await load();
+    } catch (e) {
+      setError(message(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function previewBank(bank: Bank) {
+    setError("");
+    try {
+      const detail = await staffApi<Bank>(`/api/question-banks/${bank.id}`);
+      setViewingBank(detail);
+    } catch (e) {
+      setError(message(e));
+    }
+  }
+
+  function startNewQuestionBank() {
+    setError("");
+    setIsNewBank(true);
+    const initialSubject = subjects[0];
+    const initialBank: Bank = {
+      id: "new-bank",
+      title: "",
+      subject: initialSubject?.name || "",
+      subjectId: initialSubject?.id || null,
+      revision: 1,
+      _count: { questions: 0 },
+      questions: [],
+    };
+    setSelected(initialBank);
+    setNewBankTitle("");
+    setNewBankSubject(initialSubject?.name || "");
+    setNewBankSubjectId(initialSubject?.id || (subjects.length ? subjects[0].id : "__new__"));
+    setDraftId(null);
+    setDraftRevision(0);
+    setActiveStep(0);
+    setCurrentQuestionIndex(0);
+    setQuestions([newQuestion()]); // Default tepat 1 butir soal!
+    setEditor(true);
+  }
+
+  async function openBank(id: string, edit: boolean, add = false) {
+    setError("");
+    try {
+      const detail = await staffApi<Bank>(`/api/question-banks/${id}`);
+      setSelected(detail);
+      setIsNewBank(false);
+      setNewBankTitle(detail.title);
+      setNewBankSubject(detail.subject);
+      setNewBankSubjectId(detail.subjectId || "");
+      setDraftId(null);
+      setDraftRevision(0);
+      setActiveStep(0);
+      setCurrentQuestionIndex(0);
+
+      let qs = (detail.questions || []).map(editable);
+      if (edit) {
+        const savedDraft = detail.drafts?.find((d) => d.createdBy === teacherId);
+        if (savedDraft) {
+          qs = savedDraft.content.questions;
+          setDraftId(savedDraft.id);
+          setDraftRevision(savedDraft.revision);
+        }
+        try {
+          const local = localStorage.getItem(`eduquas:bank-draft:${teacherId}:${id}`);
+          if (local) {
+            const saved = JSON.parse(local) as {
+              questions: BankQuestion[];
+              draftId?: string;
+              revision?: number;
+            };
+            qs = saved.questions;
+            setDraftId(saved.draftId || null);
+            setDraftRevision(saved.revision || 0);
+          }
+        } catch {}
+
+        if (add || !qs.length) {
+          qs = qs.length ? [...qs, newQuestion()] : [newQuestion()];
+        }
+      }
+
+      setQuestions(qs);
+      setCurrentQuestionIndex(add && qs.length > 1 ? qs.length - 1 : 0);
+      setEditor(edit);
+    } catch (e) {
+      setError(message(e));
+    }
+  }
+
+  function updateQuestions(next: BankQuestion[]) {
+    setQuestions(next);
+    if (selected && !isNewBank) {
+      try {
+        localStorage.setItem(
+          `eduquas:bank-draft:${teacherId}:${selected.id}`,
+          JSON.stringify({ questions: next, draftId, revision: draftRevision })
+        );
+      } catch {}
+    }
+  }
+
+  function updateQuestion(index: number, patch: Partial<BankQuestion>) {
+    updateQuestions(questions.map((q, i) => (i === index ? { ...q, ...patch } : q)));
+  }
+
+  async function saveDraft(commit: boolean) {
+    if (!selected) return;
+    setBusy(true);
+    setError("");
+    try {
+      let targetBank = selected;
+
+      // Jika membuat bank soal baru langsung dari editor
+      if (isNewBank) {
+        if (!newBankTitle.trim()) {
+          setError("Nama bank soal wajib diisi.");
+          setBusy(false);
+          setActiveStep(0);
+          return;
+        }
+        if (!newBankSubject.trim()) {
+          setError("Mata pelajaran wajib dipilih atau diisi.");
+          setBusy(false);
+          setActiveStep(0);
+          return;
+        }
+
+        let subjectId = newBankSubjectId && newBankSubjectId !== "__new__" ? newBankSubjectId : null;
+        let subjectName = newBankSubject.trim();
+
+        // Buat subject jika belum ada
+        if (!subjectId) {
+          const createdSubject = await staffSend<Subject>("/api/subjects", "POST", { name: subjectName });
+          subjectId = createdSubject.id;
+          subjectName = createdSubject.name;
+        }
+
+        // Buat QuestionBank
+        const createdBank = await staffSend<Bank>("/api/question-banks", "POST", {
+          title: newBankTitle.trim(),
+          subject: subjectName,
+          subjectId,
+        });
+
+        targetBank = createdBank;
+        setSelected(createdBank);
+        setIsNewBank(false);
+      }
+
+      const content = { questions, bankRevision: targetBank.revision };
+      let draft: { id: string; revision: number };
+      if (draftId && !isNewBank) {
+        draft = await staffSend(`/api/question-banks/${targetBank.id}/drafts/${draftId}`, "PUT", {
+          revision: draftRevision,
+          content,
+        });
+      } else {
+        draft = await staffSend(`/api/question-banks/${targetBank.id}/drafts`, "POST", content);
+      }
+      setDraftId(draft.id);
+      setDraftRevision(draft.revision);
+      try {
+        localStorage.setItem(
+          `eduquas:bank-draft:${teacherId}:${targetBank.id}`,
+          JSON.stringify({ questions, draftId: draft.id, revision: draft.revision })
+        );
+      } catch {}
+
+      if (commit) {
+        await staffSend(`/api/question-banks/${targetBank.id}/drafts/${draft.id}/commit`, "POST", {
+          revision: draft.revision,
+        });
+        try {
+          localStorage.removeItem(`eduquas:bank-draft:${teacherId}:${targetBank.id}`);
+        } catch {}
+        setSelected(null);
+        setEditor(false);
+        setNotice("Soal berhasil disimpan ke bank soal.");
+        await load();
+      } else {
+        setNotice("Draf soal berhasil disimpan.");
+      }
+    } catch (e) {
+      setError(message(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function discardDraft() {
+    if (!selected) return;
+    setBusy(true);
+    setError("");
+    try {
+      if (draftId && !isNewBank) {
+        await staffSend(`/api/question-banks/${selected.id}/drafts/${draftId}`, "DELETE", {
+          revision: draftRevision,
+        });
+      }
+      try {
+        localStorage.removeItem(`eduquas:bank-draft:${teacherId}:${selected.id}`);
+      } catch {}
+      setDiscard(false);
+      const id = selected.id;
+      setSelected(null);
+      setEditor(false);
+      if (!isNewBank) {
+        await openBank(id, true);
+      }
+    } catch (e) {
+      setError(message(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function upload(file: File, index: number, optionIndex?: number) {
+    setError("");
+    try {
+      const data = new FormData();
+      data.append("image", file);
+      const result = await staffApi<{ url: string }>("/api/question-banks/media", {
+        method: "POST",
+        body: data,
+      });
+      const q = questions[index];
+      if (optionIndex === undefined) {
+        updateQuestion(index, { imageUrl: result.url });
+      } else {
+        updateQuestion(index, {
+          options: q.options.map((o, i) => (i === optionIndex ? { ...o, imageUrl: result.url } : o)),
+        });
+      }
+    } catch (e) {
+      setError(message(e));
+    }
+  }
+
+  async function prepareXml(file: File) {
+    setError("");
+    try {
+      setBackup(await readBankXml(file));
+      setXmlFile(file);
+    } catch (e) {
+      setError(message(e));
+    }
+  }
+
+  async function confirmImport() {
+    const subject = subjects.find((s) => s.id === folder) || subjects[0];
+    if (!subject || !backup || !xmlFile) return;
+    setBusy(true);
+    setError("");
+    try {
+      const result = await importBankXml(xmlFile, subject);
+      setBackup(null);
+      setXmlFile(null);
+      await load();
+      if (result.alreadyImported && result.draftId && !result.draftOwnedByCaller) {
+        setNotice("XML sudah diimpor oleh guru lain dan drafnya belum disimpan ke bank.");
+        return;
+      }
+      setNotice(
+        result.alreadyImported
+          ? "XML ini sudah pernah diimpor ke folder ini."
+          : "XML diimpor sebagai draf. Periksa soal sebelum menyimpan ke bank."
+      );
+      await openBank(result.bankId, true);
+    } catch (e) {
+      setError(message(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function exportXml(bank: Bank) {
+    try {
+      setError("");
+      const external = await exportBankXml(bank);
+      setNotice(external ? "XML diunduh. Gambar eksternal tetap membutuhkan jaringan." : "XML bank soal berhasil diunduh.");
+    } catch (e) {
+      setError(message(e));
+    }
+  }
+
+  const currentQ = questions[currentQuestionIndex] || questions[0];
+
+  // ─── IN-PLACE BANK SOAL STEPPER VIEW ───────────────────────────────────────
+  if (editor && selected) {
+    return (
+      <motion.section
+        className="entry exam-creator-entry"
+        aria-labelledby="bank-creator-title"
+        initial={reduceMotion ? false : { opacity: 0.85, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: reduceMotion ? 0 : 0.28, ease: [0.22, 1, 0.36, 1] }}
+      >
+        <MotionButton
+          className="back-button"
+          type="button"
+          onClick={() => {
+            setEditor(false);
+            setSelected(null);
+            setIsNewBank(false);
+            setError("");
+          }}
+        >
+          ← Kembali ke daftar bank soal
+        </MotionButton>
+
+        <ol className="steps" aria-label="Tahapan kelola butir soal">
+          {stepNames.map((label, index) => (
+            <li
+              key={label}
+              className={index === activeStep ? "current" : index < activeStep ? "complete" : ""}
+              onClick={() => {
+                if (index < activeStep) setActiveStep(index);
+                else if (index === activeStep + 1) setActiveStep(index);
+              }}
+              style={{ cursor: index <= activeStep ? "pointer" : "default" }}
+            >
+              {index < stepNames.length - 1 && (
+                <span className="step-connector" aria-hidden="true">
+                  <motion.span
+                    initial={false}
+                    animate={{ scaleX: index < activeStep ? 1 : 0 }}
+                    transition={{ duration: reduceMotion ? 0 : 0.22 }}
+                  />
+                </span>
+              )}
+              <span className="step-number">{index + 1}</span>
+              <span>{label}</span>
+            </li>
+          ))}
+        </ol>
+
+        <div className="entry-frame">
+          <div className="entry-card-surface" />
+          <div className="entry-body">
+            <ErrorText error={error} />
+
+            {/* ─── TAHAP 1: BUAT SOAL (SPLIT VIEW EDITOR & PREVIEW) ───────── */}
+            {activeStep === 0 && currentQ && (
+              <>
+                <div style={{ marginBottom: 16 }}>
+                  <h1 id="bank-creator-title">
+                    {isNewBank ? (newBankTitle.trim() || "Buat Bank Soal Baru") : selected.title}
+                  </h1>
+                  <p className="lead" style={{ margin: "4px 0 0" }}>
+                    Susun butir soal lengkap dengan rumus matematika, gambar, pilihan jawaban, dan pratinjau langsung.
+                  </p>
+                </div>
+
+                {/* Form Nama Bank & Mapel jika membuat bank baru */}
+                {isNewBank && (
+                  <div className="exam-creator-grid" style={{ marginBottom: 18, background: "#f8f8fa", padding: 14, borderRadius: 12, border: "1px solid #e7e6ec" }}>
+                    <div className="exam-creator-field">
+                      <label htmlFor="new-bank-title">Nama Bank Soal *</label>
+                      <input
+                        id="new-bank-title"
+                        required
+                        placeholder="Contoh: Penilaian Harian Matematika Aljabar"
+                        value={newBankTitle}
+                        onChange={(e) => {
+                          setNewBankTitle(e.target.value);
+                          if (selected) setSelected({ ...selected, title: e.target.value });
+                        }}
+                      />
+                    </div>
+                    <div className="exam-creator-field">
+                      <label htmlFor="new-bank-subject">Mata Pelajaran *</label>
+                      {subjects.length > 0 ? (
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          <select
+                            id="new-bank-subject"
+                            value={newBankSubjectId}
+                            onChange={(e) => {
+                              const sid = e.target.value;
+                              setNewBankSubjectId(sid);
+                              const found = subjects.find((s) => s.id === sid);
+                              if (found) {
+                                setNewBankSubject(found.name);
+                                if (selected) setSelected({ ...selected, subject: found.name, subjectId: found.id });
+                              }
+                            }}
+                            style={{ flex: 1, minWidth: 160 }}
+                          >
+                            {subjects.map((s) => (
+                              <option key={s.id} value={s.id}>
+                                {s.name}
+                              </option>
+                            ))}
+                            <option value="__new__">+ Tulis mata pelajaran baru...</option>
+                          </select>
+                          {newBankSubjectId === "__new__" && (
+                            <input
+                              placeholder="Ketik mata pelajaran baru"
+                              value={newBankSubject}
+                              onChange={(e) => {
+                                setNewBankSubject(e.target.value);
+                                if (selected) setSelected({ ...selected, subject: e.target.value });
+                              }}
+                              style={{ flex: 1, minWidth: 160 }}
+                            />
+                          )}
+                        </div>
+                      ) : (
+                        <input
+                          id="new-bank-subject"
+                          required
+                          placeholder="Contoh: Matematika, IPA, Bahasa Indonesia"
+                          value={newBankSubject}
+                          onChange={(e) => {
+                            setNewBankSubject(e.target.value);
+                            if (selected) setSelected({ ...selected, subject: e.target.value });
+                          }}
+                        />
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Strip Penunjuk Nomor Soal & CTA Simbol-Saja */}
+                <div className="bank-nav-strip">
+                  <span style={{ fontSize: "11px", fontWeight: 650, color: "#62626c", marginRight: "4px" }}>
+                    Butir Soal:
+                  </span>
+                  {questions.map((_, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      className={`bank-q-pill ${currentQuestionIndex === idx ? "active" : ""}`}
+                      onClick={() => setCurrentQuestionIndex(idx)}
+                      title={`Pilih nomor ${idx + 1}`}
+                    >
+                      {idx + 1}
+                    </button>
+                  ))}
+                  <MotionButton
+                    type="button"
+                    className="bank-icon-btn"
+                    title="Tambah butir soal"
+                    aria-label="Tambah butir soal"
+                    onClick={() => {
+                      const next = [...questions, newQuestion()];
+                      updateQuestions(next);
+                      setCurrentQuestionIndex(next.length - 1);
+                    }}
+                  >
+                    <Icon name="plus" size={14} />
+                  </MotionButton>
+                  <MotionButton
+                    type="button"
+                    className="bank-icon-btn danger"
+                    disabled={questions.length <= 1}
+                    title="Hapus butir soal saat ini"
+                    aria-label="Hapus butir soal saat ini"
+                    onClick={() => {
+                      if (questions.length <= 1) return;
+                      const next = questions.filter((_, idx) => idx !== currentQuestionIndex);
+                      updateQuestions(next);
+                      setCurrentQuestionIndex(Math.max(0, currentQuestionIndex - 1));
+                    }}
+                  >
+                    <Icon name="trash" size={14} />
+                  </MotionButton>
+                </div>
+
+                {/* Two-Column Layout: Left Editor, Right Live Preview */}
+                <div className="bank-creator-split">
+                  {/* Left Column: Question Editor */}
+                  <div className="staff-form" style={{ gap: 16 }}>
+                    <div className="exam-creator-grid">
+                      <div className="exam-creator-field">
+                        <label>Jenis Soal</label>
+                        <select
+                          value={currentQ.type}
+                          onChange={(e) =>
+                            updateQuestion(currentQuestionIndex, {
+                              type: e.target.value as BankQuestion["type"],
+                            })
+                          }
+                        >
+                          <option value="single_choice">Pilihan tunggal (Auto-grade)</option>
+                          <option value="multi_select">Pilihan jamak (Auto-grade)</option>
+                          <option value="short_answer">Isian singkat (Penilaian manual)</option>
+                        </select>
+                      </div>
+
+                      <div className="exam-creator-field">
+                        <label>Bobot Poin</label>
+                        <input
+                          type="number"
+                          min="1"
+                          max="100"
+                          value={currentQ.points}
+                          onChange={(e) =>
+                            updateQuestion(currentQuestionIndex, {
+                              points: Math.max(1, Number(e.target.value) || 1),
+                            })
+                          }
+                        />
+                      </div>
+                    </div>
+
+                    <div
+                      style={{
+                        fontSize: "11px",
+                        padding: "8px 12px",
+                        borderRadius: "8px",
+                        background: currentQ.type === "short_answer" ? "#fffbeb" : "#eff6ff",
+                        border: "1px solid",
+                        borderColor: currentQ.type === "short_answer" ? "#fef3c7" : "#dbeafe",
+                        color: currentQ.type === "short_answer" ? "#92400e" : "#1e40af",
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      {currentQ.type === "short_answer"
+                        ? "Penilaian manual: Jawaban berupa teks bebas yang dinilai langsung oleh guru."
+                        : "Penilaian otomatis: Sistem menilai jawaban secara langsung berdasarkan kunci yang dipilih."}
+                    </div>
+
+                    <div className="exam-creator-field">
+                      <label>Pertanyaan Soal #{currentQuestionIndex + 1}</label>
+                      <EquationEditor
+                        label={`Isi soal ${currentQuestionIndex + 1}`}
+                        value={(currentQ.content as JSONContent) || blankDoc()}
+                        onChange={(doc) =>
+                          updateQuestion(currentQuestionIndex, {
+                            content: doc,
+                            questionText: docToText(doc),
+                          })
+                        }
+                      />
+                    </div>
+
+                    <div className="exam-creator-field">
+                      <label>Gambar Soal (Opsional)</label>
+                      <input
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp"
+                        onChange={(e) =>
+                          e.target.files?.[0] && void upload(e.target.files[0], currentQuestionIndex)
+                        }
+                      />
+                      {currentQ.imageUrl && (
+                        <div style={{ marginTop: 8, display: "flex", gap: 10, alignItems: "center" }}>
+                          <input
+                            placeholder="Keterangan alternatif gambar (alt)"
+                            value={currentQ.imageAlt || ""}
+                            onChange={(e) =>
+                              updateQuestion(currentQuestionIndex, { imageAlt: e.target.value })
+                            }
+                            style={{ flex: 1 }}
+                          />
+                          <MotionButton
+                            type="button"
+                            className="bank-icon-btn danger"
+                            title="Hapus gambar soal"
+                            aria-label="Hapus gambar soal"
+                            onClick={() =>
+                              updateQuestion(currentQuestionIndex, {
+                                imageUrl: undefined,
+                                imageAlt: undefined,
+                              })
+                            }
+                          >
+                            ×
+                          </MotionButton>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Answer Key & Options Section */}
+                    <div style={{ marginTop: 12 }}>
+                      <h4 style={{ fontSize: "12px", margin: "0 0 8px", color: "var(--staff-ink)", fontWeight: 650 }}>
+                        {currentQ.type === "short_answer" ? "Format Jawaban" : "Pilihan Jawaban & Kunci"}
+                      </h4>
+
+                      {currentQ.type === "short_answer" ? (
+                        <div className="staff-note" style={{ margin: 0 }}>
+                          Siswa akan diberikan kolom input isian singkat saat ujian. Jawaban tidak dinilai otomatis oleh sistem.
+                        </div>
+                      ) : (
+                        <div className="staff-options">
+                          {currentQ.options.map((o, j) => (
+                            <div key={o.id} style={{ display: "grid", gap: 8, position: "relative" }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                <label className="staff-check" style={{ cursor: "pointer", fontWeight: 600 }}>
+                                  <input
+                                    type={currentQ.type === "multi_select" ? "checkbox" : "radio"}
+                                    name={`key-q-${currentQuestionIndex}`}
+                                    checked={
+                                      currentQ.type === "multi_select"
+                                        ? !!currentQ.correctAnswers?.includes(o.id)
+                                        : currentQ.correctAnswer === o.id
+                                    }
+                                    onChange={(e) =>
+                                      updateQuestion(
+                                        currentQuestionIndex,
+                                        currentQ.type === "multi_select"
+                                          ? {
+                                              correctAnswers: e.target.checked
+                                                ? [...(currentQ.correctAnswers || []), o.id]
+                                                : (currentQ.correctAnswers || []).filter((id) => id !== o.id),
+                                            }
+                                          : { correctAnswer: o.id }
+                                      )
+                                    }
+                                  />
+                                  Kunci Jawaban ({o.label || String.fromCharCode(65 + j)})
+                                </label>
+
+                                {currentQ.options.length > 2 && (
+                                  <MotionButton
+                                    type="button"
+                                    className="bank-icon-btn danger"
+                                    title={`Hapus pilihan ${o.label || j + 1}`}
+                                    aria-label={`Hapus pilihan ${o.label || j + 1}`}
+                                    onClick={() =>
+                                      updateQuestion(currentQuestionIndex, {
+                                        options: currentQ.options.filter((_, k) => k !== j),
+                                        correctAnswer: currentQ.correctAnswer === o.id ? null : currentQ.correctAnswer,
+                                        correctAnswers: (currentQ.correctAnswers || []).filter((id) => id !== o.id),
+                                      })
+                                    }
+                                  >
+                                    ×
+                                  </MotionButton>
+                                )}
+                              </div>
+
+                              <EquationEditor
+                                label={`Pilihan ${j + 1} soal ${currentQuestionIndex + 1}`}
+                                value={(o.content as JSONContent) || blankDoc(o.text)}
+                                onChange={(doc) => {
+                                  const options: BankOption[] = currentQ.options.map((opt, k) =>
+                                    k === j ? { ...opt, content: doc, text: docToText(doc) } : opt
+                                  );
+                                  updateQuestion(currentQuestionIndex, { options });
+                                }}
+                              />
+
+                              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                                <label className="staff-secondary staff-file" style={{ fontSize: "11px", padding: "6px 12px" }}>
+                                  Gambar pilihan
+                                  <input
+                                    type="file"
+                                    accept="image/png,image/jpeg,image/webp"
+                                    onChange={(e) =>
+                                      e.target.files?.[0] && void upload(e.target.files[0], currentQuestionIndex, j)
+                                    }
+                                  />
+                                </label>
+                                {o.imageUrl && (
+                                  <MotionButton
+                                    type="button"
+                                    className="bank-icon-btn danger"
+                                    title="Hapus gambar pilihan"
+                                    aria-label="Hapus gambar pilihan"
+                                    onClick={() =>
+                                      updateQuestion(currentQuestionIndex, {
+                                        options: currentQ.options.map((opt, k) =>
+                                          k === j ? { ...opt, imageUrl: undefined, imageAlt: undefined } : opt
+                                        ),
+                                      })
+                                    }
+                                  >
+                                    ×
+                                  </MotionButton>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+
+                          {currentQ.options.length < 6 && (
+                            <MotionButton
+                              type="button"
+                              className="staff-secondary"
+                              style={{ justifySelf: "start" }}
+                              onClick={() => {
+                                const id = ["A", "B", "C", "D", "E", "F"].find(
+                                  (key) => !currentQ.options.some((o) => o.id === key)
+                                );
+                                if (id) {
+                                  updateQuestion(currentQuestionIndex, {
+                                    options: [...currentQ.options, { id, label: id, text: "", content: blankDoc() }],
+                                  });
+                                }
+                              }}
+                            >
+                              <Icon name="plus" size={14} /> Tambah pilihan
+                            </MotionButton>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="exam-creator-actions" style={{ marginTop: 24 }}>
+                      <MotionButton
+                        type="button"
+                        className="secondary-button"
+                        onClick={() => {
+                          setEditor(false);
+                          setSelected(null);
+                          setIsNewBank(false);
+                        }}
+                      >
+                        Batal
+                      </MotionButton>
+                      <MotionButton
+                        type="button"
+                        className="primary-button"
+                        onClick={() => setActiveStep(1)}
+                      >
+                        Lanjutkan ke Pratinjau Siswa →
+                      </MotionButton>
+                    </div>
+                  </div>
+
+                  {/* Right Column: Live Student Preview */}
+                  <aside className="bank-preview-panel">
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span className="bank-preview-badge">Pratinjau Siswa · Butir {currentQuestionIndex + 1}</span>
+                      <span style={{ fontSize: "11px", color: "var(--staff-muted)", fontWeight: 650 }}>
+                        {currentQ.points} Poin
+                      </span>
+                    </div>
+
+                    <div className="bank-student-card">
+                      <div className="bank-student-qtext">
+                        <QuestionContent
+                          content={currentQ.content}
+                          text={currentQ.questionText || "Tulis pertanyaan soal di sebelah kiri..."}
+                          imageUrl={currentQ.imageUrl}
+                          imageAlt={currentQ.imageAlt}
+                        />
+                      </div>
+
+                      {currentQ.type === "short_answer" ? (
+                        <div style={{ marginTop: 12 }}>
+                          <label style={{ fontSize: "10px", color: "var(--staff-muted)", display: "block", marginBottom: 4 }}>
+                            Jawaban Siswa:
+                          </label>
+                          <input
+                            type="text"
+                            disabled
+                            placeholder="Siswa mengetikkan jawaban di sini..."
+                            style={{
+                              width: "100%",
+                              padding: "8px 12px",
+                              borderRadius: "8px",
+                              border: "1px dashed #d5d4dc",
+                              background: "#f9f8fb",
+                              fontSize: "11px",
+                            }}
+                          />
+                        </div>
+                      ) : (
+                        <div className="bank-student-options">
+                          {currentQ.options.map((opt, oIdx) => {
+                            const isKey =
+                              currentQ.type === "multi_select"
+                                ? currentQ.correctAnswers?.includes(opt.id)
+                                : currentQ.correctAnswer === opt.id;
+                            return (
+                              <div
+                                key={opt.id}
+                                className={`bank-student-opt ${isKey ? "selected" : ""}`}
+                              >
+                                <input
+                                  type={currentQ.type === "multi_select" ? "checkbox" : "radio"}
+                                  checked={!!isKey}
+                                  readOnly
+                                />
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <QuestionContent
+                                    content={opt.content}
+                                    text={opt.text || `Pilihan ${opt.label || String.fromCharCode(65 + oIdx)}`}
+                                    imageUrl={opt.imageUrl}
+                                    imageAlt={opt.imageAlt}
+                                  />
+                                </div>
+                                {isKey && (
+                                  <span
+                                    style={{
+                                      fontSize: "10px",
+                                      fontWeight: 700,
+                                      color: "#7867d9",
+                                      letterSpacing: "0.06em",
+                                      textTransform: "uppercase",
+                                    }}
+                                  >
+                                    Kunci
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </aside>
+                </div>
+              </>
+            )}
+
+            {/* ─── TAHAP 2: PRATINJAU SISWA LENGKAP ───────────────────────── */}
+            {activeStep === 1 && (
+              <>
+                <h1 id="bank-creator-title">Pratinjau Lembar Soal Siswa</h1>
+                <p className="lead">
+                  Berikut tampilan lengkap seluruh {questions.length} butir soal seperti yang akan dilihat oleh siswa pada saat ujian.
+                </p>
+
+                <div className="bank-full-preview-list">
+                  {questions.map((q, idx) => (
+                    <section key={idx} className="bank-student-card" style={{ padding: 16 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                        <span style={{ fontWeight: 650, fontSize: "12px" }}>Nomor {idx + 1}</span>
+                        <span style={{ fontSize: "11px", color: "var(--staff-muted)", fontWeight: 600 }}>
+                          {q.points} Poin · {q.type === "short_answer" ? "Penilaian manual" : "Auto-grade"}
+                        </span>
+                      </div>
+
+                      <div className="bank-student-qtext">
+                        <QuestionContent
+                          content={q.content}
+                          text={q.questionText || "(Pertanyaan belum diisi)"}
+                          imageUrl={q.imageUrl}
+                          imageAlt={q.imageAlt}
+                        />
+                      </div>
+
+                      {q.type === "short_answer" ? (
+                        <div style={{ marginTop: 10 }}>
+                          <input
+                            type="text"
+                            disabled
+                            placeholder="Kolom isian siswa..."
+                            style={{
+                              width: "100%",
+                              padding: "8px 12px",
+                              borderRadius: "8px",
+                              border: "1px dashed #d5d4dc",
+                              background: "#f9f8fb",
+                              fontSize: "11px",
+                            }}
+                          />
+                        </div>
+                      ) : (
+                        <div className="bank-student-options" style={{ marginTop: 12 }}>
+                          {q.options.map((o, j) => {
+                            const isKey =
+                              q.type === "multi_select"
+                                ? q.correctAnswers?.includes(o.id)
+                                : q.correctAnswer === o.id;
+                            return (
+                              <div
+                                key={o.id}
+                                className={`bank-student-opt ${isKey ? "selected" : ""}`}
+                              >
+                                <input
+                                  type={q.type === "multi_select" ? "checkbox" : "radio"}
+                                  checked={!!isKey}
+                                  readOnly
+                                />
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <QuestionContent
+                                    content={o.content}
+                                    text={o.text || `Pilihan ${o.label || String.fromCharCode(65 + j)}`}
+                                    imageUrl={o.imageUrl}
+                                    imageAlt={o.imageAlt}
+                                  />
+                                </div>
+                                {isKey && (
+                                  <span
+                                    style={{
+                                      fontSize: "10px",
+                                      fontWeight: 700,
+                                      color: "#7867d9",
+                                      textTransform: "uppercase",
+                                    }}
+                                  >
+                                    Kunci
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </section>
+                  ))}
+                </div>
+
+                <div className="exam-creator-actions" style={{ marginTop: 24 }}>
+                  <MotionButton
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => setActiveStep(0)}
+                  >
+                    ← Kembali ke Buat Soal
+                  </MotionButton>
+                  <MotionButton
+                    type="button"
+                    className="primary-button"
+                    onClick={() => setActiveStep(2)}
+                  >
+                    Lanjutkan ke Konfirmasi Unggah →
+                  </MotionButton>
+                </div>
+              </>
+            )}
+
+            {/* ─── TAHAP 3: KONFIRMASI UNGGAH SOAL ───────────────────────── */}
+            {activeStep === 2 && (
+              <>
+                <h1 id="bank-creator-title">Konfirmasi Unggah Bank Soal</h1>
+                <p className="lead">
+                  Periksa ringkasan soal sebelum disimpan sebagai draf atau diterbitkan langsung ke bank soal.
+                </p>
+
+                <div className="bank-summary-grid">
+                  <div className="bank-summary-stat">
+                    <span>Total Butir Soal</span>
+                    <strong>{questions.length}</strong>
+                  </div>
+                  <div className="bank-summary-stat">
+                    <span>Pilihan Tunggal (Auto)</span>
+                    <strong>{questions.filter((q) => q.type === "single_choice").length}</strong>
+                  </div>
+                  <div className="bank-summary-stat">
+                    <span>Pilihan Jamak (Auto)</span>
+                    <strong>{questions.filter((q) => q.type === "multi_select").length}</strong>
+                  </div>
+                  <div className="bank-summary-stat">
+                    <span>Isian Singkat (Manual)</span>
+                    <strong>{questions.filter((q) => q.type === "short_answer").length}</strong>
+                  </div>
+                  <div className="bank-summary-stat">
+                    <span>Total Bobot Poin</span>
+                    <strong>{questions.reduce((acc, q) => acc + (q.points || 0), 0)}</strong>
+                  </div>
+                </div>
+
+                {/* Validation Warnings */}
+                {(() => {
+                  const emptyQuestions = questions
+                    .map((q, i) => (!q.questionText?.trim() ? i + 1 : null))
+                    .filter(Boolean);
+                  const missingKeys = questions
+                    .map((q, i) =>
+                      q.type === "single_choice" && !q.correctAnswer
+                        ? i + 1
+                        : q.type === "multi_select" && (!q.correctAnswers || !q.correctAnswers.length)
+                        ? i + 1
+                        : null
+                    )
+                    .filter(Boolean);
+
+                  return (
+                    <>
+                      {emptyQuestions.length > 0 && (
+                        <p className="staff-note" style={{ background: "#fff5f5", borderColor: "#fed7d7", color: "#c53030" }}>
+                          Perhatian: Butir nomor {emptyQuestions.join(", ")} belum memiliki isi pertanyaan.
+                        </p>
+                      )}
+                      {missingKeys.length > 0 && (
+                        <p className="staff-note" style={{ background: "#fffaf0", borderColor: "#feebc8", color: "#c05621" }}>
+                          Peringatan: Butir nomor {missingKeys.join(", ")} belum memiliki kunci jawaban yang dipilih.
+                        </p>
+                      )}
+                    </>
+                  );
+                })()}
+
+                <div className="exam-creator-actions" style={{ marginTop: 28 }}>
+                  <MotionButton
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => setActiveStep(1)}
+                  >
+                    ← Kembali ke Pratinjau
+                  </MotionButton>
+
+                  <div style={{ display: "flex", gap: 10, marginLeft: "auto", flexWrap: "wrap" }}>
+                    {!isNewBank && (
+                      <MotionButton
+                        type="button"
+                        className="staff-secondary"
+                        disabled={busy}
+                        onClick={() => setDiscard(true)}
+                      >
+                        Hapus Draf
+                      </MotionButton>
+                    )}
+                    <MotionButton
+                      type="button"
+                      className="secondary-button"
+                      disabled={busy}
+                      onClick={() => void saveDraft(false)}
+                    >
+                      {busy ? "Menyimpan…" : "Simpan Draf"}
+                    </MotionButton>
+                    <MotionButton
+                      type="button"
+                      className="primary-button"
+                      disabled={busy}
+                      onClick={() => void saveDraft(true)}
+                    >
+                      {busy ? "Menyimpan…" : "Simpan ke Bank Soal"}
+                    </MotionButton>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Modal Discard Draft */}
+        <Dialog open={discard} title="Hapus draf soal?" onClose={() => setDiscard(false)}>
+          <div className="staff-form">
+            <p>
+              Perubahan yang belum disimpan ke bank akan dihapus. Soal yang sudah tersimpan di bank tetap ada.
+            </p>
+            <ErrorText error={error} />
+            <div className="staff-dialog-actions">
+              <MotionButton className="staff-secondary" onClick={() => setDiscard(false)}>
+                Batal
+              </MotionButton>
+              <MotionButton className="staff-primary" disabled={busy} onClick={() => void discardDraft()}>
+                Hapus draf
+              </MotionButton>
+            </div>
+          </div>
+        </Dialog>
+      </motion.section>
+    );
+  }
+
+  // ─── NORMAL BANK LIST VIEW ─────────────────────────────────────────────────
   const visible = banks;
-  return <><div className="staff-section-head"><div><h2>Bank soal</h2><p>Susun bank soal bersama berdasarkan mata pelajaran.</p></div><MotionButton className="staff-secondary" onClick={() => setFolderOpen(true)}><Icon name="plus" size={16}/> Mata pelajaran</MotionButton></div>{notice && <p role="status">{notice}</p>}<ErrorText error={!selected && !folderOpen && !bankOpen && !backup && !moveBank && !deleteFolder ? error : ""}/><div className="staff-folder-tabs"><MotionButton className={!folder ? "active" : ""} onClick={() => switchFolder(null)}>Semua folder</MotionButton>{subjects.map(s => <MotionButton className={folder === s.id ? "active" : ""} key={s.id} onClick={() => switchFolder(s.id)}>{s.name} <span>{s._count.banks}</span></MotionButton>)}<MotionButton className={folder === "unassigned" ? "active" : ""} onClick={() => switchFolder("unassigned")}>Belum dikelompokkan</MotionButton></div>
-    {listLoading ? <p role="status">Memuat bank soal…</p> : !folder ? <div className="staff-folder-grid">{subjects.map(s => <MotionButton key={s.id} className="staff-folder" onClick={() => switchFolder(s.id)}><Icon name="folder" size={24}/><strong>{s.name}</strong><small>{s._count.banks} bank soal</small></MotionButton>)}{!subjects.length && <div className="staff-empty"><h3>Belum ada mata pelajaran</h3><p>Buat folder untuk mulai menyusun bank soal.</p></div>}</div> : <><div className="staff-section-head"><div><h3>{subjects.find(s => s.id === folder)?.name || "Belum dikelompokkan"}</h3><p>{visible.length} bank pada halaman ini</p></div>{folder !== "unassigned" && <div className="staff-action-wrap"><MotionButton className="staff-secondary" disabled={!!subjects.find(s => s.id === folder)?._count.banks} title="Folder harus kosong sebelum dihapus" onClick={() => { setError(""); setDeleteFolder(true); }}>Hapus folder</MotionButton><label className="staff-secondary staff-file">Impor XML<input type="file" accept=".xml,application/xml,text/xml" onChange={e => { if (e.target.files?.[0]) void prepareXml(e.target.files[0]); e.target.value = ""; }}/></label><MotionButton className="staff-primary" onClick={() => setBankOpen(true)}><Icon name="plus" size={16}/> Buat bank</MotionButton></div>}</div>{visible.length ? <><div className="staff-list">{visible.map(b => <div className="staff-row staff-exam-row" key={b.id}><span><strong>{b.title}</strong><small>{b._count.questions} soal · {b.subject}</small></span><div className="staff-row-actions"><MotionButton onClick={() => void openBank(b.id, false)}>Preview</MotionButton><MotionButton onClick={() => void openBank(b.id, true)}>Edit</MotionButton><MotionButton onClick={() => void openBank(b.id, true, true)}>Tambah soal</MotionButton><MotionButton onClick={() => { setError(""); setMoveBank(b); setDestination(b.subjectId || ""); }}>Pindahkan</MotionButton><MotionButton onClick={() => void exportXml(b)}>Ekspor XML</MotionButton></div></div>)}</div><nav className="staff-pagination" aria-label="Halaman bank soal"><span>{visible.length} bank pada halaman ini</span><div><MotionButton className="staff-secondary" disabled={cursorIndex === 0} onClick={() => setCursorIndex(value => value - 1)}>Sebelumnya</MotionButton><MotionButton className="staff-secondary" disabled={!nextCursor} onClick={() => { if (!nextCursor) return; setCursors(current => [...current.slice(0, cursorIndex + 1), nextCursor]); setCursorIndex(value => value + 1); }}>Berikutnya</MotionButton></div></nav></> : <div className="staff-empty"><h3>Folder ini masih kosong</h3><p>Buat bank soal di mata pelajaran ini.</p></div>}</>}
-    <Dialog open={deleteFolder} title="Hapus mata pelajaran?" onClose={() => setDeleteFolder(false)}><div className="staff-form"><p>Folder yang kosong akan dihapus. Riwayat ujian tetap tersimpan.</p><ErrorText error={error}/><div className="staff-dialog-actions"><MotionButton className="staff-secondary" onClick={() => setDeleteFolder(false)}>Batal</MotionButton><MotionButton className="staff-primary" disabled={busy} onClick={() => void removeFolder()}>Hapus folder</MotionButton></div></div></Dialog>
-    <Dialog open={!!moveBank} title="Pindahkan bank soal" onClose={() => setMoveBank(null)}><form className="staff-form" onSubmit={move}><p>Pilih mata pelajaran untuk {moveBank?.title}.</p><label>Mata pelajaran tujuan<select required value={destination} onChange={e => setDestination(e.target.value)}><option value="">Pilih mata pelajaran</option>{subjects.map(subject => <option key={subject.id} value={subject.id}>{subject.name}</option>)}</select></label><ErrorText error={error}/><div className="staff-dialog-actions"><MotionButton type="button" className="staff-secondary" onClick={() => setMoveBank(null)}>Batal</MotionButton><MotionButton className="staff-primary" disabled={busy || destination === moveBank?.subjectId}>Pindahkan</MotionButton></div></form></Dialog>
-    <Dialog open={discard} title="Hapus draf soal?" onClose={() => setDiscard(false)}><div className="staff-form"><p>Perubahan yang belum disimpan ke bank akan dihapus. Soal yang sudah tersimpan di bank tetap ada.</p><ErrorText error={error}/><div className="staff-dialog-actions"><MotionButton className="staff-secondary" onClick={() => setDiscard(false)}>Batal</MotionButton><MotionButton className="staff-primary" disabled={busy} onClick={() => void discardDraft()}>Hapus draf</MotionButton></div></div></Dialog>
-    <Dialog open={!!backup} title="Preview impor XML" onClose={() => { setBackup(null); setXmlFile(null); }}><div className="staff-form"><p><strong>{backup?.title}</strong> · {backup?.questionCount} soal</p><p>Periksa soal setelah diimpor. Gambar eksternal tetap membutuhkan jaringan.</p>{backup?.warnings.map(warning => <p className="staff-note" key={warning}>{warning}</p>)}<ErrorText error={error}/><div className="staff-dialog-actions"><MotionButton className="staff-secondary" onClick={() => setBackup(null)}>Batal</MotionButton><MotionButton className="staff-primary" disabled={busy} onClick={() => void confirmImport()}>{busy ? "Mengimpor…" : "Impor sebagai draf"}</MotionButton></div></div></Dialog>
-    <Dialog open={folderOpen} title="Buat mata pelajaran" onClose={() => setFolderOpen(false)}><form className="staff-form" onSubmit={createFolder}><label>Nama mata pelajaran<input autoFocus required maxLength={100} value={folderName} onChange={e => setFolderName(e.target.value)}/></label><ErrorText error={error}/><MotionButton className="staff-primary" disabled={busy}>Simpan</MotionButton></form></Dialog>
-    <Dialog open={bankOpen} title="Buat bank soal" onClose={() => setBankOpen(false)}><form className="staff-form" onSubmit={createBank}><label>Nama bank<input autoFocus required maxLength={200} value={bankName} onChange={e => setBankName(e.target.value)}/></label><ErrorText error={error}/><MotionButton className="staff-primary" disabled={busy}>Buat bank</MotionButton></form></Dialog>
-    <Dialog open={!!selected} title={editor ? `Edit ${selected?.title || "bank soal"}` : `Preview ${selected?.title || "bank soal"}`} onClose={() => { setSelected(null); setEditor(false); setError(""); }}>{selected && <div className="staff-editor"><ErrorText error={error}/>{!editor ? <>{questions.length ? questions.map((q,i) => <section key={q.id || i} className="staff-question"><strong>Soal {i + 1}</strong><QuestionContent content={q.content} text={q.questionText} imageUrl={q.imageUrl} imageAlt={q.imageAlt}/>{q.options.map(o => <p key={o.id}><QuestionContent content={o.content} text={o.text} imageUrl={o.imageUrl} imageAlt={o.imageAlt}/></p>)}</section>) : <p>Belum ada soal dalam bank ini.</p>}<MotionButton className="staff-primary" onClick={() => void openBank(selected.id, true, true)}>Tambah soal</MotionButton></> : <>{questions.map((q,i) => <section className="staff-question" id={i === questions.length - 1 ? "staff-last-question" : undefined} key={q.sourceQuestionId || i}><div className="staff-section-head"><h3>Soal {i + 1}</h3><MotionButton type="button" onClick={() => updateQuestions(questions.filter((_,n) => n !== i))}>Hapus dari draf</MotionButton></div><label>Jenis soal<select value={q.type} onChange={e => updateQuestion(i, { type: e.target.value as BankQuestion["type"] })}><option value="single_choice">Pilihan tunggal</option><option value="multi_select">Pilihan jamak</option><option value="short_answer">Isian singkat</option></select></label><label>Isi soal</label><EquationEditor label={`Isi soal ${i + 1}`} value={q.content as JSONContent || blankDoc()} onChange={doc => updateQuestion(i, { content: doc, questionText: docToText(doc) })}/><label>Gambar soal<input type="file" accept="image/png,image/jpeg,image/webp" onChange={e => e.target.files?.[0] && void upload(e.target.files[0], i)}/></label>{q.imageUrl && <><label>Deskripsi gambar soal<input value={q.imageAlt || ""} onChange={e => updateQuestion(i, { imageAlt: e.target.value })}/></label><QuestionContent imageUrl={q.imageUrl} imageAlt={q.imageAlt}/></>}{q.type !== "short_answer" && <div className="staff-options">{q.options.map((o,j) => <div key={o.id}><label className="staff-check"><input type={q.type === "multi_select" ? "checkbox" : "radio"} name={`answer-${i}`} checked={q.type === "multi_select" ? !!q.correctAnswers?.includes(o.id) : q.correctAnswer === o.id} onChange={e => updateQuestion(i, q.type === "multi_select" ? { correctAnswers: e.target.checked ? [...(q.correctAnswers || []), o.id] : (q.correctAnswers || []).filter(id => id !== o.id) } : { correctAnswer: o.id })}/>Kunci pilihan {j + 1}</label><EquationEditor label={`Pilihan ${j + 1} soal ${i + 1}`} value={o.content as JSONContent || blankDoc(o.text)} onChange={doc => { const options: BankOption[] = q.options.map((opt,k) => k === j ? { ...opt, content: doc, text: docToText(doc) } : opt); updateQuestion(i, { options }); }}/><label>Gambar pilihan<input type="file" accept="image/png,image/jpeg,image/webp" onChange={e => e.target.files?.[0] && void upload(e.target.files[0], i, j)}/></label>{o.imageUrl && <><label>Deskripsi gambar pilihan<input value={o.imageAlt || ""} onChange={e => updateQuestion(i, { options: q.options.map((opt,k) => k === j ? { ...opt, imageAlt: e.target.value } : opt) })}/></label><QuestionContent imageUrl={o.imageUrl} imageAlt={o.imageAlt}/></>}{q.options.length > 2 && <MotionButton type="button" className="staff-secondary" onClick={() => updateQuestion(i, { options: q.options.filter((_,k) => k !== j), correctAnswer: q.correctAnswer === o.id ? null : q.correctAnswer, correctAnswers: (q.correctAnswers || []).filter(id => id !== o.id) })}>Hapus pilihan</MotionButton>}</div>)}{q.options.length < 6 && <MotionButton type="button" className="staff-secondary" onClick={() => { const id = ["A", "B", "C", "D", "E", "F"].find(key => !q.options.some(o => o.id === key)); if (id) updateQuestion(i, { options: [...q.options, { id, label: id, text: "", content: blankDoc() }] }); }}>Tambah pilihan</MotionButton>}</div>}<label>Poin<input type="number" min="1" max="100" value={q.points} onChange={e => updateQuestion(i, { points: Number(e.target.value) })}/></label></section>)}<MotionButton type="button" className="staff-secondary" onClick={() => updateQuestions([...questions,newQuestion()])}><Icon name="plus" size={16}/> Tambah soal</MotionButton><div className="staff-dialog-actions"><MotionButton type="button" className="staff-secondary" disabled={busy} onClick={() => setDiscard(true)}>Hapus draf</MotionButton><MotionButton type="button" className="staff-secondary" disabled={busy} onClick={() => void saveDraft(false)}>Simpan draf</MotionButton><MotionButton type="button" className="staff-primary" disabled={busy} onClick={() => void saveDraft(true)}>{busy ? "Menyimpan…" : "Simpan ke bank"}</MotionButton></div></>}</div>}</Dialog>
-  </>;
+  return (
+    <>
+      <div className="staff-section-head">
+        <div>
+          <h2>Bank soal</h2>
+          <p>Susun dan kelola butir soal ujian bersama berdasarkan mata pelajaran.</p>
+        </div>
+        <div className="staff-action-wrap">
+          <MotionButton className="staff-secondary" onClick={() => setFolderOpen(true)}>
+            <Icon name="plus" size={16} /> Mata pelajaran
+          </MotionButton>
+          <label className="staff-secondary staff-file">
+            Impor XML
+            <input
+              type="file"
+              accept=".xml,application/xml,text/xml"
+              onChange={(e) => {
+                if (e.target.files?.[0]) void prepareXml(e.target.files[0]);
+                e.target.value = "";
+              }}
+            />
+          </label>
+          <MotionButton className="staff-primary" onClick={() => startNewQuestionBank()}>
+            <Icon name="plus" size={16} /> Buat Soal
+          </MotionButton>
+        </div>
+      </div>
+
+      {notice && <p role="status" className="staff-note" style={{ background: "#edfdf5", borderColor: "#c6f6d5", color: "#22543d" }}>{notice}</p>}
+      <ErrorText error={!selected && !folderOpen && !bankOpen && !backup && !moveBank && !deleteFolder && !viewingBank ? error : ""} />
+
+      <div className="staff-folder-tabs">
+        <MotionButton className={!folder ? "active" : ""} onClick={() => switchFolder(null)}>
+          Semua bank
+        </MotionButton>
+        {subjects.map((s) => (
+          <MotionButton
+            className={folder === s.id ? "active" : ""}
+            key={s.id}
+            onClick={() => switchFolder(s.id)}
+          >
+            {s.name} <span>{s._count.banks}</span>
+          </MotionButton>
+        ))}
+        <MotionButton className={folder === "unassigned" ? "active" : ""} onClick={() => switchFolder("unassigned")}>
+          Belum dikelompokkan
+        </MotionButton>
+      </div>
+
+      {/* Action bar sub-folder (hanya tampil jika memilih folder spesifik) */}
+      {folder && folder !== "unassigned" && (
+        <div className="staff-section-head" style={{ marginTop: 10, marginBottom: 14 }}>
+          <div>
+            <h3>{subjects.find((s) => s.id === folder)?.name || "Folder"}</h3>
+            <p>{visible.length} bank soal pada mata pelajaran ini</p>
+          </div>
+          <div className="staff-action-wrap">
+            <MotionButton
+              className="staff-secondary"
+              disabled={!!subjects.find((s) => s.id === folder)?._count.banks}
+              title="Folder harus kosong sebelum dihapus"
+              onClick={() => {
+                setError("");
+                setDeleteFolder(true);
+              }}
+            >
+              Hapus folder
+            </MotionButton>
+            <label className="staff-secondary staff-file">
+              Impor XML
+              <input
+                type="file"
+                accept=".xml,application/xml,text/xml"
+                onChange={(e) => {
+                  if (e.target.files?.[0]) void prepareXml(e.target.files[0]);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+            <MotionButton className="staff-primary" onClick={() => setBankOpen(true)}>
+              <Icon name="plus" size={16} /> Buat bank
+            </MotionButton>
+          </div>
+        </div>
+      )}
+
+      {listLoading ? (
+        <p role="status">Memuat bank soal…</p>
+      ) : visible.length > 0 ? (
+        <>
+          <div className="staff-list">
+            {visible.map((b) => (
+              <div className="staff-row staff-exam-row" key={b.id}>
+                <span>
+                  <strong>{b.title}</strong>
+                  <small>
+                    {b._count.questions} soal · {b.subject}
+                    {b.targetGrade ? ` · Tingkat ${b.targetGrade}` : ""}
+                  </small>
+                </span>
+                <div className="staff-row-actions">
+                  <MotionButton onClick={() => void previewBank(b)}>Preview</MotionButton>
+                  <MotionButton onClick={() => void openBank(b.id, true)}>Edit</MotionButton>
+                  <MotionButton onClick={() => void openBank(b.id, true, true)}>Tambah soal</MotionButton>
+                  <MotionButton
+                    onClick={() => {
+                      setError("");
+                      setMoveBank(b);
+                      setDestination(b.subjectId || "");
+                    }}
+                  >
+                    Pindahkan
+                  </MotionButton>
+                  <MotionButton onClick={() => void exportXml(b)}>Ekspor XML</MotionButton>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <nav className="staff-pagination" aria-label="Halaman bank soal">
+            <span>{visible.length} bank pada halaman ini</span>
+            <div>
+              <MotionButton
+                className="staff-secondary"
+                disabled={cursorIndex === 0}
+                onClick={() => setCursorIndex((value) => value - 1)}
+              >
+                Sebelumnya
+              </MotionButton>
+              <MotionButton
+                className="staff-secondary"
+                disabled={!nextCursor}
+                onClick={() => {
+                  if (!nextCursor) return;
+                  setCursors((current) => [...current.slice(0, cursorIndex + 1), nextCursor]);
+                  setCursorIndex((value) => value + 1);
+                }}
+              >
+                Berikutnya
+              </MotionButton>
+            </div>
+          </nav>
+        </>
+      ) : (
+        <div className="staff-empty" style={{ padding: "48px 24px" }}>
+          <h3>Belum ada bank soal</h3>
+          <p>Mulai susun butir soal pertama Anda untuk pelaksanaan ujian.</p>
+          <div style={{ marginTop: 16 }}>
+            <MotionButton className="staff-primary" onClick={() => startNewQuestionBank()}>
+              <Icon name="plus" size={16} /> Buat Soal Sekarang
+            </MotionButton>
+          </div>
+        </div>
+      )}
+
+      {/* Pop-up Preview Dialog for Entire Bank */}
+      <Dialog
+        open={!!viewingBank}
+        variant="wide"
+        title={`Pratinjau — ${viewingBank?.title || "Bank Soal"}`}
+        onClose={() => setViewingBank(null)}
+      >
+        {viewingBank && (
+          <div className="bank-full-preview-list">
+            <p style={{ margin: "0 0 10px", color: "var(--staff-muted)", fontSize: "11px" }}>
+              Mata pelajaran: <strong>{viewingBank.subject}</strong> · Total:{" "}
+              <strong>{viewingBank.questions?.length || 0} butir soal</strong>
+            </p>
+            {viewingBank.questions && viewingBank.questions.length > 0 ? (
+              viewingBank.questions.map((q, idx) => (
+                <section key={q.id || idx} className="bank-student-card" style={{ marginBottom: 10, padding: 14 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <strong style={{ fontSize: "12px" }}>Soal {idx + 1}</strong>
+                    <span style={{ fontSize: "11px", color: "var(--staff-muted)" }}>
+                      {q.points} Poin · {q.type === "short_answer" ? "Penilaian manual" : "Auto-grade"}
+                    </span>
+                  </div>
+                  <QuestionContent content={q.content} text={q.questionText} imageUrl={q.imageUrl} imageAlt={q.imageAlt} />
+                  {q.type === "short_answer" ? (
+                    <p className="staff-note" style={{ margin: "8px 0 0" }}>
+                      Soal isian singkat (penilaian manual oleh guru).
+                    </p>
+                  ) : (
+                    <div className="bank-student-options" style={{ marginTop: 10 }}>
+                      {q.options.map((o) => {
+                        const isCorrect =
+                          q.type === "multi_select"
+                            ? q.correctAnswers?.includes(o.id)
+                            : q.correctAnswer === o.id;
+                        return (
+                          <div key={o.id} className={`bank-student-opt ${isCorrect ? "selected" : ""}`}>
+                            <input
+                              type={q.type === "multi_select" ? "checkbox" : "radio"}
+                              checked={!!isCorrect}
+                              readOnly
+                            />
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <QuestionContent
+                                content={o.content}
+                                text={o.text}
+                                imageUrl={o.imageUrl}
+                                imageAlt={o.imageAlt}
+                              />
+                            </div>
+                            {isCorrect && (
+                              <span style={{ fontSize: "10px", fontWeight: 700, color: "#7867d9" }}>
+                                Kunci
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </section>
+              ))
+            ) : (
+              <p>Belum ada butir soal dalam bank ini.</p>
+            )}
+            <div className="staff-dialog-actions" style={{ marginTop: 16 }}>
+              <MotionButton
+                className="staff-primary"
+                onClick={() => {
+                  const id = viewingBank.id;
+                  setViewingBank(null);
+                  void openBank(id, true, true);
+                }}
+              >
+                Tambah Soal ke Bank Ini
+              </MotionButton>
+            </div>
+          </div>
+        )}
+      </Dialog>
+
+      {/* Dialog Folder Management */}
+      <Dialog open={deleteFolder} title="Hapus mata pelajaran?" onClose={() => setDeleteFolder(false)}>
+        <div className="staff-form">
+          <p>Folder yang kosong akan dihapus. Riwayat ujian tetap tersimpan.</p>
+          <ErrorText error={error} />
+          <div className="staff-dialog-actions">
+            <MotionButton className="staff-secondary" onClick={() => setDeleteFolder(false)}>
+              Batal
+            </MotionButton>
+            <MotionButton className="staff-primary" disabled={busy} onClick={() => void removeFolder()}>
+              Hapus folder
+            </MotionButton>
+          </div>
+        </div>
+      </Dialog>
+
+      {/* Dialog Pindahkan Bank */}
+      <Dialog open={!!moveBank} title="Pindahkan bank soal" onClose={() => setMoveBank(null)}>
+        <form className="staff-form" onSubmit={move}>
+          <p>Pilih mata pelajaran untuk {moveBank?.title}.</p>
+          <label>
+            Mata pelajaran tujuan
+            <select required value={destination} onChange={(e) => setDestination(e.target.value)}>
+              <option value="">Pilih mata pelajaran</option>
+              {subjects.map((subject) => (
+                <option key={subject.id} value={subject.id}>
+                  {subject.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <ErrorText error={error} />
+          <div className="staff-dialog-actions">
+            <MotionButton type="button" className="staff-secondary" onClick={() => setMoveBank(null)}>
+              Batal
+            </MotionButton>
+            <MotionButton className="staff-primary" disabled={busy || destination === moveBank?.subjectId}>
+              Pindahkan
+            </MotionButton>
+          </div>
+        </form>
+      </Dialog>
+
+      {/* Dialog XML Import Preview */}
+      <Dialog
+        open={!!backup}
+        title="Preview impor XML"
+        onClose={() => {
+          setBackup(null);
+          setXmlFile(null);
+        }}
+      >
+        <div className="staff-form">
+          <p>
+            <strong>{backup?.title}</strong> · {backup?.questionCount} soal
+          </p>
+          <p>Periksa soal setelah diimpor. Gambar eksternal tetap membutuhkan jaringan.</p>
+          {backup?.warnings.map((warning) => (
+            <p className="staff-note" key={warning}>
+              {warning}
+            </p>
+          ))}
+          <ErrorText error={error} />
+          <div className="staff-dialog-actions">
+            <MotionButton
+              className="staff-secondary"
+              onClick={() => {
+                setBackup(null);
+                setXmlFile(null);
+              }}
+            >
+              Batal
+            </MotionButton>
+            <MotionButton className="staff-primary" disabled={busy} onClick={() => void confirmImport()}>
+              {busy ? "Mengimpor…" : "Impor sebagai draf"}
+            </MotionButton>
+          </div>
+        </div>
+      </Dialog>
+
+      {/* Dialog Create Folder */}
+      <Dialog open={folderOpen} title="Buat mata pelajaran" onClose={() => setFolderOpen(false)}>
+        <form className="staff-form" onSubmit={createFolder}>
+          <label>
+            Nama mata pelajaran
+            <input
+              autoFocus
+              required
+              maxLength={100}
+              value={folderName}
+              onChange={(e) => setFolderName(e.target.value)}
+            />
+          </label>
+          <ErrorText error={error} />
+          <MotionButton className="staff-primary" disabled={busy}>
+            Simpan
+          </MotionButton>
+        </form>
+      </Dialog>
+
+      {/* Dialog Create Bank */}
+      <Dialog open={bankOpen} title="Buat bank soal" onClose={() => setBankOpen(false)}>
+        <form className="staff-form" onSubmit={createBank}>
+          <label>
+            Nama bank
+            <input
+              autoFocus
+              required
+              maxLength={200}
+              value={bankName}
+              onChange={(e) => setBankName(e.target.value)}
+            />
+          </label>
+          <ErrorText error={error} />
+          <MotionButton className="staff-primary" disabled={busy}>
+            Buat bank
+          </MotionButton>
+        </form>
+      </Dialog>
+    </>
+  );
 }

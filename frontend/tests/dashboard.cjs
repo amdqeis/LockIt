@@ -1,7 +1,7 @@
 /* Dashboard checks with controlled API responses; no database fixtures are changed. */
 const assert = require('node:assert/strict');
 const { chromium } = require('playwright-core');
-const origin = process.env.EDUQUAS_TEST_FRONTEND_URL || 'http://localhost:3002';
+const origin = process.env.EDUQUAS_TEST_FRONTEND_URL || 'http://localhost:3000';
 const executablePath = process.env.CHROMIUM_PATH || '/usr/bin/chromium';
 const exam = { id: 'exam-1', title: 'Ujian Matematika', accessCode: 'ABC234', status: 'draft', durationMinutes: 60, subjectId: 'subject-1', subjectName: 'Matematika', className: 'X A', academicYear: '2026/2027', semester: 'ganjil', category: 'Quiz', revision: 1, settings: { bank_id: 'bank-1' }, violationPolicy: {}, _count: { questions: 1, students: 2 } };
 const bank = { id: 'bank-1', title: 'Aljabar', subject: 'Matematika', subjectId: 'subject-1', revision: 2, _count: { questions: 1 }, questions: [{ id: 'q1', type: 'single_choice', questionText: 'Hitung', options: [{ id: 'A', label: 'A', text: 'Satu' }, { id: 'B', label: 'B', text: 'Dua' }], correctAnswer: 'A', points: 10 }], drafts: [] };

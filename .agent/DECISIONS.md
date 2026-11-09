@@ -64,3 +64,13 @@
 - Keputusan: Pencarian memakai daftar menu dan API ujian, notifikasi memakai ringkasan pekerjaan, serta tarikan lanjutan di akhir halaman membuka menu berikutnya dengan tautan yang bisa diakses keyboard.
 - Alasan: Mempertahankan fungsi nyata dan menyediakan cara navigasi untuk perangkat sentuh, mouse, dan keyboard.
 - Ditolak: Notifikasi buatan dan perpindahan otomatis ketika dialog terbuka atau pengguna sedang mengisi input.
+
+### 2026-11-09 — Editor bank soal in-place 3-tahap dan rollover tahun ajaran
+- Keputusan: Editor bank soal diubah dari pop up modal menjadi tampilan in-place 3-tahap (Buat Soal, Pratinjau Siswa, Konfirmasi Unggah) dengan live preview split di sisi kanan, navigator nomor compact, CTA simbol-saja tanpa teks panjang, dan pita simbol matematika Mathway; aksi pratinjau bank dari tabel tetap berupa pop up modal; form ujian menghapus input teks tahun ajaran manual (otomatis kalender akademik); aksi rollover tahun ajaran khusus admin mengarsipkan massal ujian non-archived.
+- Alasan: Guru mendapatkan ruang kerja yang leluasa tanpa batasan dialog modal, formula KaTeX dan tata letak siswa dapat dipratinjau langsung secara interaktif, kontrol lebih hemat tempat, dan tahun ajaran terkelola secara otomatis tanpa kesalahan ketik manual.
+- Ditolak: Membiarkan editor bank soal di dalam dialog sempit, mewajibkan input teks tahun ajaran manual di form ujian, dan menghapus ujian secara destruktif saat pergantian tahun ajaran.
+
+### 2026-11-09 — Penyesuaian skala font size dashboard mengikuti referensi Example
+- Keputusan: Skala tipografi dashboard guru disesuaikan ke standar compact `DESIGN/Example/src/styles.css` (base 11px-12px, heading utama 26px, section head 20px, subhead/card title 15px-16px, button 11px tinggi 40px, field label 11px, helper/muted 9px-10px, tags/badges 8px-9px).
+- Alasan: Mengembalikan tampilan dashboard agar proporsional, rapi, dan identik dengan desain referensi Example tanpa elemen teks yang tampak kebesaran.
+- Ditolak: Mempertahankan base font 14px warisan umum yang membuat komponen dan tabel menjadi terlalu renggang dan melebar.

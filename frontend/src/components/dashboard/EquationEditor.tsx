@@ -12,16 +12,66 @@ import type { MathfieldElement } from "mathlive";
 import { history, redo, undo } from "@tiptap/pm/history";
 import { keymap } from "@tiptap/pm/keymap";
 
-const templates: { label: string; latex: string }[] = [
-  { label: "Pecahan", latex: "\\frac{#?}{#?}" },
-  { label: "Pangkat", latex: "{#?}^{#?}" },
-  { label: "Indeks", latex: "{#?}_{#?}" },
-  { label: "Akar", latex: "\\sqrt{#?}" },
-  { label: "Kurung", latex: "\\left(#?\\right)" },
-  { label: "Integral", latex: "\\int_{#?}^{#?}#?" },
-  { label: "Jumlah", latex: "\\sum_{#?}^{#?}#?" },
-  { label: "Limit", latex: "\\lim_{#?}#?" },
-  { label: "Matriks", latex: "\\begin{pmatrix}#?&#?\\\\#?&#?\\end{pmatrix}" },
+export interface MathwaySymbol {
+  label: string;
+  latex: string;
+  title: string;
+}
+
+export const mathwayGroups: { name: string; symbols: MathwaySymbol[] }[] = [
+  {
+    name: "Dasar",
+    symbols: [
+      { label: "a/b", latex: "\\frac{#?}{#?}", title: "Pecahan" },
+      { label: "x²", latex: "{#?}^{2}", title: "Kuadrat" },
+      { label: "xⁿ", latex: "{#?}^{#?}", title: "Pangkat" },
+      { label: "xₙ", latex: "{#?}_{#?}", title: "Subskrip / Indeks" },
+      { label: "√x", latex: "\\sqrt{#?}", title: "Akar kuadrat" },
+      { label: "ⁿ√x", latex: "\\sqrt[#?]{#?}", title: "Akar pangkat n" },
+    ],
+  },
+  {
+    name: "Operator",
+    symbols: [
+      { label: "±", latex: "\\pm", title: "Plus-minus" },
+      { label: "×", latex: "\\times", title: "Perkalian" },
+      { label: "÷", latex: "\\div", title: "Pembagian" },
+      { label: "≤", latex: "\\le", title: "Kurang dari sama dengan" },
+      { label: "≥", latex: "\\ge", title: "Lebih dari sama dengan" },
+      { label: "≠", latex: "\\neq", title: "Tidak sama dengan" },
+      { label: "≈", latex: "\\approx", title: "Mendekati / kira-kira" },
+    ],
+  },
+  {
+    name: "Simbol & Yunani",
+    symbols: [
+      { label: "π", latex: "\\pi", title: "Pi" },
+      { label: "θ", latex: "\\theta", title: "Theta" },
+      { label: "α", latex: "\\alpha", title: "Alpha" },
+      { label: "β", latex: "\\beta", title: "Beta" },
+      { label: "∞", latex: "\\infty", title: "Tak hingga" },
+    ],
+  },
+  {
+    name: "Aljabar & Kalkulus",
+    symbols: [
+      { label: "∫", latex: "\\int_{#?}^{#?}#?", title: "Integral" },
+      { label: "∑", latex: "\\sum_{#?}^{#?}#?", title: "Sigma / Penjumlahan" },
+      { label: "lim", latex: "\\lim_{#?}#?", title: "Limit" },
+      { label: "log", latex: "\\log", title: "Logaritma" },
+      { label: "ln", latex: "\\ln", title: "Logaritma natural" },
+      { label: "|x|", latex: "|#?|", title: "Nilai mutlak" },
+    ],
+  },
+  {
+    name: "Kurung & Matriks",
+    symbols: [
+      { label: "(x)", latex: "\\left(#?\\right)", title: "Kurung biasa" },
+      { label: "[x]", latex: "\\left[#?\\right]", title: "Kurung siku" },
+      { label: "{x}", latex: "\\left\\{#?\\right\\}", title: "Kurung kurawal" },
+      { label: "[2×2]", latex: "\\begin{pmatrix}#?&#?\\\\#?&#?\\end{pmatrix}", title: "Matriks 2x2" },
+    ],
+  },
 ];
 
 function EquationNodeView({ node, updateAttributes, editor, getPos }: NodeViewProps) {
@@ -32,6 +82,8 @@ function EquationNodeView({ node, updateAttributes, editor, getPos }: NodeViewPr
   useEffect(() => { updateRef.current = updateAttributes; }, [updateAttributes]);
   useEffect(() => { latexRef.current = node.attrs.latex || ""; }, [node.attrs.latex]);
   const [advanced, setAdvanced] = useState(false);
+  const [activeGroupIndex, setActiveGroupIndex] = useState(0);
+
   useEffect(() => {
     let active = true;
     let element: MathfieldElement | null = null;
@@ -58,13 +110,77 @@ function EquationNodeView({ node, updateAttributes, editor, getPos }: NodeViewPr
     });
     return () => { active = false; element?.removeEventListener("input", onInput); element?.removeEventListener("move-out", onMoveOut); element?.remove(); field.current = null; };
   }, [editor, getPos, node.nodeSize]);
-  useEffect(() => { if (field.current && field.current.value !== (node.attrs.latex || "")) field.current.setValue(node.attrs.latex || "", { silenceNotifications: true }); }, [node.attrs.latex]);
-  return <NodeViewWrapper as={node.type.name === "equationBlock" ? "div" : "span"} className="equation-node" contentEditable={false}>
-    <span className="equation-caption">Persamaan</span><span ref={container} />
-    <span className="equation-tools">{templates.map(t => <MotionButton type="button" key={t.label} onClick={() => { field.current?.executeCommand(["insert", t.latex, { selectionMode: "placeholder" }]); field.current?.focus(); }}>{t.label}</MotionButton>)}
-      <MotionButton type="button" onClick={() => setAdvanced(!advanced)} aria-expanded={advanced}>LaTeX</MotionButton></span>
-    {advanced && <label className="equation-advanced">LaTeX <input value={node.attrs.latex || ""} onChange={e => { updateAttributes({ latex: e.target.value }); field.current?.setValue(e.target.value, { silenceNotifications: true }); }} /></label>}
-  </NodeViewWrapper>;
+
+  useEffect(() => {
+    if (field.current && field.current.value !== (node.attrs.latex || "")) {
+      field.current.setValue(node.attrs.latex || "", { silenceNotifications: true });
+    }
+  }, [node.attrs.latex]);
+
+  const insertSymbol = (latex: string) => {
+    field.current?.executeCommand(["insert", latex, { selectionMode: "placeholder" }]);
+    field.current?.focus();
+  };
+
+  return (
+    <NodeViewWrapper as={node.type.name === "equationBlock" ? "div" : "span"} className="equation-node" contentEditable={false}>
+      <span className="equation-caption">Persamaan</span>
+      <span ref={container} />
+
+      <div className="mathway-ribbon">
+        <div className="mathway-tabs" role="tablist">
+          {mathwayGroups.map((g, idx) => (
+            <MotionButton
+              key={g.name}
+              type="button"
+              className={`mathway-tab-btn ${activeGroupIndex === idx ? "active" : ""}`}
+              onClick={() => setActiveGroupIndex(idx)}
+              role="tab"
+              aria-selected={activeGroupIndex === idx}
+            >
+              {g.name}
+            </MotionButton>
+          ))}
+          <MotionButton
+            type="button"
+            className={`mathway-tab-btn ${advanced ? "active" : ""}`}
+            onClick={() => setAdvanced(!advanced)}
+            aria-expanded={advanced}
+          >
+            LaTeX
+          </MotionButton>
+        </div>
+
+        <div className="mathway-symbols">
+          {mathwayGroups[activeGroupIndex]?.symbols.map((s) => (
+            <MotionButton
+              type="button"
+              key={s.label}
+              className="mathway-symbol-btn"
+              title={s.title}
+              aria-label={s.title}
+              onClick={() => insertSymbol(s.latex)}
+            >
+              {s.label}
+            </MotionButton>
+          ))}
+        </div>
+      </div>
+
+      {advanced && (
+        <label className="equation-advanced">
+          LaTeX{" "}
+          <input
+            value={node.attrs.latex || ""}
+            onChange={(e) => {
+              updateAttributes({ latex: e.target.value });
+              field.current?.setValue(e.target.value, { silenceNotifications: true });
+            }}
+          />
+        </label>
+      )}
+    </NodeViewWrapper>
+  );
 }
 
 const Equation = Node.create({
@@ -89,11 +205,41 @@ export function docToText(node: JSONContent): string {
 export default function EquationEditor({ value, onChange, label, disabled = false }: { value: JSONContent; onChange: (doc: JSONContent) => void; label: string; disabled?: boolean }) {
   const onChangeRef = useRef(onChange);
   useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
-  const editor = useEditor({ immediatelyRender: false, extensions: [Document, Paragraph, Text, HardBreak, History, Equation, EquationBlock], content: value,
+  const editor = useEditor({
+    immediatelyRender: false,
+    extensions: [Document, Paragraph, Text, HardBreak, History, Equation, EquationBlock],
+    content: value,
     editorProps: { attributes: { "aria-label": label, class: "equation-prose", role: "textbox", "aria-multiline": "true" } },
     onUpdate: ({ editor: current }) => onChangeRef.current(current.getJSON()),
   });
   useEffect(() => { if (editor && JSON.stringify(editor.getJSON()) !== JSON.stringify(value)) editor.commands.setContent(value, { emitUpdate: false }); }, [editor, value]);
   useEffect(() => { editor?.setEditable(!disabled, false); }, [editor, disabled]);
-  return <div className="equation-editor"><div className="equation-editor-toolbar"><MotionButton type="button" disabled={disabled} onClick={() => editor?.chain().focus().insertContent({ type: "equation", attrs: { latex: "" } }).run()}>Sisipkan persamaan <span>Alt+=</span></MotionButton><MotionButton type="button" disabled={disabled} onClick={() => editor?.chain().focus().insertContent({ type: "equationBlock", attrs: { latex: "" } }).run()}>Persamaan blok</MotionButton></div><EditorContent editor={editor} /></div>;
+
+  return (
+    <div className="equation-editor">
+      <div className="equation-editor-toolbar">
+        <MotionButton
+          type="button"
+          disabled={disabled}
+          className="equation-icon-btn"
+          title="Sisipkan persamaan inline (Alt+=)"
+          aria-label="Sisipkan persamaan inline"
+          onClick={() => editor?.chain().focus().insertContent({ type: "equation", attrs: { latex: "" } }).run()}
+        >
+          √x
+        </MotionButton>
+        <MotionButton
+          type="button"
+          disabled={disabled}
+          className="equation-icon-btn"
+          title="Sisipkan persamaan blok"
+          aria-label="Sisipkan persamaan blok"
+          onClick={() => editor?.chain().focus().insertContent({ type: "equationBlock", attrs: { latex: "" } }).run()}
+        >
+          ∑
+        </MotionButton>
+      </div>
+      <EditorContent editor={editor} />
+    </div>
+  );
 }

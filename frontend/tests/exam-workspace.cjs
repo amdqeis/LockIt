@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const { chromium } = require('playwright-core');
 
-const origin = process.env.EDUQUAS_TEST_FRONTEND_URL || 'http://localhost:3002';
+const origin = process.env.EDUQUAS_TEST_FRONTEND_URL || 'http://localhost:3000';
 const executablePath = process.env.CHROMIUM_PATH || '/usr/bin/chromium';
 const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/a2kAAAAASUVORK5CYII=', 'base64');
 const questions = [

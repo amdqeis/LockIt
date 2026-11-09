@@ -1,7 +1,7 @@
 /* Browser checks use simulated API responses and never touch a database. */
 const assert = require('node:assert/strict');
 const { chromium } = require('playwright-core');
-const origin = process.env.EDUQUAS_TEST_FRONTEND_URL || 'http://localhost:3002';
+const origin = process.env.EDUQUAS_TEST_FRONTEND_URL || 'http://localhost:3000';
 const executablePath = process.env.CHROMIUM_PATH || '/usr/bin/chromium';
 
 (async () => {

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# EduQuas Platform — Dev Server Launcher (Frontend: 3002 | Backend: 3001)
+# EduQuas Platform — Dev Server Launcher (Frontend: 3000 | Backend: 3001)
 # ==============================================================================
 
 set -eo pipefail
@@ -66,8 +66,8 @@ check_port() {
   fi
 }
 
-if check_port 3002; then
-  echo -e "${YELLOW}⚠️  Port 3002 (Frontend) sedang aktif / digunakan oleh proses lain.${NC}"
+if check_port 3000; then
+  echo -e "${YELLOW}⚠️  Port 3000 (Frontend) sedang aktif / digunakan oleh proses lain.${NC}"
 fi
 
 if check_port 3001; then
@@ -91,17 +91,17 @@ while ! curl -s -o /dev/null http://127.0.0.1:3001 2>/dev/null; do
 done
 echo -e "${GREEN}✓ Backend siap di http://localhost:3001${NC}"
 
-echo -e "${CYAN}▶ Menjalankan Frontend Next.js di port 3002...${NC}"
+echo -e "${CYAN}▶ Menjalankan Frontend Next.js di port 3000...${NC}"
 (
   cd frontend
   npm run dev
-) 2>&1 | sed "s/^/$(echo -e "${CYAN}[FE-3002]${NC} ")/" &
+) 2>&1 | sed "s/^/$(echo -e "${CYAN}[FE-3000]${NC} ")/" &
 FE_PID=$!
 
 echo -e "${GREEN}${BOLD}"
 echo "=========================================================="
 echo "   ✅ EduQuas Services Berjalan:"
-echo "   🌐 Frontend Web: http://localhost:3002"
+echo "   🌐 Frontend Web: http://localhost:3000"
 echo "   🔌 Backend API : http://localhost:3001"
 echo "   Tekan [Ctrl+C] untuk menghentikan kedua server."
 echo "=========================================================="
