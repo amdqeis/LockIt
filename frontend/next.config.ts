@@ -1,24 +1,14 @@
 import type { NextConfig } from "next";
 
-const backendUrl = process.env.INTERNAL_BACKEND_URL || process.env.NEXT_PUBLIC_BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:3001";
-
+const backend = process.env.INTERNAL_BACKEND_URL || "http://127.0.0.1:3001";
 const nextConfig: NextConfig = {
-  /* config options here */
-  cacheComponents: true,
-  partialPrefetching: true,
-  output: "standalone", // required for Docker multi-stage build
+  distDir: process.env.EDUQUAS_FRONTEND_DIST_DIR || ".next",
+  experimental: { useTypeScriptCli: false },
   async rewrites() {
     return [
-      {
-        source: "/api/:path*",
-        destination: `${backendUrl}/api/:path*`,
-      },
-      {
-        source: "/socket.io/:path*",
-        destination: `${backendUrl}/socket.io/:path*`,
-      },
+      { source: "/api/:path*", destination: `${backend}/api/:path*` },
+      { source: "/uploads/exams/:path*", destination: `${backend}/uploads/exams/:path*` },
     ];
   },
 };
-
 export default nextConfig;

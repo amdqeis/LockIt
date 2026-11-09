@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { successResponse, errorResponse, safeErrorMessage } from "@/lib/response";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { AppError } from "@/lib/errors";
+import { validateChoiceAnswer } from "@/lib/student-answer";
 
 const answerSchema = z.object({
   questionId: z.string().uuid("ID soal tidak valid"),
@@ -68,7 +69,7 @@ export async function POST(req: NextRequest) {
     // Verify question belongs to this exam and check question type
     const question = await prisma.question.findUnique({
       where: { id: questionId },
-      select: { examId: true, type: true },
+      select: { examId: true, type: true, options: true },
     });
 
     if (!question || question.examId !== exam.id) {
@@ -81,10 +82,9 @@ export async function POST(req: NextRequest) {
         // Soal jawaban singkat: simpan teks mentah siswa tanpa uppercase atau regex pilihan ganda
         cleanOption = selectedOption.trim();
       } else {
-        cleanOption = selectedOption.trim().toUpperCase();
-        if (!/^([A-Z])(,[A-Z])*$/.test(cleanOption)) {
-          return errorResponse("VALIDATION_ERROR", "Format opsi jawaban harus huruf tunggal atau huruf dipisah koma (mis. A,C)", 400);
-        }
+        const selection = validateChoiceAnswer(question.options, selectedOption, question.type === "multi_select");
+        if (!selection.ok) return errorResponse("VALIDATION_ERROR", selection.message, 400);
+        cleanOption = selection.value;
       }
     }
 

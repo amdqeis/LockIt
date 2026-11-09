@@ -24,3 +24,14 @@ export async function PUT(req: NextRequest, { params }: Context) {
     return successResponse(await prisma.questionBankDraft.findUnique({ where: { id: draftId } }));
   } catch (err) { return bankError(err); }
 }
+
+export async function DELETE(req: NextRequest, { params }: Context) {
+  try {
+    const teacher = await bankTeacher(req);
+    const { id, draftId } = await params;
+    const { revision } = z.object({ revision: z.number().int().positive() }).parse(await req.json());
+    const removed = await prisma.questionBankDraft.deleteMany({ where: { id: draftId, bankId: id, createdBy: teacher.teacherId, revision, committedAt: null } });
+    if (!removed.count) return errorResponse("CONFLICT", "Draf telah berubah atau tidak dapat dihapus.", 409);
+    return successResponse({ deleted: true });
+  } catch (err) { return bankError(err); }
+}

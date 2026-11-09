@@ -8,7 +8,7 @@ import { createRequestLogger } from "@/lib/logger";
 import { associateStudentWithBrowser } from "@/lib/browser-identity";
 
 const joinSchema = z.object({
-  accessCode: z.string().min(4, "Kode akses tidak valid").max(10).trim(),
+  accessCode: z.string().trim().regex(/^[A-Za-z0-9]{6}$/, "Kode ujian harus terdiri dari 6 karakter huruf atau angka."),
   name: z.string().min(2, "Nama minimal 2 karakter").max(100).trim(),
   nisn: z.string().regex(/^\d{10}$/, "NISN harus 10 digit angka").trim(),
 });
@@ -115,97 +115,85 @@ export async function POST(req: NextRequest) {
         return errorResponse("STUDENT_KICKED", `Kamu telah dikeluarkan dari ujian ini: ${student.kickReason || "oleh pengawas"}`, 403);
       }
 
+      if (student.status === "rejected") {
+        freshToken = generateStudentSessionToken({ studentId: student.id, examId: exam.id, nisn: student.nisn });
+        const updated = await prisma.$transaction(async (tx) => {
+          const changed = await tx.student.updateMany({
+            where: { id: student!.id, examId: exam.id, status: "rejected" },
+            data: { name, status: "waiting", sessionTokenHash: hashStudentToken(freshToken), ipAddress: clientIp, userAgent, acceptedAt: null, kickReason: null },
+          });
+          if (!changed.count) throw new Error("PERMISSION_REAPPLY_RACE");
+          await tx.admissionHistory.create({ data: { studentId: student!.id, action: "reapplied" } });
+          return tx.student.findUniqueOrThrow({ where: { id: student!.id } });
+        });
+        student = updated;
+
+        const io = (globalThis as any).io;
+        if (io) {
+          io.of("/teacher-dashboard").to(`exam:${exam.id}`).emit("student_joined_waiting", {
+            studentId: student.id, name: student.name, nisn: student.nisn, status: student.status, joinedAt: student.joinedAt.toISOString(),
+          });
+        }
+      } else {
+
       // Reconnect scenario
-      const previousIp = student.ipAddress;
       log.info("Student reconnect", { studentId: student.id, nisn: student.nisn, examId: exam.id });
       freshToken = generateStudentSessionToken({
         studentId: student.id,
         examId: exam.id,
         nisn: student.nisn,
       });
-
-      const ipChanged = !!previousIp && previousIp !== clientIp;
-
-      student = await prisma.student.update({
-        where: { id: student.id },
-        data: {
-          name,           // Selalu update nama saat reconnect (D-07)
-          sessionTokenHash: hashStudentToken(freshToken),
-          ipAddress: clientIp,
-          userAgent,
-        },
-      });
-
-      // Catat reconnect event
-      await prisma.proctoringEvent.create({
-        data: {
-          studentId: student.id,
-          examId: exam.id,
-          eventType: "reconnect",
-          metadata: {
-            newIp: clientIp,
-            oldIp: previousIp ?? null,
-            ipChanged,
-            reason: "rejoined_with_code",
-          },
-        },
-      });
-
-      // Jika IP berubah, hitung sebagai pelanggaran jika diaktifkan di kebijakan (Item 8)
-      const policy = (exam.violationPolicy as any) || {};
-      if (ipChanged && policy.detect_ip_change !== false) {
-        const maxViolations = policy.max_violations || 3;
-        const policyAction = policy.action || "lock";
-
-        const updatedStudent = await prisma.student.update({
-          where: { id: student.id },
-          data: { violationCount: { increment: 1 } },
-        });
-
-        const shouldLock =
-          updatedStudent.violationCount >= maxViolations &&
-          policyAction === "lock" &&
-          !updatedStudent.isLocked;
-
-        if (shouldLock) {
-          await prisma.student.update({
-            where: { id: student.id },
-            data: { isLocked: true },
-          });
-        }
-
-        // Catat proctoring event khusus ip_change
-        await prisma.proctoringEvent.create({
+      const policy = (exam.violationPolicy && typeof exam.violationPolicy === "object" ? exam.violationPolicy : {}) as Record<string, unknown>;
+      const maxViolations = typeof policy.max_violations === "number" && policy.max_violations > 0 ? policy.max_violations : 3;
+      const policyAction = typeof policy.action === "string" ? policy.action : "lock";
+      const reconnect = await prisma.$transaction(async (tx) => {
+        const current = await tx.student.findUniqueOrThrow({ where: { id: student!.id } });
+        const previousIp = current.ipAddress;
+        const ipChanged = Boolean(previousIp) && previousIp !== clientIp;
+        const currentExam = await tx.exam.findUnique({ where: { id: exam.id }, select: { status: true, endTime: true } });
+        const inProgress = currentExam?.status === "active" && (!currentExam.endTime || currentExam.endTime > new Date());
+        const counts = ipChanged && inProgress && policy.detect_ip_change !== false && !current.isLocked;
+        const nextCycle = current.violationCycleCount + (counts ? 1 : 0);
+        const shouldLock = counts && nextCycle >= maxViolations && policyAction === "lock";
+        const updated = await tx.student.update({
+          where: { id: current.id },
           data: {
-            studentId: student.id,
-            examId: exam.id,
-            eventType: "ip_change",
-            metadata: {
-              oldIp: previousIp,
-              newIp: clientIp,
-            },
+            name,
+            sessionTokenHash: hashStudentToken(freshToken),
+            ipAddress: clientIp,
+            userAgent,
+            ...(counts ? { violationCount: { increment: 1 }, violationCycleCount: { increment: 1 } } : {}),
+            ...(shouldLock ? { isLocked: true } : {}),
           },
         });
-
+        await tx.proctoringEvent.create({
+          data: {
+            studentId: current.id, examId: exam.id, eventType: "reconnect",
+            metadata: { newIp: clientIp, oldIp: previousIp ?? null, ipChanged, reason: "rejoined_with_code" },
+          },
+        });
+        const event = ipChanged ? await tx.proctoringEvent.create({
+          data: { studentId: current.id, examId: exam.id, eventType: "ip_change", metadata: { oldIp: previousIp, newIp: clientIp } },
+        }) : null;
+        return { student: updated, event, shouldLock };
+      }, { isolationLevel: "Serializable" });
+      student = reconnect.student;
+      if (reconnect.event) {
         const io = (globalThis as any).io;
-        if (io) {
-          try {
-            io.of("/teacher-dashboard").to(`exam:${exam.id}`).emit("student_violation", {
-              studentId: student.id,
-              name: student.name,
-              nisn: student.nisn,
-              violationCount: updatedStudent.violationCount,
-              isLocked: shouldLock ? true : updatedStudent.isLocked,
-              event: {
-                eventType: "ip_change",
-                timestamp: new Date().toISOString(),
-                metadata: { oldIp: previousIp, newIp: clientIp },
-              },
-            });
-          } catch (socketErr) {
-            console.error("Socket emit failed on ip_change:", socketErr);
-          }
-        }
+        io?.of("/teacher-dashboard").to(`exam:${exam.id}`).emit("student_violation", {
+          studentId: student.id, name: student.name, nisn: student.nisn,
+          violationCount: student.violationCount, violationCycleCount: student.violationCycleCount,
+          isLocked: student.isLocked,
+          event: { id: reconnect.event.id, eventType: "ip_change", timestamp: reconnect.event.timestamp.toISOString(), metadata: reconnect.event.metadata },
+        });
+      }
+      if (reconnect.shouldLock) {
+        const io = (globalThis as any).io;
+        io?.of("/student-session").to(`student:${student.id}`).emit("student_locked", {
+          message: "Batas pelanggaran tercapai dan sesi dikunci.", isLocked: true,
+          violationCycleCount: student.violationCycleCount,
+        });
+      }
       }
     } else {
       // New student joining — status awal waiting (Item 11)
@@ -219,17 +207,12 @@ export async function POST(req: NextRequest) {
 
       const freshTokenHash = hashStudentToken(freshToken);
 
-      student = await prisma.student.create({
-        data: {
-          id: dummyId,
-          examId: exam.id,
-          name,
-          nisn,
-          sessionTokenHash: freshTokenHash,
-          status: "waiting",
-          ipAddress: clientIp,
-          userAgent,
-        },
+      student = await prisma.$transaction(async (tx) => {
+        const created = await tx.student.create({
+          data: { id: dummyId, examId: exam.id, name, nisn, sessionTokenHash: freshTokenHash, status: "waiting", ipAddress: clientIp, userAgent },
+        });
+        await tx.admissionHistory.create({ data: { studentId: created.id, action: "requested" } });
+        return created;
       });
 
       const io = (globalThis as any).io;

@@ -42,6 +42,7 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  distDir: process.env.EDUQUAS_BACKEND_DIST_DIR || ".next",
   serverExternalPackages: ["@prisma/client", "bcryptjs"],
   experimental: {},
   async headers() {

@@ -5,6 +5,7 @@ import path from "path";
 import { prisma } from "@/lib/prisma";
 import { bankError, bankTeacher } from "@/lib/question-bank";
 import { errorResponse, successResponse } from "@/lib/response";
+import { questionBankMediaDirectory } from "@/lib/question-bank-media";
 
 const maxSize = 2 * 1024 * 1024;
 export async function POST(req: NextRequest) {
@@ -21,7 +22,7 @@ export async function POST(req: NextRequest) {
     const expected = png ? ["image/png", "png"] : jpeg ? ["image/jpeg", "jpg"] : webp ? ["image/webp", "webp"] : null;
     if (!expected || file.type !== expected[0]) return errorResponse("INVALID_IMAGE_TYPE", "Format gambar harus PNG, JPEG, atau WebP yang valid", 400);
     const filename = `${randomUUID()}.${expected[1]}`;
-    const dir = path.join(process.cwd(), "storage", "question-bank");
+    const dir = questionBankMediaDirectory();
     await mkdir(dir, { recursive: true });
     const target = path.join(dir, filename);
     await writeFile(target, bytes, { flag: "wx" });

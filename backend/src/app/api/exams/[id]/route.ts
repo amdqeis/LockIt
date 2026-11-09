@@ -1,3 +1,4 @@
+import { retrySerializable } from "@/lib/transaction-retry";
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { authenticateTeacher } from "@/lib/middleware/auth";
@@ -10,6 +11,17 @@ const updateExamSchema = z.object({
   title: z.string().min(3).optional(),
   description: z.string().nullable().optional(),
   durationMinutes: z.number().int().min(5).max(360).optional(),
+  revision: z.number().int().positive().optional(),
+  className: z.string().trim().min(1).max(100).optional(),
+  academicYear: z.string().trim().min(1).max(30).optional(),
+  semester: z.enum(["ganjil", "genap"]).optional(),
+  category: z.string().trim().min(1).max(100).optional(),
+  categoryNumber: z.number().int().positive().nullable().optional(),
+  scheduledStartAt: z.string().datetime().nullable().optional(),
+  passingScore: z.number().int().min(0).max(100).optional(),
+  bankId: z.string().uuid().optional(),
+  bankRevision: z.number().int().positive().optional(),
+  questionIds: z.array(z.string().uuid()).min(1).max(200).optional(),
   violationPolicy: z
     .object({
       max_violations: z.number().int().min(1).optional(),
@@ -124,6 +136,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       if (parsed.data.title !== undefined) updateData.title = parsed.data.title;
       if (parsed.data.description !== undefined) updateData.description = parsed.data.description;
       if (parsed.data.durationMinutes !== undefined) updateData.durationMinutes = parsed.data.durationMinutes;
+      for (const key of ["className", "academicYear", "semester", "category", "categoryNumber", "passingScore"] as const) {
+        if (parsed.data[key] !== undefined) updateData[key] = parsed.data[key];
+      }
+      if (parsed.data.scheduledStartAt !== undefined) updateData.scheduledStartAt = parsed.data.scheduledStartAt ? new Date(parsed.data.scheduledStartAt) : null;
       if (normalizedViolationPolicy !== undefined) {
         updateData.violationPolicy = {
           ...(typeof exam.violationPolicy === "object" && exam.violationPolicy !== null ? exam.violationPolicy : {}),
@@ -139,13 +155,30 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       }
     }
 
-    const updated = await prisma.$transaction(async (tx) => {
-      await tx.exam.update({
-        where: { id },
-        data: updateData,
+    const updated = await retrySerializable(() => prisma.$transaction(async (tx) => {
+      const changed = await tx.exam.updateMany({
+        where: { id, status: exam.status, ...(parsed.data.revision ? { revision: parsed.data.revision } : {}) },
+        data: { ...updateData, revision: { increment: 1 } },
       });
+      if (!changed.count) throw new AppError("CONFLICT", "Ujian telah berubah. Muat ulang sebelum menyimpan.", 409);
 
-      if (exam.status === "draft" && Array.isArray(parsed.data.questions)) {
+      if (exam.status === "draft" && parsed.data.bankId) {
+        const source = await tx.questionBank.findUnique({ where: { id: parsed.data.bankId }, include: { questions: { orderBy: { orderIndex: "asc" } } } });
+        if (!source || source.revision !== parsed.data.bankRevision) throw new AppError("CONFLICT", "Bank soal berubah. Muat ulang dan pilih soal kembali.", 409);
+        if (exam.subjectId && source.subjectId !== exam.subjectId) throw new AppError("VALIDATION_ERROR", "Bank soal tidak sesuai mata pelajaran ujian.", 400);
+        const selected = source.questions.filter(q => parsed.data.questionIds?.includes(q.id));
+        if (!selected.length || selected.length !== new Set(parsed.data.questionIds).size) throw new AppError("VALIDATION_ERROR", "Pilih soal yang tersedia dalam bank.", 400);
+        await tx.question.deleteMany({ where: { examId: id } });
+        await tx.question.createMany({ data: selected.map((q, index) => ({
+          examId: id, orderIndex: index + 1, questionText: q.questionText,
+          content: q.content === null ? undefined : q.content as any, imageUrl: q.imageUrl, imageAlt: q.imageAlt,
+          hint: q.hint, hintContent: q.hintContent === null ? undefined : q.hintContent as any, type: q.type,
+          options: q.options as any, correctAnswer: Array.isArray(q.correctAnswers) && q.correctAnswers.length ? q.correctAnswers.join(",") : q.correctAnswer || "", points: q.points,
+        })) });
+        await tx.exam.update({ where: { id }, data: { settings: { ...(updateData.settings || (typeof exam.settings === "object" && exam.settings !== null ? exam.settings : {})), bank_id: source.id, bank_title: source.title } } });
+      }
+
+      if (exam.status === "draft" && !parsed.data.bankId && Array.isArray(parsed.data.questions)) {
         await tx.question.deleteMany({ where: { examId: id } });
         if (parsed.data.questions.length > 0) {
           const questionData = parsed.data.questions.map((q, idx) => {
@@ -180,7 +213,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
           },
         },
       });
-    });
+    }, { isolationLevel: "Serializable" }));
 
     return successResponse(updated);
   } catch (err: any) {

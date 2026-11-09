@@ -32,6 +32,7 @@ model Teacher {
   exams         Exam[]
   warnings      Warning[]
   refreshTokens RefreshToken[]
+  admissionActions AdmissionHistory[]
 
   @@index([role])
   @@index([isActive])
@@ -73,12 +74,23 @@ model Exam {
   status          ExamStatus @default(draft)
   violationPolicy Json       @default("{\"max_violations\": 3, \"action\": \"lock\", \"notify_student\": false}") @map("violation_policy")
   settings        Json       @default("{}")
+  subjectId       String?    @map("subject_id")
+  subjectName     String?    @map("subject_name")
+  className       String?    @map("class_name")
+  academicYear    String?    @map("academic_year")
+  semester        String?
+  category        String?
+  categoryNumber  Int?       @map("category_number")
+  scheduledStartAt DateTime? @map("scheduled_start_at") @db.Timestamptz
+  passingScore    Int?       @map("passing_score")
+  revision        Int        @default(1)
   startTime       DateTime?  @map("start_time") @db.Timestamptz
   endTime         DateTime?  @map("end_time") @db.Timestamptz
   createdAt       DateTime   @default(now()) @map("created_at") @db.Timestamptz
   updatedAt       DateTime   @updatedAt @map("updated_at") @db.Timestamptz
 
   teacher          Teacher           @relation(fields: [teacherId], references: [id], onDelete: Restrict)
+  subjectFolder    Subject?          @relation(fields: [subjectId], references: [id], onDelete: SetNull)
   questions        Question[]
   students         Student[]
   proctoringEvents ProctoringEvent[]
@@ -115,10 +127,22 @@ model Question {
 }
 
 // Bank soal dapat digunakan bersama oleh guru dan admin. Soal ujian tetap snapshot.
+model Subject {
+  id        String         @id @default(uuid())
+  name      String         @unique
+  createdAt DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  banks     QuestionBank[]
+  exams     Exam[]
+
+  @@map("subjects")
+}
+
 model QuestionBank {
   id          String             @id @default(uuid())
   title       String
   subject     String
+  subjectId   String?            @map("subject_id")
+  subjectFolder Subject?         @relation(fields: [subjectId], references: [id], onDelete: Restrict)
   description String?
   tags        Json               @default("[]")
   difficulty  String             @default("mixed")
@@ -190,7 +214,15 @@ enum StudentStatus {
   active
   submitted
   disconnected
+  rejected
   kicked
+}
+
+enum AdmissionHistoryAction {
+  requested
+  approved
+  rejected
+  reapplied
 }
 
 model Student {
@@ -204,6 +236,7 @@ model Student {
   status            StudentStatus @default(waiting)
   isLocked          Boolean       @default(false) @map("is_locked")
   violationCount    Int           @default(0) @map("violation_count")
+  violationCycleCount Int         @default(0) @map("violation_cycle_count")
   ipAddress         String?       @map("ip_address")
   userAgent         String?       @map("user_agent")
   joinedAt          DateTime      @default(now()) @map("joined_at") @db.Timestamptz
@@ -215,6 +248,7 @@ model Student {
   exam             Exam              @relation(fields: [examId], references: [id], onDelete: Restrict)
   answers          Answer[]
   proctoringEvents ProctoringEvent[]
+  admissionHistory AdmissionHistory[]
   warnings         Warning[]
   browserLinks     BrowserStudent[]
 
@@ -282,6 +316,7 @@ enum EventType {
   heartbeat_lost
   ip_change
   screenshot
+  teacher_unlock
 }
 
 model ProctoringEvent {
@@ -292,13 +327,30 @@ model ProctoringEvent {
   timestamp  DateTime  @default(now()) @db.Timestamptz
   durationMs Int?      @map("duration_ms")
   metadata   Json?
+  incidentId String?   @map("incident_id")
 
   student Student @relation(fields: [studentId], references: [id], onDelete: Restrict)
   exam    Exam    @relation(fields: [examId], references: [id], onDelete: Restrict)
 
   @@index([examId, studentId])
   @@index([examId, timestamp])
+  @@unique([studentId, incidentId])
   @@map("proctoring_events")
+}
+
+model AdmissionHistory {
+  id        String                @id @default(uuid())
+  studentId String                @map("student_id")
+  teacherId String?               @map("teacher_id")
+  action    AdmissionHistoryAction
+  reason    String?
+  createdAt DateTime              @default(now()) @map("created_at") @db.Timestamptz
+
+  student Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  teacher Teacher? @relation(fields: [teacherId], references: [id], onDelete: SetNull)
+
+  @@index([studentId, createdAt])
+  @@map("admission_history")
 }
 
 // ─── WARNING ───────────────────────────────────────

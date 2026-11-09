@@ -15,6 +15,7 @@ node_modules/
 
 # ─── NEXT.JS & BUILD ARTIFACTS ──────────────────────────────
 .next/
+.next-*/
 out/
 build/
 dist/

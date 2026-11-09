@@ -18,6 +18,7 @@ const handle = app.getRequestHandler();
 
 // In-memory heartbeat tracker: studentId -> last timestamp
 const studentLastHeartbeat = new Map<string, number>();
+(globalThis as any).studentLastHeartbeat = studentLastHeartbeat;
 
 app.prepare().then(async () => {
   const httpServer = createServer(async (req, res) => {
@@ -34,7 +35,7 @@ app.prepare().then(async () => {
   // CRIT-02: Batasi origin Socket.IO — jangan pernah gunakan "*"
   const allowedOrigins = process.env.ALLOWED_ORIGINS
     ? process.env.ALLOWED_ORIGINS.split(",").map((o) => o.trim())
-    : ["http://localhost:3000"];
+    : ["http://localhost:3000", "http://localhost:3002"];
 
   const io = new SocketIOServer(httpServer, {
     cors: {
@@ -56,7 +57,8 @@ app.prepare().then(async () => {
     try {
       const token =
         socket.handshake.auth?.token ||
-        socket.handshake.headers?.authorization?.replace("Bearer ", "");
+        socket.handshake.headers?.authorization?.replace("Bearer ", "") ||
+        socket.handshake.headers.cookie?.split(";").map(part => part.trim()).find(part => part.startsWith("accessToken="))?.slice("accessToken=".length);
 
       if (!token) {
         return next(new Error("Token autentikasi guru wajib disertakan"));
@@ -69,7 +71,7 @@ app.prepare().then(async () => {
 
       socket.data.teacher = payload;
       next();
-    } catch (err) {
+    } catch {
       next(new Error("Autentikasi gagal"));
     }
   });
@@ -83,7 +85,7 @@ app.prepare().then(async () => {
         const { examId } = data;
         const exam = await prisma.exam.findUnique({ where: { id: examId } });
 
-        if (!exam || exam.teacherId !== teacher.teacherId) {
+        if (!exam || (teacher.role !== "ADMIN" && exam.teacherId !== teacher.teacherId)) {
           socket.emit("error", { message: "Akses dashboard ujian ditolak" });
           return;
         }
@@ -152,7 +154,7 @@ app.prepare().then(async () => {
 
       socket.data.student = student;
       next();
-    } catch (err) {
+    } catch {
       next(new Error("Autentikasi peserta gagal"));
     }
   });
@@ -168,37 +170,42 @@ app.prepare().then(async () => {
     socket.join(`exam:${student.examId}`);
 
     // Notify teacher dashboard of online presence
-    teacherNs.to(`exam:${student.examId}`).emit("student_presence", {
-      studentId: student.id,
-      name: student.name,
-      nisn: student.nisn,
-      status: student.status,
-      lastSeen: new Date().toISOString(),
-    });
+    void prisma.student.findUnique({ where: { id: student.id }, select: { id: true, name: true, nisn: true, status: true, isLocked: true } })
+      .then((current) => {
+        if (!current) return;
+        teacherNs.to(`exam:${student.examId}`).emit("student_presence", {
+          studentId: current.id, name: current.name, nisn: current.nisn,
+          status: current.status, isLocked: current.isLocked, lastSeen: new Date().toISOString(),
+        });
+      }).catch(() => {});
 
     // Heartbeat listener (every 10s from client)
     socket.on("heartbeat", async () => {
       const now = Date.now();
-      studentLastHeartbeat.set(student.id, now);
-
-      // If student was marked disconnected, update back to active
-      if (student.status === "disconnected") {
-        await prisma.student
-          .update({
-            where: { id: student.id },
-            data: { status: "active" },
-          })
-          .catch(() => {});
-
-        student.status = "active";
-
+      try {
+        const current = await prisma.student.findUnique({ where: { id: student.id }, include: { exam: { select: { status: true, endTime: true } } } });
+        if (!current || ["submitted", "kicked", "rejected"].includes(current.status) || current.exam.status !== "active" || !current.exam.endTime || current.exam.endTime.getTime() <= now) {
+          socket.emit("session_unavailable", { message: "Sesi ujian tidak lagi aktif." });
+          socket.disconnect(true);
+          return;
+        }
+        studentLastHeartbeat.set(student.id, now);
+        let presenceStatus = current.status;
+        if (current.status === "disconnected") {
+          const resumed = await prisma.student.updateMany({ where: { id: student.id, status: "disconnected" }, data: { status: "active" } });
+          if (!resumed.count) return;
+          presenceStatus = "active";
+        }
         teacherNs.to(`exam:${student.examId}`).emit("student_presence", {
-          studentId: student.id,
-          name: student.name,
-          nisn: student.nisn,
-          status: "active",
+          studentId: current.id,
+          name: current.name,
+          nisn: current.nisn,
+          status: presenceStatus,
+          isLocked: current.isLocked,
           lastSeen: new Date(now).toISOString(),
         });
+      } catch (err) {
+        console.error(`[Socket] Heartbeat reconciliation failed for ${student.id}:`, err);
       }
     });
 
@@ -249,7 +256,7 @@ app.prepare().then(async () => {
     }
   }, 10000);
 
-  httpServer.listen(port, () => {
+  httpServer.listen(port, process.env.EDUQUAS_BIND_HOST || undefined, () => {
     console.log(`> Ready on http://${hostname}:${port}`);
     console.log(`> Socket.IO server running on namespaces: /teacher-dashboard, /student-session`);
   });

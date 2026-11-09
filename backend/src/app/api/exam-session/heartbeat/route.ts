@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import type { Prisma } from "@prisma/client";
 import { authenticateStudent } from "@/lib/middleware/auth";
 import { prisma } from "@/lib/prisma";
 import { successResponse, errorResponse, safeErrorMessage } from "@/lib/response";
@@ -31,99 +32,76 @@ export async function POST(req: NextRequest) {
     }
 
     const now = new Date();
-    const isExamActive = exam.status === "active" && (!exam.endTime || now <= exam.endTime);
-    let currentIsLocked = student.isLocked;
+    const [currentStudent, currentExam] = await Promise.all([
+      prisma.student.findUniqueOrThrow({ where: { id: student.id }, select: { status: true, isLocked: true } }),
+      prisma.exam.findUnique({ where: { id: exam.id }, select: { status: true, endTime: true } }),
+    ]);
+    const isExamActive = currentExam?.status === "active" && (!currentExam.endTime || now <= currentExam.endTime);
+    let currentIsLocked = currentStudent.isLocked;
+    let currentStatus = currentStudent.status;
 
-    // Deteksi IP Change mid-exam
+    // Catat perubahan IP sekali, dan gunakan siklus yang sama dengan event proctoring lain.
     const clientIp = getClientIp(req.headers);
-    if (clientIp && clientIp !== "unknown") {
-      if (student.ipAddress && student.ipAddress !== clientIp) {
-        const previousIp = student.ipAddress;
-        
-        // Catat proctoring event ip_change
-        await prisma.proctoringEvent.create({
+    if (clientIp && clientIp !== "unknown" && isExamActive && ["active", "disconnected"].includes(student.status)) {
+      const policy = (exam.violationPolicy && typeof exam.violationPolicy === "object" ? exam.violationPolicy : {}) as Record<string, unknown>;
+      const maxViolations = typeof policy.max_violations === "number" && policy.max_violations > 0 ? policy.max_violations : 3;
+      const policyAction = typeof policy.action === "string" ? policy.action : "lock";
+      const ipChange = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        const current = await tx.student.findUniqueOrThrow({ where: { id: student.id } });
+        if (current.ipAddress === clientIp) return null;
+        const counts = Boolean(current.ipAddress) && policy.detect_ip_change !== false && !current.isLocked;
+        const nextCycle = current.violationCycleCount + (counts ? 1 : 0);
+        const shouldLock = counts && nextCycle >= maxViolations && policyAction === "lock";
+        const changed = await tx.student.updateMany({
+          where: { id: student.id, ipAddress: current.ipAddress },
           data: {
-            studentId: student.id,
-            examId: exam.id,
-            eventType: "ip_change",
-            metadata: {
-              oldIp: previousIp,
-              newIp: clientIp,
-              detectedVia: "heartbeat",
-            },
+            ipAddress: clientIp,
+            ...(counts ? { violationCount: { increment: 1 }, violationCycleCount: { increment: 1 } } : {}),
+            ...(shouldLock ? { isLocked: true } : {}),
           },
         });
-
-        // Increment violation count if policy enables IP change detection
-        const policy = (exam.violationPolicy as any) || {};
-        if (policy.detect_ip_change !== false) {
-          const maxViolations = policy.max_violations || 3;
-          const policyAction = policy.action || "lock";
-
-          const updatedStudent = await prisma.student.update({
-            where: { id: student.id },
-            data: {
-              ipAddress: clientIp,
-              violationCount: { increment: 1 },
-            },
-          });
-
-          const shouldLock =
-            updatedStudent.violationCount >= maxViolations &&
-            policyAction === "lock" &&
-            !updatedStudent.isLocked;
-
-          if (shouldLock) {
-            await prisma.student.update({
-              where: { id: student.id },
-              data: { isLocked: true },
-            });
-            currentIsLocked = true;
-          }
-
-          // Emit student_violation ke dashboard guru
+        if (!changed.count) return null;
+        const event = current.ipAddress ? await tx.proctoringEvent.create({
+          data: {
+            studentId: student.id, examId: exam.id, eventType: "ip_change",
+            metadata: { oldIp: current.ipAddress, newIp: clientIp, detectedVia: "heartbeat" },
+          },
+        }) : null;
+        const updated = await tx.student.findUniqueOrThrow({ where: { id: student.id } });
+        return { event, student: updated, shouldLock };
+      }, { isolationLevel: "Serializable" });
+      if (ipChange) {
+        currentIsLocked = ipChange.student.isLocked;
+        if (ipChange.event) {
           const io = (globalThis as any).io;
-          if (io) {
-            try {
-              io.of("/teacher-dashboard").to(`exam:${exam.id}`).emit("student_violation", {
-                studentId: student.id,
-                name: student.name,
-                nisn: student.nisn,
-                violationCount: updatedStudent.violationCount,
-                isLocked: currentIsLocked,
-                event: {
-                  eventType: "ip_change",
-                  timestamp: now.toISOString(),
-                  metadata: { oldIp: previousIp, newIp: clientIp, detectedVia: "heartbeat" },
-                },
-              });
-            } catch (socketErr) {
-              console.error("Socket emit failed on heartbeat ip_change:", socketErr);
-            }
-          }
-        } else {
-          await prisma.student.update({
-            where: { id: student.id },
-            data: { ipAddress: clientIp },
+          io?.of("/teacher-dashboard").to(`exam:${exam.id}`).emit("student_violation", {
+            studentId: student.id, name: student.name, nisn: student.nisn,
+            violationCount: ipChange.student.violationCount,
+            violationCycleCount: ipChange.student.violationCycleCount,
+            isLocked: ipChange.student.isLocked,
+            event: { id: ipChange.event.id, eventType: "ip_change", timestamp: ipChange.event.timestamp.toISOString(), metadata: ipChange.event.metadata },
           });
         }
-      } else if (!student.ipAddress) {
-        await prisma.student.update({
-          where: { id: student.id },
-          data: { ipAddress: clientIp },
-        });
+        if (ipChange.shouldLock) {
+          const io = (globalThis as any).io;
+          io?.of("/student-session").to(`student:${student.id}`).emit("student_locked", {
+            message: "Batas pelanggaran tercapai dan sesi dikunci.", isLocked: true,
+            violationCycleCount: ipChange.student.violationCycleCount,
+          });
+        }
       }
     }
 
-    if (student.status === "disconnected" && isExamActive) {
-      await prisma.student.update({
-        where: { id: student.id },
+    if (currentStudent.status === "disconnected" && isExamActive) {
+      const restored = await prisma.student.updateMany({
+        where: { id: student.id, examId: exam.id, status: "disconnected" },
         data: { status: "active" },
       });
+      if (restored.count) currentStatus = "active";
 
       // Notify Teacher dashboard that student reconnected via HTTP heartbeat
       const io = (globalThis as any).io;
-      if (io) {
+      if (io && restored.count) {
         try {
           io.of("/teacher-dashboard").to(`exam:${exam.id}`).emit("student_presence", {
             studentId: student.id,
@@ -146,7 +124,7 @@ export async function POST(req: NextRequest) {
 
     return successResponse({
       studentId: student.id,
-      status: student.status,
+      status: currentStatus,
       isLocked: currentIsLocked,
       isExamActive,
       serverTime: now.toISOString(),

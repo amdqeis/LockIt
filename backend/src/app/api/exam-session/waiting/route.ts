@@ -12,6 +12,11 @@ export async function GET(req: NextRequest) {
     const questionCount = await prisma.question.count({
       where: { examId: exam.id },
     });
+    const latestAdmissionAction = await prisma.admissionHistory.findFirst({
+      where: { studentId: student.id },
+      orderBy: { createdAt: "desc" },
+      select: { action: true, reason: true, createdAt: true },
+    });
 
     return successResponse({
       student: {
@@ -20,6 +25,10 @@ export async function GET(req: NextRequest) {
         nisn: student.nisn,
         status: student.status,
         kickReason: student.kickReason ?? null,
+        isLocked: student.isLocked,
+        violationCount: student.violationCount,
+        violationCycleCount: student.violationCycleCount,
+        latestAdmissionAction,
       },
       exam: {
         id: exam.id,
@@ -30,6 +39,7 @@ export async function GET(req: NextRequest) {
         questionCount,
         startTime: exam.startTime?.toISOString() ?? null,
         endTime: exam.endTime?.toISOString() ?? null,
+        serverTime: new Date().toISOString(),
       },
     });
   } catch (err: any) {

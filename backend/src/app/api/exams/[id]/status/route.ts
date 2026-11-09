@@ -6,6 +6,7 @@ import { successResponse, errorResponse, safeErrorMessage } from "@/lib/response
 import { AppError } from "@/lib/errors";
 import { scheduleExamAutoEnd, executeExamEnd, cancelExamAutoEnd } from "@/lib/scheduler";
 import { normalizeQuestionForDb } from "@/services/question-parser";
+import { retrySerializable } from "@/lib/transaction-retry";
 
 const statusSchema = z.object({
   status: z.enum(["draft", "active", "ended", "archived"]),
@@ -92,20 +93,25 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       const startTime = new Date();
       const endTime = new Date(startTime.getTime() + exam.durationMinutes * 60 * 1000);
 
-      const updated = await prisma.exam.update({
-        where: { id },
-        data: {
-          status: "active",
-          startTime,
-          endTime,
-        },
-      });
-
-      // Mulai hanya peserta yang sudah diterima pengawas.
-      await prisma.student.updateMany({
-        where: { examId: id, status: "accepted", isLocked: false },
-        data: { status: "active" },
-      });
+      const updated = await retrySerializable(() => prisma.$transaction(async (tx) => {
+        const claimed = await tx.exam.updateMany({
+          where: { id, status: "draft" },
+          data: { status: "active", startTime, endTime },
+        });
+        if (!claimed.count) return null;
+        await tx.student.updateMany({
+          where: { examId: id, status: "accepted", isLocked: false },
+          data: { status: "active" },
+        });
+        return tx.exam.findUniqueOrThrow({ where: { id } });
+      }, { isolationLevel: "Serializable" }));
+      if (!updated) {
+        const latest = await prisma.exam.findUnique({ where: { id } });
+        if (latest?.status === "active" && latest.endTime && latest.endTime > new Date()) {
+          return successResponse({ exam: latest, message: "Ujian sudah dimulai; waktu global tidak diubah." });
+        }
+        return errorResponse("INVALID_STATE", "Status ujian berubah sebelum dapat dimulai", 409);
+      }
 
       const io = (globalThis as any).io;
       if (io) {

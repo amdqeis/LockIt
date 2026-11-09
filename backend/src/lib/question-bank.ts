@@ -7,6 +7,7 @@ import { errorResponse, safeErrorMessage } from "@/lib/response";
 export const bankSchema = z.object({
   title: z.string().trim().min(1).max(200),
   subject: z.string().trim().min(1).max(100),
+  subjectId: z.string().uuid().nullable().optional(),
   description: z.string().max(500).nullable().optional(),
   tags: z.array(z.string().max(60)).max(30).default([]),
   difficulty: z.enum(["easy", "medium", "hard", "mixed"]).default("mixed"),

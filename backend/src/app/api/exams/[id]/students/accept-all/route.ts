@@ -18,13 +18,18 @@ export async function POST(
     }
     if (!["draft", "active"].includes(exam.status) || (exam.endTime && exam.endTime <= new Date())) return errorResponse("INVALID_STATE", "Ujian tidak menerima peserta saat ini", 409);
 
-    const updated = await prisma.student.updateMany({
-      where: { examId: id, status: "waiting" },
-      data: {
-        status: "accepted",
-        acceptedAt: new Date(),
-      },
-    });
+    const updated = await prisma.$transaction(async (tx) => {
+      const currentExam = await tx.exam.findUnique({ where: { id }, select: { status: true, startTime: true, endTime: true } });
+      if (!currentExam || (currentExam.status !== "draft" && currentExam.status !== "active") || (currentExam.endTime && currentExam.endTime <= new Date())) return null;
+      const status = currentExam.status === "active" ? "active" as const : "accepted" as const;
+      const pending = await tx.student.findMany({ where: { examId: id, status: "waiting" }, select: { id: true } });
+      const changed = await tx.student.updateMany({ where: { id: { in: pending.map((student) => student.id) }, status: "waiting" }, data: { status, acceptedAt: new Date() } });
+      if (changed.count) {
+        await tx.admissionHistory.createMany({ data: pending.map((student) => ({ studentId: student.id, teacherId: teacher.teacherId, action: "approved" as const })) });
+      }
+      return { count: changed.count, status, startTime: currentExam.startTime, endTime: currentExam.endTime };
+    }, { isolationLevel: "Serializable" });
+    if (!updated) return errorResponse("INVALID_STATE", "Ujian tidak menerima peserta saat ini", 409);
 
     const io = (globalThis as any).io;
     if (io) {
@@ -33,7 +38,10 @@ export async function POST(
           count: updated.count,
         });
         io.of("/student-session").to(`exam:${id}`).emit("student_accepted", {
-          message: "Semua peserta telah diterima oleh pengawas. Menunggu ujian dimulai.",
+          message: updated.status === "active" ? "Semua peserta yang menunggu telah diterima ke ujian." : "Semua peserta telah diterima oleh pengawas. Menunggu ujian dimulai.",
+          status: updated.status,
+          startTime: updated.startTime?.toISOString() ?? null,
+          endTime: updated.endTime?.toISOString() ?? null,
         });
       } catch (socketErr) {
         console.error("Socket emit accept-all failed:", socketErr);
@@ -42,6 +50,9 @@ export async function POST(
 
     return successResponse({
       acceptedCount: updated.count,
+      status: updated.status,
+      startTime: updated.startTime?.toISOString() ?? null,
+      endTime: updated.endTime?.toISOString() ?? null,
       message: `${updated.count} peserta berhasil diterima`,
     });
   } catch (err: any) {

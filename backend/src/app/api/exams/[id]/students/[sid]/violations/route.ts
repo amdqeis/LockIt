@@ -26,6 +26,9 @@ export async function GET(
         warnings: {
           orderBy: { sentAt: "asc" },
         },
+        admissionHistory: {
+          orderBy: { createdAt: "asc" },
+        },
       },
     });
 
@@ -41,6 +44,7 @@ export async function GET(
         status: student.status,
         isLocked: student.isLocked,
         violationCount: student.violationCount,
+        violationCycleCount: student.violationCycleCount,
         joinedAt: student.joinedAt,
         submittedAt: student.submittedAt,
         ipAddress: student.ipAddress,
@@ -48,6 +52,7 @@ export async function GET(
       },
       events: student.proctoringEvents,
       warnings: student.warnings,
+      admissionHistory: student.admissionHistory,
     });
   } catch (err: any) {
     if (err instanceof AppError) {

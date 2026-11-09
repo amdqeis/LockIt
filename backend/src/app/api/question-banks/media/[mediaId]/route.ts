@@ -6,6 +6,7 @@ import { authenticateStudent } from "@/lib/middleware/auth";
 import { findBrowserIdentity } from "@/lib/browser-identity";
 import { bankError, bankTeacher } from "@/lib/question-bank";
 import { errorResponse } from "@/lib/response";
+import { questionBankMediaDirectory } from "@/lib/question-bank-media";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ mediaId: string }> }) {
   try {
@@ -36,7 +37,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ medi
       const allowed = questions.some(q => q.imageUrl === imageUrl || (Array.isArray(q.options) && q.options.some(o => typeof o === "object" && o !== null && !Array.isArray(o) && o.imageUrl === imageUrl)));
       if (!allowed) return errorResponse("NOT_FOUND", "Gambar tidak ditemukan", 404);
     }
-    const bytes = await readFile(path.join(process.cwd(), "storage", "question-bank", media.filename));
+    const bytes = await readFile(path.join(questionBankMediaDirectory(), media.filename));
     return new NextResponse(bytes, { headers: { "Content-Type": media.mimeType, "Content-Length": String(bytes.length), "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff" } });
   } catch (err) { return bankError(err); }
 }

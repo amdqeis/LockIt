@@ -107,6 +107,11 @@ export async function POST(req: NextRequest) {
       },
     });
 
+    response.cookies.set("accessToken", accessToken, {
+      httpOnly: true, secure: process.env.NODE_ENV === "production",
+      sameSite: "strict", path: "/", maxAge: 15 * 60,
+    });
+
     // Set secure httpOnly cookie for refresh token
     response.cookies.set("refreshToken", rawRefreshToken, {
       httpOnly: true,

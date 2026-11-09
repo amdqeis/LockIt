@@ -50,6 +50,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         where: {
           examId: id,
           isLocked: true,
+          status: { in: ["active", "disconnected"] },
         },
       }),
       // 4. Recent 50 proctoring events
@@ -101,18 +102,20 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       }),
     ]);
 
-    let onlineCount = 0;
+    let activeCount = 0;
     let disconnectedCount = 0;
     let submittedCount = 0;
     let waitingCount = 0;
     let acceptedCount = 0;
+    let rejectedCount = 0;
 
     for (const group of studentStatusCounts) {
-      if (group.status === "active") onlineCount = group._count.id;
+      if (group.status === "active") activeCount = group._count.id;
       else if (group.status === "disconnected") disconnectedCount = group._count.id;
       else if (group.status === "submitted") submittedCount = group._count.id;
       else if (group.status === "waiting") waitingCount = group._count.id;
       else if (group.status === "accepted") acceptedCount = group._count.id;
+      else if (group.status === "rejected") rejectedCount = group._count.id;
     }
 
     const totalViolations = totalViolationsResult._sum.violationCount || 0;
@@ -121,6 +124,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       exam: {
         id: exam.id,
         title: exam.title,
+        className: exam.className,
         accessCode: exam.accessCode,
         durationMinutes: exam.durationMinutes,
         status: exam.status,
@@ -130,11 +134,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       },
       overview: {
         totalJoined: exam._count.students,
-        onlineCount,
+        activeCount,
         disconnectedCount,
         submittedCount,
         waitingCount,
         acceptedCount,
+        rejectedCount,
         lobbyCount: waitingCount + acceptedCount,
         lockedCount,
         totalViolations,

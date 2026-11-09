@@ -13,7 +13,7 @@ const resetPasswordSchema = z.object({
 // ─── POST /api/admin/teachers/[id]/reset-password ────────────────────────────
 // Side effects:
 //   1. Update passwordHash
-//   2. Revoke SEMUA refresh token guru → force re-login di semua sesi
+//   2. Cabut refresh token; access token yang sudah terbit berlaku sampai kedaluwarsa.
 
 export async function POST(
   req: NextRequest,
@@ -48,7 +48,7 @@ export async function POST(
       }),
     ]);
 
-    return successResponse({ message: "Password berhasil direset. Semua sesi aktif guru telah dihentikan." });
+    return successResponse({ message: "Password berhasil direset. Sesi yang masih aktif berakhir saat token akses kedaluwarsa." });
   } catch (err: any) {
     if (err instanceof AppError) {
       return errorResponse(err.code, err.message, err.statusCode, err.details);

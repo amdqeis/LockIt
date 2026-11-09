@@ -4,14 +4,12 @@
   "private": true,
   "workspaces": [
     "frontend",
-    "frontend-new",
     "backend"
   ],
   "scripts": {
     "dev": "concurrently \"npm run dev --workspace=backend\" \"npm run dev --workspace=frontend\"",
     "dev:backend": "npm run dev --workspace=backend",
     "dev:frontend": "npm run dev --workspace=frontend",
-    "dev:frontend-new": "npm run dev --workspace=frontend-new",
     "build": "npm run build --workspace=backend && npm run build --workspace=frontend",
     "prisma:seed": "npm run prisma:seed --workspace=backend",
     "lint": "npm run lint --workspace=backend && npm run lint --workspace=frontend"

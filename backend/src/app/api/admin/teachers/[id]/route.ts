@@ -9,6 +9,7 @@ import { AppError } from "@/lib/errors";
 
 const updateTeacherSchema = z.object({
   fullName: z.string().min(2, "Nama lengkap minimal 2 karakter").optional(),
+  email:    z.string().trim().email("Format email tidak valid").transform(value => value.toLowerCase()).optional(),
   phone:    z.string().max(20).nullable().optional(),
   role:     z.enum(["TEACHER", "ADMIN"]).optional(),
   isActive: z.boolean().optional(),
@@ -80,6 +81,10 @@ export async function PUT(
     // Pastikan target ada
     const existing = await prisma.teacher.findUnique({ where: { id } });
     if (!existing) return errorResponse("NOT_FOUND", "Guru tidak ditemukan", 404);
+    if (parsed.data.email && parsed.data.email !== existing.email) {
+      const taken = await prisma.teacher.findUnique({ where: { email: parsed.data.email } });
+      if (taken) return errorResponse("CONFLICT", "Email sudah digunakan akun lain", 409);
+    }
 
     const updated = await prisma.teacher.update({
       where: { id },

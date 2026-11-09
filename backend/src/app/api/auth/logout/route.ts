@@ -17,8 +17,9 @@ export async function POST(req: NextRequest) {
     }
 
     const response = successResponse({ message: "Berhasil keluar dari akun" });
-    response.cookies.delete("refreshToken");
+    response.cookies.set("refreshToken", "", { path: "/api/auth", maxAge: 0, httpOnly: true, sameSite: "strict", secure: process.env.NODE_ENV === "production" });
     response.cookies.delete("hasTeacherSession");
+    response.cookies.delete("accessToken");
 
     return response;
   } catch (err: any) {

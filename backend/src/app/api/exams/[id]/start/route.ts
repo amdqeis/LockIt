@@ -41,30 +41,24 @@ export async function POST(
     }
 
     const now = new Date();
-    const startTime = exam.status === "active" && exam.startTime ? exam.startTime : now;
-    const endTime = exam.status === "active" && exam.endTime ? exam.endTime : new Date(now.getTime() + exam.durationMinutes * 60 * 1000);
-    if (endTime <= now) return errorResponse("EXAM_TIME_EXPIRED", "Waktu ujian telah berakhir", 400);
-
-    const updatedExam = await prisma.exam.update({
-      where: { id: examId },
-      data: {
-        status: "active",
-        startTime,
-        endTime,
-      },
+    if (exam.status === "active") {
+      if (!exam.endTime || exam.endTime <= now) return errorResponse("EXAM_TIME_EXPIRED", "Waktu ujian telah berakhir", 400);
+      return successResponse({ examId, status: "active", startTime: exam.startTime, endTime: exam.endTime, message: "Ujian sudah dimulai." });
+    }
+    const startTime = now;
+    const endTime = new Date(now.getTime() + exam.durationMinutes * 60 * 1000);
+    const started = await prisma.$transaction(async tx => {
+      const claimed = await tx.exam.updateMany({ where: { id: examId, status: "draft" }, data: { status: "active", startTime, endTime } });
+      if (!claimed.count) return null;
+      const students = await tx.student.updateMany({ where: { examId, status: "accepted", isLocked: false }, data: { status: "active" } });
+      return { students };
     });
-
-    // Peserta menunggu harus diterima pengawas sebelum dapat dimulai.
-    const updatedStudents = await prisma.student.updateMany({
-      where: {
-        examId,
-        status: "accepted",
-        isLocked: false,
-      },
-      data: {
-        status: "active",
-      },
-    });
+    if (!started) {
+      const current = await prisma.exam.findUnique({ where: { id: examId } });
+      if (current?.status === "active" && current.endTime && current.endTime > now) return successResponse({ examId, status: "active", startTime: current.startTime, endTime: current.endTime, message: "Ujian sudah dimulai." });
+      return errorResponse("INVALID_STATE", "Status ujian berubah sebelum dapat dimulai", 409);
+    }
+    const updatedStudents = started.students;
 
     const io = (globalThis as any).io;
     if (io) {
@@ -90,7 +84,7 @@ export async function POST(
     }
 
     // Schedule auto-end timer
-    scheduleExamAutoEnd(updatedExam.id, endTime, io);
+    scheduleExamAutoEnd(examId, endTime, io);
 
     return successResponse({
       examId,

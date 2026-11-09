@@ -30,12 +30,13 @@ export async function GET(req: NextRequest) {
     }
 
     const code = req.nextUrl.searchParams.get("code");
-    if (!code || code.trim().length < 4) {
-      return errorResponse("MISSING_CODE", "Parameter kode ujian wajib diisi (min 4 karakter)", 400);
+    const normalizedCode = code?.trim() ?? "";
+    if (!/^[A-Za-z0-9]{6}$/.test(normalizedCode)) {
+      return errorResponse("INVALID_CODE", "Kode ujian harus terdiri dari 6 karakter huruf atau angka.", 400);
     }
 
     const exam = await prisma.exam.findFirst({
-      where: { accessCode: { equals: code.trim().toUpperCase() } },
+      where: { accessCode: { equals: normalizedCode.toUpperCase() } },
       select: {
         id: true,
         title: true,

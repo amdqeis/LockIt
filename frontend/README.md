@@ -1,36 +1,24 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# EduQuas participant frontend
 
-## Getting Started
+Portal peserta memakai Next.js pada port 3002 dan backend pada port 3001. Dari root proyek, jalankan `npm install`, lalu `npm run dev` atau `./start.sh`. Halaman `/` menangani kode, identitas, persetujuan, riwayat dan review; `/exam/session` menangani pengerjaan ujian. Dashboard guru belum dibangun kembali pada tahap ini.
 
-First, run the development server:
+REST menggunakan rewrite server dari `/api/*` dan `/uploads/exams/*` ke `INTERNAL_BACKEND_URL` (default `http://127.0.0.1:3001`). Untuk Socket.IO pada backend terpisah, atur `NEXT_PUBLIC_BACKEND_URL` ke origin backend yang dapat diakses browser dan izinkan origin frontend pada konfigurasi backend. Gunakan hostname yang konsisten agar cookie sesi tersedia.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+Pemeriksaan lokal dari root:
+
+```sh
+npm run lint --workspace=frontend
+npm run type-check --workspace=frontend
+npm run build --workspace=frontend
+node --import tsx --test backend/src/lib/student-answer.test.ts backend/src/lib/proctoring-events.test.ts
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Untuk uji browser halaman pengerjaan dengan respons API simulasi, jalankan frontend lalu jalankan `node frontend/tests/exam-workspace.cjs` dari root. Uji ini tidak mengubah database.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+`tests/participant-flow.cjs` adalah uji browser terhadap backend dan database nyata. Uji membuat fixture unik sementara dan membersihkannya setelah selesai. Siapkan backend uji pada port 3011 dan frontend uji pada port 3012, atau atur `EDUQUAS_TEST_BACKEND_URL` dan `EDUQUAS_TEST_FRONTEND_URL`; lalu jalankan dari root:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```sh
+node --env-file=backend/.env frontend/tests/participant-flow.cjs
+```
 
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Server backend uji dapat memakai `EDUQUAS_BACKEND_DIST_DIR=.cache/next-e2e` agar output Next.js terpisah dari proses backend lain. `CHROMIUM_PATH` dapat digunakan jika Chromium tidak berada di `/usr/bin/chromium`.

@@ -40,7 +40,7 @@ export async function GET(req: NextRequest) {
       return errorResponse("ALREADY_SUBMITTED", "Ujian telah selesai dikumpulkan", 403);
     }
 
-    if (student.status === "waiting" || student.status === "accepted") {
+    if (student.status === "waiting" || student.status === "accepted" || student.status === "rejected") {
       return errorResponse("EXAM_NOT_STARTED", "Ujian belum dimulai oleh pengawas", 403);
     }
 

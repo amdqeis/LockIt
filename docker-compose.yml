@@ -6,6 +6,8 @@ services:
     container_name: eduquas_backend
     env_file:
       - ./backend/.env
+    environment:
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
     restart: unless-stopped
     # Agar container bisa akses DB di host machine (Linux) jika DATABASE_URL pakai host.docker.internal
     extra_hosts:
@@ -20,6 +22,14 @@ services:
       start_period: 40s
     networks:
       - caddy_net
+      - cache_net
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    networks:
+      - cache_net
 
   frontend:
     build:
@@ -46,3 +56,5 @@ services:
 networks:
   caddy_net:
     external: true
+  cache_net:
+    internal: true

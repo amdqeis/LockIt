@@ -1,939 +1,163 @@
 "use client";
 
-import { useState, useEffect, useRef, Suspense } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import Image from "next/image";
 import Link from "next/link";
-import {
-  validateExamCode,
-  clearSessionHint,
-  initializeStudentHistory,
-  fetchStudentHistory,
-  resumeStudentHistory,
-  type StudentHistoryItem,
-} from "@/lib/examSession";
-import { useActiveSession } from "@/hooks/useActiveSession";
-import { useTeacherAuth } from "@/lib/auth";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
+import { api, post, ApiError, type Waiting } from "@/lib/api";
+import { History } from "@/components/History";
+import { MotionButton } from "@/components/MotionButton";
+import { AnimatePresence, LayoutGroup, motion, useAnimate, useReducedMotion } from "framer-motion";
 
-// Spec §8 & §7 Unified Design Tokens
-const T = {
-  bgPage: "#F6F8FB",
-  bgCard: "#FFFFFF",
-  bgSubtle: "#F0F3F8",
-  border: "#E1E6ED",
-  borderInput: "#8391A7",
-  textPrimary: "#172033",
-  textSecondary: "#5B6778",
-  textPlaceholder: "#6B7788",
-  primary: "#1B76BF",
-  primaryHover: "#155E99",
-  primaryActive: "#114E80",
-  primaryRing: "rgba(27, 118, 191, 0.25)",
-  danger: "#C73E3E",
-  dangerBg: "#FCE9E9",
-  radiusControl: "8px",
-  fontMono: "ui-monospace, SFMono-Regular, Menlo, monospace",
-};
+type Step = "code" | "identity" | "confirmation" | "waiting";
+type Validation = { exam: { title: string; durationMinutes: number; status: string } };
+const stepNames = ["Kode ujian", "Identitas", "Menunggu persetujuan"];
 
-type ResultStatus = "idle" | "error" | "notice" | "rate_limited";
-
-function JoinContent() {
+export default function Home() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-
+  const [step, setStep] = useState<Step>("code");
   const [code, setCode] = useState("");
-  const [resultStatus, setResultStatus] = useState<ResultStatus>("idle");
-  const [message, setMessage] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [attemptCount, setAttemptCount] = useState(0);
-  const [rateLimitTimer, setRateLimitTimer] = useState(0);
-  const [isTeacherSignedIn, setIsTeacherSignedIn] = useState(false);
+  const [name, setName] = useState("");
+  const [nisn, setNisn] = useState("");
+  const [exam, setExam] = useState<Validation["exam"] | null>(null);
+  const [waiting, setWaiting] = useState<Waiting | null>(null);
+  const [error, setError] = useState("");
+  const [waitingError, setWaitingError] = useState("");
+  const [sessionUnavailable, setSessionUnavailable] = useState(false);
+  const [field, setField] = useState<"code" | "name" | "nisn" | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [acknowledged, setAcknowledged] = useState(false);
+  const [identityEntrance, setIdentityEntrance] = useState(false);
+  const [codeFieldScope, animateCode] = useAnimate();
+  const reduceMotion = useReducedMotion();
+  const [revision, setRevision] = useState(0);
+  const [notice, setNotice] = useState("");
+  const codeRef = useRef<HTMLInputElement>(null);
+  const nameRef = useRef<HTMLInputElement>(null);
+  const nisnRef = useRef<HTMLInputElement>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const acknowledgementRef = useRef<HTMLInputElement>(null);
+  const interacted = useRef(false);
 
-  const { teacher, isAuthenticated } = useTeacherAuth();
-  const inputRef = useRef<HTMLInputElement>(null);
-  const buttonRef = useRef<HTMLButtonElement>(null);
+  const applyWaiting = useCallback((value: Waiting) => {
+    setWaiting(value); setWaitingError(""); setSessionUnavailable(false); setCode(value.exam.accessCode); setName(value.student.name); setNisn(value.student.nisn);
+    if (["active", "disconnected"].includes(value.student.status) && value.exam.status === "active") { router.replace("/exam/session"); return; }
+    setStep("waiting");
+  }, [router]);
 
-  const { checking, sessionCheck, sessionHint, hasActiveSession } = useActiveSession();
-  const [showResumePrompt, setShowResumePrompt] = useState(false);
-  const [submitSuccessBanner, setSubmitSuccessBanner] = useState<string | null>(null);
-  const [alreadySubmittedBanner, setAlreadySubmittedBanner] = useState<string | null>(null);
-  const [historyItems, setHistoryItems] = useState<StudentHistoryItem[]>([]);
-  const [historyCursor, setHistoryCursor] = useState<string | null>(null);
-  const [historyLoading, setHistoryLoading] = useState(true);
-  const [historyError, setHistoryError] = useState<string | null>(null);
-  const [historyActionStudentId, setHistoryActionStudentId] = useState<string | null>(null);
-  const [historyActionError, setHistoryActionError] = useState<string | null>(null);
-  const [historyRequest, setHistoryRequest] = useState(0);
+  const restore = useCallback(async () => {
+    const value = await api<Waiting>("/api/exam-session/waiting");
+    applyWaiting(value);
+  }, [applyWaiting]);
 
-  const loadHistory = async (cursor?: string, append = false) => {
-    setHistoryLoading(true);
-    setHistoryError(null);
-    try {
-      if (!append) await initializeStudentHistory();
-      const response = await fetchStudentHistory(cursor);
-      if (!response.success || !response.data) {
-        throw new Error(response.error?.message || "Riwayat ujian tidak dapat dimuat.");
-      }
-      setHistoryItems((current) => append ? [...current, ...response.data!.items] : response.data!.items);
-      setHistoryCursor(response.data.nextCursor);
-    } catch (error) {
-      setHistoryError(error instanceof Error ? error.message : "Riwayat ujian tidak dapat dimuat.");
-    } finally {
-      setHistoryLoading(false);
-    }
-  };
-
-  // Deteksi pengumpulan ujian dan cegah akses ulang
   useEffect(() => {
-    if (isAuthenticated || teacher || isTeacherSignedIn) return;
-    void loadHistory();
-  }, [isAuthenticated, teacher, isTeacherSignedIn, historyRequest]);
+    let active = true;
+    void api<Waiting>("/api/exam-session/waiting").then(value => { if (active && !interacted.current) applyWaiting(value); }).catch((err: unknown) => {
+      if (active && err instanceof ApiError && err.status !== 401 && err.code !== "ALREADY_SUBMITTED") setWaitingError(err.message);
+    });
+    if (new URLSearchParams(window.location.search).has("selesai")) Promise.resolve().then(() => { if (active) setNotice("Ujian telah dikumpulkan. Riwayat Anda tersedia di bawah."); });
+    return () => { active = false; };
+  }, [applyWaiting]);
 
-  const handleResumeHistory = async (item: StudentHistoryItem) => {
-    setHistoryActionStudentId(item.studentId);
-    setHistoryActionError(null);
-    try {
-      const response = await resumeStudentHistory(item.studentId);
-      if (!response.success || !response.data) {
-        throw new Error(response.error?.message || "Sesi tidak dapat dilanjutkan.");
-      }
-      clearSessionHint();
-      window.location.assign(response.data.nextStep === "session" ? "/exam/session" : "/exam/lobby");
-    } catch (error) {
-      setHistoryActionError(error instanceof Error ? error.message : "Sesi tidak dapat dilanjutkan.");
-      setHistoryRequest((request) => request + 1);
-    } finally {
-      setHistoryActionStudentId(null);
-    }
-  };
-
-  const formatHistoryStatus = (status: StudentHistoryItem["status"]) => ({
-    waiting: "Menunggu pengawas",
-    accepted: "Disetujui",
-    active: "Sedang dikerjakan",
-    submitted: "Selesai dikumpulkan",
-    disconnected: "Terputus",
-    kicked: "Dikeluarkan",
-  })[status];
-
-  const formatHistoryDate = (value: string) => new Intl.DateTimeFormat("id-ID", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const justSubmitted = sessionStorage.getItem("exam_just_submitted");
-    const examTitle = sessionStorage.getItem("exam_submitted_title");
-    if (justSubmitted === "true") {
-      sessionStorage.removeItem("exam_just_submitted");
-      sessionStorage.removeItem("exam_submitted_title");
-      setSubmitSuccessBanner(`Ujian "${examTitle || "Ujian"}" berhasil dikumpulkan! Jawaban Anda telah tersimpan.`);
-    }
-
-    const alreadySubmitted = sessionStorage.getItem("exam_already_submitted");
-    if (alreadySubmitted === "true") {
-      sessionStorage.removeItem("exam_already_submitted");
-      setAlreadySubmittedBanner("Kamu sudah mengerjakan ujian ini sebelumnya.");
-    }
-  }, []);
-
-  // Auto-redirect jika backend konfirmasi sesi aktif
-  useEffect(() => {
-    if (!checking && hasActiveSession) {
-      router.replace("/exam/session");
-    }
-  }, [checking, hasActiveSession, router]);
-
-  // Tampilkan resume banner jika ada hint localStorage
-  useEffect(() => {
-    if (sessionHint) setShowResumePrompt(true);
-  }, [sessionHint]);
-
-  // Tutup banner jika backend konfirmasi sesi tidak aktif
-  useEffect(() => {
-    if (!checking && sessionCheck && !sessionCheck.isActive) {
-      setShowResumePrompt(false);
-    }
-  }, [checking, sessionCheck]);
-
-  // Redirect guru yang sudah login langsung ke dashboard
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      const hasCookie =
-        document.cookie.includes("hasTeacherSession=1") ||
-        document.cookie.includes("eduquas_teacher_session=active");
-      const hasLocal =
-        localStorage.getItem("eduquas_teacher_session") === "active";
-      if (hasCookie || hasLocal || isAuthenticated || Boolean(teacher)) {
-        setIsTeacherSignedIn(true);
-        router.replace("/dashboard");
+    if (step !== "waiting" || sessionUnavailable) return;
+    let active = true;
+    async function refresh() {
+      try { const value = await api<Waiting>("/api/exam-session/waiting"); if (active) applyWaiting(value); }
+      catch (err) {
+        if (!active) return;
+        if (err instanceof ApiError && err.code === "ALREADY_SUBMITTED") { setStep("code"); setWaiting(null); setNotice("Ujian telah dikumpulkan. Riwayat Anda tersedia di bawah."); setRevision(value => value + 1); return; }
+        if (err instanceof ApiError && err.status === 401) { setSessionUnavailable(true); setWaitingError(""); return; }
+        setWaitingError(err instanceof Error ? err.message : "Status belum dapat diperbarui.");
       }
     }
-  }, [isAuthenticated, teacher, router]);
+    const timer = setInterval(() => { void refresh(); }, 3000);
+    const visible = () => { if (document.visibilityState === "visible") void refresh(); };
+    document.addEventListener("visibilitychange", visible);
+    return () => { active = false; clearInterval(timer); document.removeEventListener("visibilitychange", visible); };
+  }, [step, applyWaiting, sessionUnavailable]);
 
-  // Handle ?code=ABC1234 query parameter pre-fill
   useEffect(() => {
-    const codeParam = searchParams.get("code");
-    if (codeParam) {
-      const normalized = codeParam.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10);
-      setCode(normalized);
-      // Move focus to the button and remove query parameter from address bar
-      setTimeout(() => {
-        buttonRef.current?.focus();
-      }, 50);
-      window.history.replaceState(null, "", window.location.pathname);
-    } else {
-      // Autofocus on desktop (pointer: fine) per Spec §3.2
-      if (typeof window !== "undefined" && window.matchMedia("(pointer: fine)").matches) {
-        inputRef.current?.focus();
-      }
+    if (!reduceMotion) return;
+    const frame = requestAnimationFrame(() => {
+      if (step === "identity") nameRef.current?.focus();
+      else if (step === "waiting" || step === "confirmation") headingRef.current?.focus();
+      else if (interacted.current) codeRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [step, reduceMotion]);
+
+  function fail(message: string, target: "code" | "name" | "nisn") {
+    setError(message); setField(target);
+    if (target === "code" && !reduceMotion && codeFieldScope.current) {
+      void animateCode(codeFieldScope.current, { x: [0, -4, 4, -2, 0] }, { duration: 0.22 });
     }
-  }, [searchParams]);
-
-  // Rate limit countdown tick
-  useEffect(() => {
-    if (rateLimitTimer <= 0) return;
-    const timer = setInterval(() => {
-      setRateLimitTimer((prev) => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          setResultStatus("idle");
-          setMessage("");
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [rateLimitTimer]);
-
-  // Input normalization (Spec §3.2: uppercase, non-alphanumeric removed immediately)
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const raw = e.target.value;
-    const normalized = raw.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10);
-    setCode(normalized);
-    // Clear previous error on typing
-    if (resultStatus !== "rate_limited") {
-      setResultStatus("idle");
-      setMessage("");
-    }
-  };
-
-  const handleJoin = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (rateLimitTimer > 0) return;
-
-    // Normalization check
-    const normalized = code.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
-
-    // Situation 1: Empty or too short (< 6 chars)
-    if (!normalized || normalized.length < 6) {
-      setResultStatus("error");
-      setMessage("Masukkan kode ujian.");
-      inputRef.current?.focus();
-      return;
-    }
-
-    setLoading(true);
-    setResultStatus("idle");
-    setMessage("");
-
-    // Minimum visible time 300 ms to avoid flicker per Spec §3.3
-    const startTime = Date.now();
-
-    // Check rate limit (simulated > 4 consecutive failed attempts)
-    if (attemptCount >= 4) {
-      const elapsed = Date.now() - startTime;
-      if (elapsed < 350) await new Promise((r) => setTimeout(r, 350 - elapsed));
-      setLoading(false);
-      setResultStatus("rate_limited");
-      setRateLimitTimer(30);
-      setMessage("Terlalu banyak percobaan. Coba lagi dalam 30 detik.");
-      setAttemptCount(0);
-      return;
-    }
-
-    try {
-      const res = await validateExamCode(normalized);
-      const elapsed = Date.now() - startTime;
-      if (elapsed < 300) await new Promise((r) => setTimeout(r, 300 - elapsed));
-      setLoading(false);
-
-      if (res.success && res.data?.exam) {
-        if (typeof window !== "undefined") {
-          sessionStorage.setItem("eduquas_exam_preview", JSON.stringify(res.data.exam));
-        }
-        router.push(`/join/identity?code=${encodeURIComponent(normalized)}`);
-        return;
-      }
-
-      // Check backend error codes
-      const errCode = res.error?.code;
-      if (errCode === "ALREADY_SUBMITTED") {
-        setResultStatus("notice");
-        setMessage("Anda sudah menyelesaikan dan mengumpulkan ujian ini.");
-      } else if (errCode === "EXAM_NOT_FOUND") {
-        setAttemptCount((prev) => prev + 1);
-        setResultStatus("error");
-        setMessage("Kode tidak ditemukan. Periksa lagi kode dari pengawas.");
-        inputRef.current?.select();
-      } else if (errCode === "EXAM_NOT_STARTED") {
-        setResultStatus("notice");
-        setMessage("Ujian belum dimulai.");
-      } else if (errCode === "EXAM_ENDED" || errCode === "EXAM_TIME_EXPIRED") {
-        setResultStatus("notice");
-        setMessage("Ujian ini sudah berakhir.");
-      } else if (errCode === "TOO_MANY_REQUESTS") {
-        setResultStatus("rate_limited");
-        setRateLimitTimer((res.error?.details as any)?.retryAfter || 30);
-        setMessage("Terlalu banyak percobaan. Coba lagi dalam beberapa saat.");
-      } else {
-        setAttemptCount((prev) => prev + 1);
-        setResultStatus("error");
-        setMessage(res.error?.message || "Kode tidak ditemukan. Periksa lagi kode dari pengawas.");
-        inputRef.current?.select();
-      }
-    } catch {
-      setLoading(false);
-      setResultStatus("error");
-      setMessage("Terjadi kesalahan jaringan. Coba lagi.");
-    }
-  };
-
-  const isError = resultStatus === "error";
-  const isNotice = resultStatus === "notice";
-  const isRateLimited = resultStatus === "rate_limited";
-
-  if (isTeacherSignedIn || isAuthenticated || Boolean(teacher)) {
-    return (
-      <div
-        style={{
-          minHeight: "100dvh",
-          background: T.bgPage,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontFamily: "var(--font-family, 'Poppins', sans-serif)",
-          color: T.textSecondary,
-        }}
-      >
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
-          <div
-            style={{
-              width: 32,
-              height: 32,
-              borderRadius: "50%",
-              border: `3px solid ${T.primary}`,
-              borderTopColor: "transparent",
-              animation: "spinner-rotate 0.8s linear infinite",
-            }}
-          />
-          <div style={{ fontSize: 13, fontWeight: 500 }}>Mengalihkan ke dashboard guru…</div>
-        </div>
-        <style>{`
-          @keyframes spinner-rotate {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
-          }
-        `}</style>
-      </div>
-    );
+    ({ code: codeRef, name: nameRef, nisn: nisnRef })[target].current?.focus();
+  }
+  async function validate(event: FormEvent) {
+    event.preventDefault(); setError(""); setField(null);
+    if (code.length !== 6) { fail("Masukkan 6 huruf atau angka dari pengawas.", "code"); return; }
+    setBusy(true);
+    try { const value = await api<Validation>(`/api/join/validate?code=${encodeURIComponent(code)}`); setExam(value.exam); setIdentityEntrance(true); setStep("identity"); }
+    catch (err) { fail(err instanceof Error ? err.message : "Kode belum dapat diperiksa.", "code"); }
+    finally { setBusy(false); }
+  }
+  function confirmIdentity(event: FormEvent) {
+    event.preventDefault(); setError(""); setField(null);
+    if (name.trim().length < 2) { fail("Masukkan nama minimal 2 karakter.", "name"); return; }
+    if (!/^\d{10}$/.test(nisn)) { fail("NISN harus terdiri dari 10 angka.", "nisn"); return; }
+    setAcknowledged(false); setStep("confirmation");
+  }
+  async function join() {
+    setError("");
+    if (!acknowledged) { setError("Centang pernyataan berikut sebelum mengajukan masuk."); acknowledgementRef.current?.focus(); return; }
+    setBusy(true);
+    try { await post("/api/join", { accessCode: code, name: name.trim(), nisn }); await restore(); setRevision(value => value + 1); requestAnimationFrame(() => headingRef.current?.focus()); }
+    catch (err) { setError(err instanceof Error ? err.message : "Permintaan belum dapat dikirim."); }
+    finally { setBusy(false); }
   }
 
-  return (
-    <div
-      style={{
-        minHeight: "100dvh",
-        background: T.bgPage,
-        display: "flex",
-        flexDirection: "column",
-        fontFamily: "var(--font-family, 'Poppins', sans-serif)",
-      }}
-    >
-      <style>{`
-        .eduquas-code-input {
-          width: 100%;
-          height: 56px;
-          padding: 0 16px;
-          background: #FFFFFF;
-          border: 1px solid ${isError ? T.danger : T.borderInput};
-          border-radius: ${T.radiusControl};
-          font-family: ${T.fontMono};
-          font-size: 22px;
-          line-height: 28px;
-          font-weight: 600;
-          letter-spacing: 0.12em;
-          text-align: left;
-          text-transform: uppercase;
-          color: ${T.textPrimary};
-          outline: none;
-          transition: border-color 150ms ease, box-shadow 150ms ease;
-          box-sizing: border-box;
-        }
-        .eduquas-code-input::placeholder {
-          color: ${T.textPlaceholder};
-          font-weight: 500;
-          letter-spacing: 0.12em;
-        }
-        .eduquas-code-input:focus {
-          border-color: ${isError ? T.danger : T.primary};
-          box-shadow: 0 0 0 3px ${isError ? "rgba(199, 62, 62, 0.20)" : T.primaryRing};
-        }
-        .eduquas-code-input:read-only {
-          background: ${T.bgSubtle};
-          cursor: not-allowed;
-        }
+  const current = step === "code" ? 0 : step === "identity" || step === "confirmation" ? 1 : 2;
+  const ended = !!waiting && (["ended", "archived"].includes(waiting.exam.status) || !!waiting.exam.endTime && Date.parse(waiting.exam.endTime) <= Date.parse(waiting.exam.serverTime));
+  const studentStatus = waiting?.student.status || "waiting";
+  const title = sessionUnavailable ? "Sesi tidak tersedia" : ended ? "Ujian telah berakhir" : studentStatus === "rejected" ? "Permintaan belum disetujui" : studentStatus === "accepted" ? "Anda sudah disetujui" : studentStatus === "kicked" ? "Sesi telah dihentikan" : "Menunggu persetujuan";
 
-        .join-btn-primary {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          gap: 8px;
-          height: 48px;
-          min-width: 140px;
-          padding: 0 32px;
-          border-radius: ${T.radiusControl};
-          background-color: ${T.primary};
-          color: #FFFFFF;
-          font-size: 14px;
-          font-weight: 500;
-          border: none;
-          cursor: pointer;
-          outline: none;
-          transition: background-color 150ms ease;
-          text-decoration: none;
-        }
-        .join-btn-primary:hover:not(:disabled) {
-          background-color: ${T.primaryHover};
-        }
-        .join-btn-primary:active:not(:disabled) {
-          background-color: ${T.primaryActive};
-        }
-        .join-btn-primary:focus-visible {
-          outline: 2px solid ${T.primary};
-          outline-offset: 2px;
-        }
-        .join-btn-primary:disabled {
-          background-color: ${T.borderInput};
-          cursor: not-allowed;
-          opacity: 0.7;
-        }
-
-        .teacher-switch-link {
-          font-size: 14px;
-          line-height: 20px;
-          font-weight: 500;
-          color: ${T.primary};
-          text-decoration: none;
-          outline: none;
-        }
-        .teacher-switch-link:hover {
-          text-decoration: underline;
-        }
-        .teacher-switch-link:focus-visible {
-          outline: 2px solid ${T.primary};
-          outline-offset: 2px;
-          border-radius: 4px;
-        }
-
-        @keyframes spinner-rotate {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-      `}</style>
-
-      {/* ============================================================
-          SHARED HEADER (Spec §2: Brand top left, nothing on right, height 72px)
-          ============================================================ */}
-      <header
-        style={{
-          height: "72px",
-          padding: "0 32px",
-          display: "flex",
-          alignItems: "center",
-          flexShrink: 0,
-        }}
-      >
-        <Link
-          href="/"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "10px",
-            textDecoration: "none",
-            outline: "none",
-          }}
-          aria-label="EduQuas Beranda"
-        >
-          {/* 32px rounded square in --primary with white line-style lock (SVG, not emoji) */}
-          <div
-            style={{
-              width: "32px",
-              height: "32px",
-              background: T.primary,
-              borderRadius: "8px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              flexShrink: 0,
-            }}
-          >
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="#FFFFFF"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-            </svg>
-          </div>
-          <span
-            style={{
-              fontSize: "16px",
-              fontWeight: 600,
-              color: T.textPrimary,
-              letterSpacing: "-0.01em",
-            }}
-          >
-            EduQuas
-          </span>
-        </Link>
-      </header>
-
-      {/* ============================================================
-          MAIN JOIN VIEW (Spec §3: No card, 360px wide, centered, ~45% top)
-          ============================================================ */}
-      <main
-        style={{
-          flex: 1,
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: "0 24px 64px",
-          width: "100%",
-          boxSizing: "border-box",
-        }}
-      >
-        <div
-          style={{
-            width: "100%",
-            maxWidth: "360px",
-            textAlign: "center",
-          }}
-        >
-          {/* Heading (h1): Masukkan kode untuk bergabung */}
-          <h1
-            style={{
-              margin: "0 0 8px",
-              fontSize: "26px",
-              lineHeight: "32px",
-              fontWeight: 600,
-              color: T.textPrimary,
-              letterSpacing: "-0.01em",
-            }}
-          >
-            Masukkan kode untuk bergabung
-          </h1>
-
-          {/* Help text: Kode diberikan oleh pengawas ujian. */}
-          <p
-            style={{
-              margin: "0 0 32px",
-              fontSize: "14px",
-              lineHeight: "20px",
-              color: T.textSecondary,
-            }}
-          >
-            Kode diberikan oleh pengawas ujian.
-          </p>
-
-          {/* Resume Session Banner */}
-          {showResumePrompt && sessionHint && (
-            <div
-              style={{
-                background: "linear-gradient(135deg, #E8F6FD 0%, #EDE9FE 100%)",
-                border: "1.5px solid #29ABE2",
-                borderRadius: "10px",
-                padding: "14px 16px",
-                marginBottom: "20px",
-                textAlign: "left",
-                boxShadow: "0 4px 16px rgba(41,171,226,0.10)",
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "flex-start", gap: "10px" }}>
-                <span style={{ fontSize: "20px", flexShrink: 0 }}>📋</span>
-                <div style={{ flex: 1 }}>
-                  <p style={{ fontWeight: 600, fontSize: "13px", color: "#1C303D", margin: "0 0 3px 0" }}>
-                    Ada ujian yang sedang berlangsung
-                  </p>
-                  <p style={{ fontSize: "12px", color: "#3D6A7E", margin: "0 0 10px 0" }}>
-                    <strong>{sessionHint.studentName}</strong> · {sessionHint.examTitle}
-                  </p>
-                  <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                    {checking ? (
-                      <span style={{ fontSize: "12px", color: "#5A8FA8" }}>Memeriksa sesi...</span>
-                    ) : (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => router.replace("/exam/session")}
-                          style={{
-                            background: "#29ABE2", color: "white", border: "none",
-                            borderRadius: "6px", padding: "6px 14px", fontSize: "13px",
-                            fontWeight: 600, cursor: "pointer",
-                          }}
-                        >
-                          ▶ Lanjutkan Ujian
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { clearSessionHint(); setShowResumePrompt(false); }}
-                          style={{
-                            background: "transparent", color: "#5A8FA8",
-                            border: "1px solid #A8D4E8", borderRadius: "6px",
-                            padding: "6px 12px", fontSize: "12px", cursor: "pointer",
-                          }}
-                        >
-                          Abaikan
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Banner Sukses Mengumpulkan Ujian */}
-          {submitSuccessBanner && (
-            <div
-              style={{
-                background: "#ECFDF5",
-                border: "1.5px solid #10B981",
-                color: "#065F46",
-                borderRadius: "8px",
-                padding: "12px 16px",
-                marginBottom: "20px",
-                fontSize: "13px",
-                lineHeight: 1.5,
-                textAlign: "left",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: "8px",
-                boxShadow: "0 2px 8px rgba(16,185,129,0.12)",
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <span style={{ fontSize: "18px" }}>✅</span>
-                <span>{submitSuccessBanner}</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSubmitSuccessBanner(null)}
-                style={{ background: "none", border: "none", color: "#065F46", cursor: "pointer", fontSize: "16px", padding: 0 }}
-                aria-label="Tutup notifikasi"
-              >
-                ×
-              </button>
-            </div>
-          )}
-
-          {/* Banner Peringatan Sudah Mengerjakan */}
-          {alreadySubmittedBanner && (
-            <div
-              style={{
-                background: "#FFFBEB",
-                border: "1.5px solid #F59E0B",
-                color: "#92400E",
-                borderRadius: "8px",
-                padding: "12px 16px",
-                marginBottom: "20px",
-                fontSize: "13px",
-                lineHeight: 1.5,
-                textAlign: "left",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: "8px",
-                boxShadow: "0 2px 8px rgba(245,158,11,0.12)",
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                <span style={{ fontSize: "18px" }}>⚠️</span>
-                <span>{alreadySubmittedBanner}</span>
-                <a
-                  href="/exam/done"
-                  style={{
-                    color: "#92400E",
-                    fontWeight: 700,
-                    textDecoration: "underline",
-                    marginLeft: "4px",
-                  }}
-                >
-                  Lihat Konfirmasi Ujian
-                </a>
-              </div>
-              <button
-                type="button"
-                onClick={() => setAlreadySubmittedBanner(null)}
-                style={{ background: "none", border: "none", color: "#92400E", cursor: "pointer", fontSize: "16px", padding: 0 }}
-                aria-label="Tutup peringatan"
-              >
-                ×
-              </button>
-            </div>
-          )}
-
-          {/* Form */}
-          <form onSubmit={handleJoin} noValidate>
-            {/* Code Input */}
-            <div style={{ marginBottom: "8px", position: "relative" }}>
-              <input
-                ref={inputRef}
-                type="text"
-                inputMode="text"
-                autoCapitalize="characters"
-                autoComplete="off"
-                autoCorrect="off"
-                spellCheck={false}
-                enterKeyHint="go"
-                aria-label="Kode ujian"
-                aria-describedby="code-feedback-message"
-                aria-invalid={isError}
-                placeholder="ABC1234"
-                value={code}
-                onChange={handleInputChange}
-                readOnly={loading}
-                className="eduquas-code-input"
-              />
-            </div>
-
-            {/* Reserved message area (min-height 24px per Spec §3.4: nothing jumps) */}
-            <div
-              id="code-feedback-message"
-              aria-live="polite"
-              style={{
-                minHeight: "24px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                marginBottom: "24px",
-              }}
-            >
-              {(isError || isRateLimited) && (
-                <div
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "6px",
-                    fontSize: "13px",
-                    lineHeight: "18px",
-                    color: T.danger,
-                    textAlign: "center",
-                  }}
-                >
-                  <svg
-                    width="14"
-                    height="14"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                    style={{ flexShrink: 0 }}
-                  >
-                    <circle cx="12" cy="12" r="10" />
-                    <line x1="12" y1="8" x2="12" y2="12" />
-                    <line x1="12" y1="16" x2="12.01" y2="16" />
-                  </svg>
-                  <span>
-                    {isRateLimited
-                      ? `Terlalu banyak percobaan. Coba lagi dalam ${rateLimitTimer} detik.`
-                      : message}
-                  </span>
-                </div>
-              )}
-
-              {isNotice && (
-                <div
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "6px",
-                    fontSize: "13px",
-                    lineHeight: "18px",
-                    color: T.textSecondary,
-                    background: T.bgSubtle,
-                    padding: "4px 10px",
-                    borderRadius: "6px",
-                    textAlign: "center",
-                  }}
-                >
-                  <svg
-                    width="14"
-                    height="14"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                    style={{ flexShrink: 0 }}
-                  >
-                    <circle cx="12" cy="12" r="10" />
-                    <line x1="12" y1="16" x2="12" y2="12" />
-                    <line x1="12" y1="8" x2="12.01" y2="8" />
-                  </svg>
-                  <span>{message}</span>
-                </div>
-              )}
-            </div>
-
-            {/* Submit Button: Gabung (Spec §3.3: never disabled while empty) */}
-            <div style={{ marginBottom: "40px" }}>
-              <button
-                ref={buttonRef}
-                type="submit"
-                disabled={loading || rateLimitTimer > 0}
-                className="join-btn-primary"
-              >
-                {loading ? (
-                  <>
-                    <svg
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2.5"
-                      style={{ animation: "spinner-rotate 0.8s linear infinite" }}
-                      aria-hidden="true"
-                    >
-                      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-                    </svg>
-                    <span>Memeriksa…</span>
-                  </>
-                ) : (
-                  <span>Gabung</span>
-                )}
-              </button>
-            </div>
-          </form>
-
-          {/* Browser-scoped student exam history */}
-          {!isTeacherSignedIn && !isAuthenticated && !teacher && (
-            <section
-              aria-labelledby="student-history-heading"
-              aria-busy={historyLoading}
-              style={{ width: "100%", marginTop: "42px", textAlign: "left" }}
-            >
-              <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: "24px", marginBottom: "14px" }}>
-                <h2 id="student-history-heading" style={{ margin: 0, color: T.textPrimary, fontSize: "17px", lineHeight: 1.4 }}>
-                  Riwayat ujian di browser ini
-                </h2>
-                <p style={{ margin: "5px 0 0", color: T.textSecondary, fontSize: "12px", lineHeight: 1.5 }}>
-                  Keikutsertaan ujian yang pernah dibuka dari browser ini.
-                </p>
-              </div>
-
-              {historyLoading && historyItems.length === 0 && (
-                <p role="status" style={{ color: T.textSecondary, fontSize: "13px" }}>Memuat riwayat ujian…</p>
-              )}
-
-              {historyError && (
-                <div role="alert" style={{ border: `1px solid ${T.border}`, borderRadius: T.radiusControl, padding: "14px", color: T.textSecondary, fontSize: "13px" }}>
-                  <p style={{ margin: "0 0 10px" }}>{historyError}</p>
-                  <button type="button" onClick={() => setHistoryRequest((request) => request + 1)} style={{ color: T.primary, background: "transparent", border: 0, padding: 0, fontWeight: 700, cursor: "pointer" }}>Coba lagi</button>
-                </div>
-              )}
-
-              {historyActionError && <p role="alert" style={{ color: T.danger, fontSize: "13px" }}>{historyActionError}</p>}
-
-              {!historyLoading && !historyError && historyItems.length === 0 && (
-                <p style={{ color: T.textSecondary, fontSize: "13px", lineHeight: 1.6 }}>Riwayat akan muncul setelah Anda bergabung dengan ujian dari browser ini.</p>
-              )}
-
-              <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: "10px" }}>
-                {historyItems.map((item) => (
-                  <li key={item.studentId} style={{ border: `1px solid ${T.border}`, borderRadius: T.radiusControl, background: T.bgCard, padding: "14px", display: "grid", gap: "10px" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px" }}>
-                      <div style={{ minWidth: 0 }}>
-                        <h3 style={{ margin: 0, color: T.textPrimary, fontSize: "14px", lineHeight: 1.4, overflowWrap: "anywhere" }}>{item.exam.title}</h3>
-                        <p style={{ margin: "4px 0 0", color: T.textSecondary, fontSize: "12px" }}>{item.studentName}</p>
-                      </div>
-                      <span style={{ flexShrink: 0, borderRadius: "999px", background: T.bgSubtle, color: T.textSecondary, padding: "4px 8px", fontSize: "10px", fontWeight: 700 }}>{formatHistoryStatus(item.status)}</span>
-                    </div>
-                    <p style={{ margin: 0, color: T.textSecondary, fontSize: "11px", lineHeight: 1.5 }}>
-                      {[item.exam.className, item.exam.examType].filter(Boolean).join(" · ")}{item.exam.className || item.exam.examType ? " · " : ""}
-                      {formatHistoryDate(item.submittedAt || item.joinedAt)}
-                      {item.score !== null ? ` · Nilai ${item.score}` : ""}
-                      {item.isLocked && item.canResume ? " · Terkunci sampai dibuka pengawas" : ""}
-                    </p>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-                      {item.canResume && (
-                        <button
-                          type="button"
-                          disabled={historyActionStudentId !== null}
-                          onClick={() => void handleResumeHistory(item)}
-                          style={{ minHeight: "40px", border: 0, borderRadius: "6px", background: T.primary, color: "white", padding: "8px 12px", fontSize: "12px", fontWeight: 700, cursor: historyActionStudentId ? "wait" : "pointer", opacity: historyActionStudentId ? 0.7 : 1 }}
-                        >
-                          {historyActionStudentId === item.studentId ? "Membuka…" : item.status === "waiting" || item.status === "accepted" ? "Buka ruang tunggu" : "Lanjutkan ujian"}
-                        </button>
-                      )}
-                      {item.canReview && (
-                        <Link href={`/exam/review?studentId=${encodeURIComponent(item.studentId)}`} style={{ minHeight: "40px", display: "inline-flex", alignItems: "center", border: `1px solid ${T.border}`, borderRadius: "6px", color: T.primary, padding: "8px 12px", fontSize: "12px", fontWeight: 700, textDecoration: "none" }}>Review jawaban</Link>
-                      )}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-
-              {historyCursor && !historyError && (
-                <button type="button" disabled={historyLoading} onClick={() => void loadHistory(historyCursor, true)} style={{ width: "100%", minHeight: "42px", marginTop: "12px", border: `1px solid ${T.border}`, borderRadius: T.radiusControl, background: "transparent", color: T.primary, fontWeight: 700, cursor: historyLoading ? "wait" : "pointer" }}>
-                  {historyLoading ? "Memuat…" : "Muat riwayat lainnya"}
-                </button>
-              )}
-            </section>
-          )}
-
-          {/* Teacher link: 40 px under button (Spec §3.6) */}
-          <div>
-            {isTeacherSignedIn ? (
-              <Link href="/dashboard" className="teacher-switch-link">
-                Buka dashboard
-              </Link>
-            ) : (
-              <Link href="/login" className="teacher-switch-link">
-                Login sebagai guru?
-              </Link>
-            )}
-          </div>
-        </div>
-      </main>
-    </div>
-  );
-}
-
-export default function JoinPage() {
-  return (
-    <Suspense
-      fallback={
-        <div style={{ minHeight: "100dvh", background: T.bgPage, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          Memuat…
-        </div>
-      }
-    >
-      <JoinContent />
-    </Suspense>
-  );
+  return <main className="page-shell">
+    <motion.header className="site-header" initial={reduceMotion ? false : { opacity: 0.7, y: -6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: reduceMotion ? 0 : 0.32, ease: [0.22, 1, 0.36, 1] }}><Image className="brand-logo" src="/eduquas-logo.png" width={264} height={62} alt="EduQuas" priority /></motion.header>
+    <LayoutGroup><motion.section className="entry" aria-labelledby="entry-title" initial={reduceMotion ? false : { opacity: 0.75, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: reduceMotion ? 0 : 0.32, delay: reduceMotion ? 0 : 0.06, ease: [0.22, 1, 0.36, 1] }}>
+      <motion.ol className="steps" aria-label="Tahapan masuk ujian" initial={reduceMotion ? false : { opacity: 0.75 }} animate={{ opacity: 1 }} transition={{ duration: reduceMotion ? 0 : 0.32, delay: reduceMotion ? 0 : 0.1 }}>{stepNames.map((label, index) => <li key={label} className={index === current ? "current" : index < current ? "complete" : ""} aria-current={index === current ? "step" : undefined}>{index < stepNames.length - 1 && <span className="step-connector" aria-hidden="true"><motion.span initial={false} animate={{ scaleX: index < current ? 1 : 0 }} transition={{ duration: reduceMotion ? 0 : 0.22 }} /></span>}<span className="step-number">{index + 1}</span><span>{label}</span></li>)}</motion.ol>
+      <motion.div layout className="entry-frame" data-plain={step === "code"} transition={reduceMotion ? { duration: 0 } : { layout: { type: "spring", stiffness: 270, damping: 31, mass: 0.95 } }}>
+      {step !== "code" && <motion.div aria-hidden="true" className="entry-card-surface" initial={reduceMotion || !identityEntrance ? false : { opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: reduceMotion ? 0 : 0.36, ease: [0.22, 1, 0.36, 1] }} />}
+      <AnimatePresence mode="popLayout" initial={false}>
+      <motion.div layout className="entry-body" key={step} initial={reduceMotion ? false : { opacity: 0 }} animate={{ opacity: 1 }} exit={reduceMotion ? { opacity: 0, transition: { duration: 0 } } : { opacity: 0, transition: { duration: 0.12 } }} transition={{ opacity: { duration: reduceMotion ? 0 : 0.22, delay: !reduceMotion && step === "identity" && identityEntrance ? 0.32 : 0 }, layout: reduceMotion ? { duration: 0 } : { type: "spring", stiffness: 270, damping: 31, mass: 0.95 } }} onAnimationComplete={() => { if (document.activeElement !== document.body) return; if (step === "identity") nameRef.current?.focus(); else if (step === "waiting" || step === "confirmation") headingRef.current?.focus(); else if (interacted.current) codeRef.current?.focus(); }}>
+        {step === "code" && <><h1 id="entry-title">Masuk ke ujian</h1><p className="lead">Masukkan kode yang diberikan oleh pengawas.</p>
+          <form onSubmit={event => void validate(event)} noValidate><label className="field-label" htmlFor="exam-code">Kode ujian</label>
+            <motion.div ref={codeFieldScope} className="code-field"><div className="code-slots" aria-hidden="true">{Array.from({ length: 6 }, (_, index) => <span key={index} />)}</div><input ref={codeRef} id="exam-code" value={code} onChange={event => { interacted.current = true; setCode(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6)); setError(""); setField(null); }} maxLength={6} autoComplete="off" autoCapitalize="characters" spellCheck={false} aria-invalid={field === "code"} aria-describedby={field === "code" ? "code-hint form-error" : "code-hint"} /></motion.div>
+            <p className="hint" id="code-hint">6 huruf atau angka</p>{error && <p className="error" role="alert" id="form-error">{error}</p>}
+            <MotionButton className="primary-button" type="submit" disabled={busy} aria-busy={busy}>{busy ? "Memeriksa kode…" : "Lanjutkan"}</MotionButton>
+          </form></>}
+        {step === "identity" && <><MotionButton className="back-button" type="button" onClick={() => { setStep("code"); setError(""); requestAnimationFrame(() => codeRef.current?.focus()); }}>← Kembali ke kode</MotionButton><h1 id="entry-title">Isi identitas</h1><p className="lead">{exam?.title || waiting?.exam.title || "Ujian"}</p>
+          <form onSubmit={confirmIdentity} noValidate className="identity-form"><label htmlFor="student-name">Nama lengkap</label><input ref={nameRef} id="student-name" value={name} maxLength={100} autoComplete="name" placeholder="Masukkan nama lengkap" onChange={event => { setName(event.target.value); setError(""); setField(null); }} aria-invalid={field === "name"} aria-describedby={field === "name" ? "identity-error" : undefined} />
+            <label htmlFor="student-nisn">NISN</label><input ref={nisnRef} id="student-nisn" value={nisn} inputMode="numeric" maxLength={10} placeholder="10 digit NISN" onChange={event => { setNisn(event.target.value.replace(/\D/g, "").slice(0, 10)); setError(""); setField(null); }} aria-invalid={field === "nisn"} aria-describedby={field === "nisn" ? "identity-error" : undefined} />
+            {error && <p className="error" id="identity-error" role="alert">{error}</p>}
+            <MotionButton className="primary-button" type="submit">Lanjutkan</MotionButton>
+          </form></>}
+        {step === "confirmation" && <><MotionButton className="back-button" type="button" disabled={busy} onClick={() => { setIdentityEntrance(false); setStep("identity"); setError(""); }}>← Kembali ke identitas</MotionButton><h1 id="entry-title" ref={headingRef} tabIndex={-1}>Sebelum masuk ujian</h1><p className="lead">Baca informasi ini sebelum mengirim permintaan kepada pengawas.</p>
+          <div className="admission-information"><p>Selama ujian, pelanggaran yang terdeteksi dapat dicatat dan diperiksa oleh pengawas sesuai pengaturan ujian. Sesi Anda dapat terkunci sementara jika terjadi pelanggaran.</p><p>Sesuai pengaturan ujian, kehilangan fokus, keluar dari layar penuh, perubahan IP, dan shortcut devtools dapat dicatat sebagai pelanggaran.</p><p>Shortcut screenshot tertentu dapat terdeteksi dan langsung mengunci sesi. Browser tidak dapat memastikan apakah tangkapan layar berhasil dibuat, dan tidak semua aktivitas dapat dideteksi.</p></div>
+          <motion.label className="acknowledgement" animate={{ backgroundColor: acknowledged ? "#f3eff8" : "#ffffff", borderColor: acknowledged ? "#9b7ac8" : "#e9e9ec" }} transition={{ duration: reduceMotion ? 0 : 0.22 }}><input ref={acknowledgementRef} type="checkbox" checked={acknowledged} onChange={event => { setAcknowledged(event.target.checked); setError(""); }} aria-invalid={!!error && !acknowledged} aria-describedby={error && !acknowledged ? "confirmation-error" : undefined} /><span>Saya sudah membaca dan memahami informasi di atas.</span></motion.label>
+          {error && <p className="error" id="confirmation-error" role="alert">{error}</p>}
+          <MotionButton className="primary-button" type="button" disabled={busy} aria-busy={busy} onClick={() => void join()}>{busy ? "Mengirim permintaan…" : studentStatus === "rejected" ? "Ajukan ulang" : "Ajukan masuk"}</MotionButton>
+        </>}
+        {step === "waiting" && <><h1 id="entry-title" ref={headingRef} tabIndex={-1}>{title}</h1><p className="lead">{waiting?.exam.title}</p>{studentStatus === "waiting" && !ended && !sessionUnavailable && !waitingError && <div className="waiting-indicator" role="status"><motion.span className="waiting-spinner" aria-hidden="true" animate={reduceMotion ? { rotate: 0 } : { rotate: 360 }} transition={reduceMotion ? { duration: 0 } : { duration: 1, ease: "linear", repeat: Infinity }} /><span>Menunggu respons pengawas…</span></div>}<div className="waiting-details"><p><strong>{waiting?.student.name}</strong><span>NISN {waiting?.student.nisn}</span></p><p role="status">{sessionUnavailable ? "Sesi berakhir atau telah digantikan. Hubungi pengawas jika Anda memerlukan bantuan." : ended ? "Waktu ujian sudah berakhir." : studentStatus === "rejected" ? waiting?.student.latestAdmissionAction?.reason || "Anda dapat memperbaiki data dan mengajukan ulang." : studentStatus === "accepted" ? "Tunggu pengawas memulai ujian. Halaman akan berpindah otomatis." : studentStatus === "kicked" ? waiting?.student.kickReason || "Hubungi pengawas untuk informasi lebih lanjut." : "Permintaan Anda telah dikirim. Tunggu pengawas memeriksa identitas Anda."}</p></div>
+          {waitingError && <p className="error" role="alert">{waitingError} Status akan diperiksa kembali.</p>}
+          {studentStatus === "rejected" && !ended && !sessionUnavailable && <MotionButton className="primary-button" type="button" onClick={() => { setIdentityEntrance(false); setStep("identity"); setError(""); requestAnimationFrame(() => nameRef.current?.focus()); }}>Ajukan ulang</MotionButton>}
+          {(ended || studentStatus === "kicked" || sessionUnavailable) && <MotionButton className="secondary-button" type="button" onClick={() => { interacted.current = true; setStep("code"); setCode(""); setWaiting(null); setWaitingError(""); setSessionUnavailable(false); }}>Masukkan kode lain</MotionButton>}
+        </>}
+      </motion.div>
+      </AnimatePresence></motion.div>
+    </motion.section>
+    {notice && <p className="notice" role="status">{notice}</p>}{step === "code" && waitingError && <p className="error" role="alert">{waitingError}</p>}
+    <History revision={revision} onResume={restore} /></LayoutGroup>
+    <motion.footer className="staff-entry-link" initial={reduceMotion ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: reduceMotion ? 0 : .32 }}><Link href="/login">Masuk sebagai guru</Link></motion.footer>
+  </main>;
 }

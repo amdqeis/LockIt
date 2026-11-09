@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authenticateTeacher } from "@/lib/middleware/auth";
 import { prisma } from "@/lib/prisma";
-import { autoGradeExam } from "@/services/grading";
+import { readStudentGradingSummaries } from "@/services/grading";
 import { errorResponse, safeErrorMessage } from "@/lib/response";
 import { AppError } from "@/lib/errors";
 
@@ -15,17 +15,22 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       return errorResponse("NOT_FOUND", "Ujian tidak ditemukan", 404);
     }
 
-    const summaries = await autoGradeExam(id);
+    const summaries = await readStudentGradingSummaries(id);
 
     // Build CSV content
     const header = ["Nama", "NISN", "Nilai", "Jumlah Pelanggaran", "Status", "Waktu Selesai", "Penilaian Manual Tertunda"];
+    const cell = (value: unknown) => {
+      const raw = String(value ?? "");
+      const safe = /^[\t\r\n ]*[=+\-@]/.test(raw) ? `'${raw}` : raw;
+      return `"${safe.replace(/"/g, '""')}"`;
+    };
     const rows = summaries.map((s) => [
-      `"${s.name.replace(/"/g, '""')}"`,
-      `"${s.nisn}"`,
-      s.finalScore,
+      cell(s.name),
+      cell(s.nisn),
+      s.status === "submitted" && !s.pendingManualCount ? s.finalScore : "",
       s.violationCount,
-      s.status,
-      s.submittedAt ? `"${s.submittedAt.toISOString()}"` : '"Belum Submit"',
+      cell(s.status),
+      cell(s.submittedAt ? s.submittedAt.toISOString() : "Belum mengumpulkan"),
       s.pendingManualCount,
     ]);
 

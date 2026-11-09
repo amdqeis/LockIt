@@ -93,7 +93,7 @@ echo -e "${GREEN}✓ Backend siap di http://localhost:3001${NC}"
 
 echo -e "${CYAN}▶ Menjalankan Frontend Next.js di port 3002...${NC}"
 (
-  cd frontend-new
+  cd frontend
   npm run dev
 ) 2>&1 | sed "s/^/$(echo -e "${CYAN}[FE-3002]${NC} ")/" &
 FE_PID=$!

@@ -24,16 +24,18 @@ export async function POST(req: NextRequest) {
     if (!storedToken || storedToken.isRevoked || new Date() > storedToken.expiresAt) {
       // Clear cookie if invalid
       const response = errorResponse("INVALID_REFRESH_TOKEN", "Refresh token tidak valid atau telah kedaluwarsa", 401);
-      response.cookies.delete("refreshToken");
+      response.cookies.set("refreshToken", "", { path: "/api/auth", maxAge: 0, httpOnly: true, sameSite: "strict", secure: process.env.NODE_ENV === "production" });
       response.cookies.delete("hasTeacherSession");
+      response.cookies.delete("accessToken");
       return response;
     }
 
     // Guard: akun dinonaktifkan oleh Admin
     if (!storedToken.teacher.isActive) {
       const response = errorResponse("ACCOUNT_INACTIVE", "Akun telah dinonaktifkan. Hubungi administrator.", 403);
-      response.cookies.delete("refreshToken");
+      response.cookies.set("refreshToken", "", { path: "/api/auth", maxAge: 0, httpOnly: true, sameSite: "strict", secure: process.env.NODE_ENV === "production" });
       response.cookies.delete("hasTeacherSession");
+      response.cookies.delete("accessToken");
       return response;
     }
 
@@ -65,6 +67,11 @@ export async function POST(req: NextRequest) {
 
     const response = successResponse({
       accessToken: newAccessToken,
+    });
+
+    response.cookies.set("accessToken", newAccessToken, {
+      httpOnly: true, secure: process.env.NODE_ENV === "production",
+      sameSite: "strict", path: "/", maxAge: 15 * 60,
     });
 
     response.cookies.set("refreshToken", newRawRefreshToken, {

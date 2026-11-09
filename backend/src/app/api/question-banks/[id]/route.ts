@@ -19,6 +19,11 @@ export async function PATCH(req: NextRequest, { params }: Context) {
     const { id } = await params;
     const input = bankSchema.partial().extend({ revision: z.number().int().positive() }).parse(await req.json());
     const { revision, ...data } = input;
+    if (data.subjectId) {
+      const folder = await prisma.subject.findUnique({ where: { id: data.subjectId } });
+      if (!folder) return errorResponse("NOT_FOUND", "Mata pelajaran tidak ditemukan", 404);
+      data.subject = folder.name;
+    }
     const changed = await prisma.questionBank.updateMany({ where: { id, revision }, data: { ...data, updatedBy: teacher.teacherId, revision: { increment: 1 } } });
     if (!changed.count) return errorResponse("CONFLICT", "Bank telah berubah atau tidak ditemukan. Muat ulang sebelum menyimpan.", 409);
     return successResponse(await prisma.questionBank.findUnique({ where: { id } }));
