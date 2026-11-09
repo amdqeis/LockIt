@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { calculateScore } from "./score-calculation";
+import { calculateScore, calculateQuestionScore } from "./score-calculation";
 
 export interface StudentScoreSummary {
   studentId: string;
@@ -14,13 +14,6 @@ export interface StudentScoreSummary {
   totalQuestions: number;
   violationCount: number;
   submittedAt: Date | null;
-}
-
-function checkAnswerCorrect(selectedOption: string, correctAnswer: string): boolean {
-  if (!selectedOption || !correctAnswer) return false;
-  const sParts = selectedOption.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean).sort().join(",");
-  const cParts = correctAnswer.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean).sort().join(",");
-  return sParts === cParts;
 }
 
 export async function autoGradeStudent(studentId: string): Promise<StudentScoreSummary> {
@@ -54,7 +47,8 @@ export async function autoGradeStudent(studentId: string): Promise<StudentScoreS
     const answer = answerMap.get(q.id);
 
     if (answer && answer.selectedOption) {
-      const isCorrect = checkAnswerCorrect(answer.selectedOption, q.correctAnswer);
+      const qScore = calculateQuestionScore(q, answer);
+      const isCorrect = qScore.isFullCorrect;
       // Collect answer updates if not yet evaluated or changed
       if (answer.isCorrect !== isCorrect) {
         answerUpdates.push({ id: answer.id, isCorrect });
@@ -122,7 +116,8 @@ export async function autoGradeExam(examId: string): Promise<StudentScoreSummary
       const answer = answerMap.get(q.id);
 
       if (answer && answer.selectedOption) {
-        const isCorrect = checkAnswerCorrect(answer.selectedOption, q.correctAnswer);
+        const qScore = calculateQuestionScore(q, answer);
+        const isCorrect = qScore.isFullCorrect;
         if (answer.isCorrect !== isCorrect) {
           answerUpdates.push({ id: answer.id, isCorrect });
           studentUpdates.set(answer.id, isCorrect);
@@ -173,7 +168,7 @@ export async function readStudentGradingSummaries(examId: string): Promise<Stude
     }),
     prisma.question.findMany({
       where: { examId },
-      select: { id: true, points: true, type: true },
+      select: { id: true, points: true, type: true, correctAnswer: true, options: true },
     }),
   ]);
 

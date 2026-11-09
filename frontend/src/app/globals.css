@@ -124,7 +124,13 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; }
 .review-summary { padding: 0 0 18px; border-bottom: 1px solid var(--border); }
 .review-question { padding: 22px 0; border-bottom: 1px solid var(--border); }
-.review-question h3 { margin: 0 0 14px; font-size: 14px; }
+.review-question-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.review-question-header h3 { margin: 0; font-size: 14px; }
+.review-point-pill { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 9999px; font-size: 12px; font-weight: 500; background: #f0eef4; color: #443e52; }
+.review-status-correct { color: var(--success); font-weight: 500; }
+.review-status-partial { color: #b45309; font-weight: 500; }
+.review-status-incorrect { color: var(--danger); font-weight: 500; }
+.review-status-pending { color: var(--muted); font-weight: 500; }
 .review-options { display: grid; gap: 12px; padding: 0; list-style: none; }
 .review-options li { display: flex; align-items: flex-start; gap: 12px; font-size: 14px; }
 .review-answer, .answer-mark { color: var(--muted); font-size: 13px; }

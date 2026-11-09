@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { AppError } from "@/lib/errors";
-import { calculateScore } from "./score-calculation";
+import { calculateScore, calculateQuestionScore } from "./score-calculation";
 
 type ReviewStudent = {
   id: string;
@@ -58,6 +58,7 @@ export async function buildStudentReview(student: ReviewStudent) {
   const answersByQuestion = new Map(answers.map((answer) => [answer.questionId, answer]));
   const formattedQuestions = questions.map((question) => {
     const answer = answersByQuestion.get(question.id);
+    const qScore = showScoreToStudent ? calculateQuestionScore(question, answer) : null;
     return {
       id: question.id,
       orderIndex: question.orderIndex,
@@ -71,7 +72,9 @@ export async function buildStudentReview(student: ReviewStudent) {
       studentAnswer: answer?.selectedOption ?? null,
       ...(showScoreToStudent ? {
         correctAnswer: (question as typeof question & { correctAnswer?: string }).correctAnswer ?? "",
-        isCorrect: question.type === "short_answer" ? (answer?.isCorrect ?? null) : (answer?.isCorrect ?? false),
+        earnedPoints: qScore ? qScore.earnedPoints : 0,
+        isPartiallyCorrect: qScore ? qScore.isPartiallyCorrect : false,
+        isCorrect: question.type === "short_answer" ? (answer?.isCorrect ?? null) : (qScore ? qScore.isFullCorrect : false),
       } : {}),
     };
   });

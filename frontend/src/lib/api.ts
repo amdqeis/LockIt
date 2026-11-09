@@ -16,7 +16,7 @@ export function post<T>(path: string, body?: unknown): Promise<T> {
 }
 
 export type Option = { id?: string; label?: string; text?: string; content?: unknown; imageUrl?: string | null; imageAlt?: string | null };
-export type Question = { id: string; orderIndex: number; type: string; questionText: string; content?: unknown; imageUrl?: string | null; imageAlt?: string | null; options: (Option | string)[]; points: number; studentAnswer?: string | null; correctAnswer?: string | null; isCorrect?: boolean | null };
+export type Question = { id: string; orderIndex: number; type: string; questionText: string; content?: unknown; imageUrl?: string | null; imageAlt?: string | null; options: (Option | string)[]; points: number; earnedPoints?: number | null; isPartiallyCorrect?: boolean; studentAnswer?: string | null; correctAnswer?: string | null; isCorrect?: boolean | null };
 export type Waiting = { student: { id: string; name: string; nisn: string; status: string; isLocked: boolean; kickReason?: string | null; latestAdmissionAction?: { reason: string | null } | null }; exam: { id: string; title: string; accessCode: string; status: string; durationMinutes: number; startTime: string | null; endTime: string | null; serverTime: string } };
 export type ExamSession = { student: { id: string; name: string; nisn: string; isLocked: boolean }; exam: { id: string; title: string; description?: string | null; endTime: string | null; settings: Record<string, unknown>; violationPolicy: Record<string, unknown> }; questions: Question[]; totalQuestions: number; hasMore: boolean; answers: { questionId: string; selectedOption: string | null }[]; serverTime: string };
 

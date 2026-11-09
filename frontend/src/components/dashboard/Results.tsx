@@ -11,7 +11,31 @@ import { ErrorText, message } from "./Dashboard";
 import type { Exam, ResultStudent } from "./types";
 
 type ResultExam = Pick<Exam, "id" | "title" | "subjectName" | "className" | "academicYear" | "semester" | "category" | "categoryNumber" | "passingScore">;
-type Detail = { answers: { questionId: string; orderIndex: number; questionText: string; content?: unknown; imageUrl?: string | null; imageAlt?: string | null; type: string; selectedOption: string | null; isCorrect: boolean | null }[] };
+type Detail = {
+  summary?: {
+    totalPoints: number;
+    earnedPoints: number;
+    finalScore: number;
+    correctCount: number;
+    pendingManualCount: number;
+    totalQuestions: number;
+  };
+  answers: {
+    questionId: string;
+    orderIndex: number;
+    questionText: string;
+    content?: unknown;
+    imageUrl?: string | null;
+    imageAlt?: string | null;
+    type: string;
+    selectedOption: string | null;
+    correctAnswer?: string;
+    points: number;
+    earnedPoints: number;
+    isPartiallyCorrect: boolean;
+    isCorrect: boolean | null;
+  }[];
+};
 type ResultPage = { exams: ResultExam[]; attempts: { exam: ResultExam; student: ResultStudent }[]; students: { nisn: string; name: string; scores: Record<string, { finalScore: number; pendingManualCount: number }> }[]; page: number; total: number; totalPages: number };
 type Filters = { subject: string; className: string; period: string; category: string };
 
@@ -89,6 +113,55 @@ export function Results() {
     <div className="staff-results-controls"><input className="staff-search" aria-label="Cari hasil ujian" placeholder="Cari kelas, mata pelajaran, kategori, atau periode" value={query} onChange={e => { setQuery(e.target.value); setPage(1); }}/><div className="staff-segment"><MotionButton className={mode === "list" ? "active" : ""} onClick={() => { setMode("list"); setPage(1); }}>Daftar</MotionButton><MotionButton className={mode === "matrix" ? "active" : ""} onClick={() => { setMode("matrix"); setPage(1); }}>Matriks</MotionButton></div></div>
     <div className="staff-result-filters">{([["subject", "Semua mata pelajaran"], ["className", "Semua kelas"], ["period", "Semua periode"], ["category", "Semua kategori"]] as const).map(([key,label]) => <select key={key} aria-label={label} value={filters[key]} onChange={e => { setFilters(v => ({ ...v, [key]: e.target.value })); setPage(1); }}><option value="">{label}</option>{choices[key].map(value => <option key={value} value={value}>{value}</option>)}</select>)}</div>
     {loading && !result ? <TableSkeleton columns={mode === "list" ? 5 : Math.max(3, selected.length + 1)} label="Memuat hasil ujian..." /> : !result?.total ? <div className="staff-empty"><h3>Belum ada hasil</h3><p>Hasil peserta tersedia setelah ujian selesai dan dikumpulkan. Periksa kembali filter yang digunakan.</p></div> : <><div className="staff-table-wrap"><table className="staff-table"><thead>{mode === "list" ? <tr><th>Peserta</th><th>Ujian</th><th>Nilai</th><th>Penilaian</th><th /></tr> : <tr><th>Peserta</th>{selected.map(e => <th key={e.id}>{e.title}<small>{e.subjectName || "—"} · {e.className || "—"} · {e.academicYear || "—"} · {e.semester || "—"}</small></th>)}</tr>}</thead><tbody>{mode === "list" ? attempts.map(({exam,student}) => <tr key={`${exam.id}-${student.studentId}`}><td><strong>{student.name}</strong><small>{student.nisn}</small></td><td>{exam.title}<small>{exam.className || "—"} · {exam.academicYear || "—"} · {exam.semester || "—"}</small></td><td>{student.pendingManualCount ? "—" : student.finalScore}</td><td>{student.pendingManualCount ? "Menunggu penilaian" : exam.passingScore == null ? "Final" : student.finalScore >= exam.passingScore ? "Lulus" : "Belum lulus"}</td><td><MotionButton onClick={() => void openDetail(exam,student)}>Lihat jawaban</MotionButton></td></tr>) : students.map(student => <tr key={student.nisn}><td><strong>{student.name}</strong><small>{student.nisn}</small></td>{selected.map(exam => { const score = student.scores[exam.id]; return <td key={exam.id}>{!score ? "—" : score.pendingManualCount ? "Menunggu penilaian" : score.finalScore}</td>; })}</tr>)}</tbody></table></div><nav className="staff-pagination" aria-label="Halaman hasil"><span>Halaman {result.page} dari {result.totalPages} · {result.total} {mode === "list" ? "pengerjaan" : "peserta"}</span><div><MotionButton className="staff-secondary" disabled={page <= 1} onClick={() => setPage(value => value - 1)}>Sebelumnya</MotionButton><MotionButton className="staff-secondary" disabled={page >= result.totalPages} onClick={() => setPage(value => value + 1)}>Berikutnya</MotionButton></div></nav></>}
-    <Dialog open={!!detail} title={`Jawaban ${detail?.student.name || "peserta"}`} onClose={() => setDetail(null)}>{detail && <div className="staff-editor"><ErrorText error={error}/>{detail.data.answers.map(q => <section className="staff-question" key={q.questionId}><strong>Soal {q.orderIndex}</strong><QuestionContent text={q.questionText} content={q.content} imageUrl={q.imageUrl} imageAlt={q.imageAlt}/><p>Jawaban: {q.selectedOption || "Tidak dijawab"}</p>{q.type === "short_answer" && q.selectedOption && <><p>{q.isCorrect === null ? "Menunggu penilaian" : q.isCorrect ? "Benar" : "Salah"}</p><div className="staff-action-wrap"><MotionButton disabled={busy} onClick={() => void grade(q.questionId,true)}>Tandai benar</MotionButton><MotionButton disabled={busy} onClick={() => void grade(q.questionId,false)}>Tandai salah</MotionButton></div></>}</section>)}</div>}</Dialog>
+    <Dialog open={!!detail} title={`Jawaban ${detail?.student.name || "peserta"}`} onClose={() => setDetail(null)}>
+      {detail && (
+        <div className="staff-editor">
+          <ErrorText error={error}/>
+          {detail.data.answers.map(q => {
+            const earned = q.earnedPoints ?? (q.isCorrect ? q.points : 0);
+            const isShortAnswer = q.type === "short_answer";
+            const isMultiSelect = q.type === "multi_select";
+            const isPendingShort = isShortAnswer && q.selectedOption && q.isCorrect === null;
+            const isPartial = isMultiSelect && (q.isPartiallyCorrect || (earned > 0 && earned < q.points));
+            const isFull = !isPendingShort && (earned >= q.points || q.isCorrect === true);
+
+            let statusLabel = "Jawaban belum benar";
+            let statusColor = "#991b1b";
+
+            if (isPendingShort) {
+              statusLabel = "Menunggu penilaian guru";
+              statusColor = "#475569";
+            } else if (isPartial) {
+              statusLabel = "Jawaban sebagian benar";
+              statusColor = "#b45309";
+            } else if (isFull) {
+              statusLabel = "Jawaban benar";
+              statusColor = "#166534";
+            }
+
+            return (
+              <section className="staff-question" key={q.questionId}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <strong>Soal {q.orderIndex}</strong>
+                  <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 9999, background: "#f1f5f9", color: "#334155" }}>
+                    Poin: {isPendingShort ? `— / ${q.points}` : `${earned} / ${q.points}`}
+                  </span>
+                </div>
+                <QuestionContent text={q.questionText} content={q.content} imageUrl={q.imageUrl} imageAlt={q.imageAlt}/>
+                <p>Jawaban: {q.selectedOption || "Tidak dijawab"}</p>
+                {q.correctAnswer && <p style={{ color: "var(--staff-muted)" }}>Kunci jawaban: {q.correctAnswer}</p>}
+                <p style={{ color: statusColor, fontWeight: 500 }}>{statusLabel}</p>
+                {isShortAnswer && q.selectedOption && (
+                  <div className="staff-action-wrap">
+                    <MotionButton disabled={busy} onClick={() => void grade(q.questionId, true)}>Tandai benar</MotionButton>
+                    <MotionButton disabled={busy} onClick={() => void grade(q.questionId, false)}>Tandai salah</MotionButton>
+                  </div>
+                )}
+              </section>
+            );
+          })}
+        </div>
+      )}
+    </Dialog>
   </>;
 }

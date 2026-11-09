@@ -59,7 +59,7 @@ export async function GET(req: NextRequest) {
       select: { id: true, examId: true, name: true, nisn: true, status: true, submittedAt: true, violationCount: true, answers: { select: { questionId: true, selectedOption: true, isCorrect: true } } },
     });
     const pageExamIds = [...new Set(students.map(student => student.examId))];
-    const questions = await prisma.question.findMany({ where: { examId: { in: pageExamIds } }, select: { id: true, examId: true, type: true, points: true } });
+    const questions = await prisma.question.findMany({ where: { examId: { in: pageExamIds } }, select: { id: true, examId: true, type: true, points: true, correctAnswer: true, options: true } });
     const byExam = new Map(exams.map(exam => [exam.id, exam]));
     const attempts = students.map(student => ({ exam: byExam.get(student.examId)!, student: { studentId: student.id, name: student.name, nisn: student.nisn, status: student.status, submittedAt: student.submittedAt, violationCount: student.violationCount, ...calculateScore(questions.filter(question => question.examId === student.examId), student.answers) } }));
     const matrixStudents = nisns?.map(nisn => {

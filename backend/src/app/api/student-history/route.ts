@@ -61,7 +61,7 @@ export async function GET(req: NextRequest) {
                 durationMinutes: true,
                 endTime: true,
                 settings: true,
-                questions: { select: { id: true, type: true, points: true } },
+                questions: { select: { id: true, type: true, points: true, correctAnswer: true, options: true } },
               },
             },
             answers: { select: { questionId: true, isCorrect: true, selectedOption: true } },

@@ -119,3 +119,9 @@
 - Keputusan: Mengubah path SVG ikon `sliders` pada `Dashboard.tsx` dari slider vertikal menjadi slider horizontal (tiga garis horizontal kontinu dengan knob penggeser vertikal di posisi selang-seling) sesuai rancangan mockup; serta menambahkan aturan reset spesifisitas tinggi pada `.staff-app .proctor-search-box input` di `dashboard.css` (`border: 0 !important; background: transparent !important; padding: 0 !important; height: 100% !important; min-height: unset !important; border-radius: 0 !important;`).
 - Alasan: Ikon filter di mockup menggunakan representasi horizontal adjustment lines, dan input pencarian sebelumnya terpengaruh style global `.staff-app input` yang menyisipkan border sekunder serta tinggi 40px berlebih.
 - Ditolak: Membiarkan ikon vertikal default atau mengubah border container luar menjadi transparan.
+
+
+### 2026-11-09 — Penilaian parsial multi-select dan rincian poin per soal
+- Keputusan: Mengimplementasikan penilaian parsial untuk tipe soal `multi_select` dengan rumus penalti `max(0, (opsi_benar_dipilih / x * 100) - (opsi_salah_dipilih / n * 100)) * points / 100`, dihitung secara dinamis dari jawaban tersimpan (`selectedOption`) dan kunci jawaban (`correctAnswer` + `options`) tanpa migrasi skema database. Di antarmuka review siswa dan detail jawaban guru, sertakan perolehan poin dan poin maksimal per soal (misal `Poin: 2.5 / 10`) serta badge status (benar, sebagian benar, belum benar, menunggu penilaian guru).
+- Alasan: Memberikan penilaian yang adil dan akurat terhadap pemahaman siswa tanpa membiarkan pemilihan seluruh opsi mendapat skor penuh, sekaligus menjaga konsistensi nilai di seluruh ringkasan, riwayat, rekapitulasi matriks, dan ekspor CSV untuk percobaan lama maupun baru.
+- Ditolak: Mengubah skema database `Answer.isCorrect` menjadi float (skema tetap boolean/null) dan menerapkan penalti pada opsi benar yang tidak dipilih.

@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { authenticateTeacher } from "@/lib/middleware/auth";
 import { prisma } from "@/lib/prisma";
 import { autoGradeStudent } from "@/services/grading";
+import { calculateQuestionScore } from "@/services/score-calculation";
 import { successResponse, errorResponse, safeErrorMessage } from "@/lib/response";
 import { AppError } from "@/lib/errors";
 import { z } from "zod";
@@ -41,6 +42,7 @@ export async function GET(
 
     const detailedAnswers = questions.map((q) => {
       const ans = answerMap.get(q.id);
+      const qScore = calculateQuestionScore(q, ans);
       return {
         questionId: q.id,
         orderIndex: q.orderIndex,
@@ -52,8 +54,10 @@ export async function GET(
         options: q.options,
         correctAnswer: q.correctAnswer,
         points: q.points,
+        earnedPoints: qScore.earnedPoints,
+        isPartiallyCorrect: qScore.isPartiallyCorrect,
         selectedOption: ans?.selectedOption ?? null,
-        isCorrect: q.type === "short_answer" ? (ans?.isCorrect ?? null) : (ans?.isCorrect ?? false),
+        isCorrect: q.type === "short_answer" ? (ans?.isCorrect ?? null) : qScore.isFullCorrect,
         answeredAt: ans?.answeredAt ?? null,
       };
     });

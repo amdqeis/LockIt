@@ -65,7 +65,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       prisma.student.count({ where: studentWhere }),
       prisma.question.findMany({
         where: { examId: id },
-        select: { id: true, points: true, type: true },
+        select: { id: true, points: true, type: true, correctAnswer: true, options: true },
       }),
     ]);
 
