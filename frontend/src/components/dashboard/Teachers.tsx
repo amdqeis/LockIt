@@ -3,14 +3,225 @@ import { MotionButton } from "@/components/MotionButton";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { Dialog } from "@/components/Dialog";
 import { staffApi, staffSend } from "@/lib/staff-api";
+import { queryCache } from "@/lib/data-cache";
+import { ListRowsSkeleton } from "@/components/skeletons";
 import { ErrorText, Icon, message } from "./Dashboard";
 import type { Teacher } from "./types";
+
 export function Teachers() {
-  const [teachers,setTeachers] = useState<Teacher[]>([]); const [target,setTarget] = useState<Teacher | null>(null); const [mode,setMode] = useState<"create" | "edit" | "reset" | null>(null); const [name,setName] = useState(""); const [email,setEmail] = useState(""); const [password,setPassword] = useState(""); const [active,setActive] = useState(true); const [error,setError] = useState(""); const [busy,setBusy] = useState(false); const [notice,setNotice] = useState(""); const [page,setPage] = useState(1); const [query,setQuery] = useState(""); const [totalPages,setTotalPages] = useState(0); const [total,setTotal] = useState(0); const [loading,setLoading] = useState(true); const requestNumber = useRef(0);
-  const load = useCallback(async () => { const request = ++requestNumber.current; setLoading(true); try { const params = new URLSearchParams({ page: String(page), limit: "25" }); if (query.trim()) params.set("search", query.trim()); const data = await staffApi<{ data: Teacher[]; meta: { total: number; totalPages: number } }>(`/api/admin/teachers?${params}`); if (request === requestNumber.current) { setTeachers(data.data); setTotal(data.meta.total); setTotalPages(data.meta.totalPages); setError(""); } } catch(e) { if (request === requestNumber.current) setError(message(e)); } finally { if (request === requestNumber.current) setLoading(false); } }, [page, query]);
-  useEffect(() => { const timer = setTimeout(() => void load(), 180); const counter = requestNumber; return () => { clearTimeout(timer); counter.current++; }; }, [load]);
-  function open(next: "create" | "edit" | "reset", t?: Teacher) { setTarget(t || null); setMode(next); setName(t?.fullName || ""); setEmail(t?.email || ""); setPassword(""); setActive(t?.isActive ?? true); setError(""); setNotice(""); }
-  async function save(e: FormEvent) { e.preventDefault(); setBusy(true); setError(""); try { if (mode === "create") await staffSend("/api/admin/teachers", "POST", { fullName: name, email, password, role: "TEACHER" }); else if (mode === "edit" && target) await staffSend(`/api/admin/teachers/${target.id}`, "PUT", { fullName: name, email, isActive: active }); else if (mode === "reset" && target) await staffSend(`/api/admin/teachers/${target.id}/reset-password`, "POST", { newPassword: password }); setNotice(mode === "reset" ? "Password berhasil direset." : "Data guru berhasil disimpan."); setMode(null); if (mode === "create" && page !== 1) setPage(1); else await load(); } catch(e) { setError(message(e)); } finally { setBusy(false); } }
-  return <><div className="staff-section-head"><div><h2>Manajemen guru</h2><p>Kelola akun yang dapat membuat dan memantau ujian.</p></div><MotionButton className="staff-primary" onClick={() => open("create")}><Icon name="plus" size={16}/> Tambah guru</MotionButton></div>{notice && <p role="status">{notice}</p>}<ErrorText error={!mode ? error : ""}/><input className="staff-search" aria-label="Cari guru" placeholder="Cari nama atau email" value={query} onChange={e => { setQuery(e.target.value); setPage(1); }}/>{loading ? <p role="status">Memuat daftar guru…</p> : teachers.length ? <><div className="staff-list">{teachers.map(t => <div className="staff-row staff-exam-row" key={t.id}><span><strong>{t.fullName}</strong><small>{t.email} · {t.role === "ADMIN" ? "Administrator" : "Guru"}</small></span><span className="staff-status">{t.isActive ? "Aktif" : "Nonaktif"}</span><div className="staff-row-actions"><MotionButton onClick={() => open("edit",t)}>Edit</MotionButton><MotionButton onClick={() => open("reset",t)}>Reset password</MotionButton></div></div>)}</div><nav className="staff-pagination" aria-label="Halaman guru"><span>Halaman {page} dari {totalPages} · {total} akun</span><div><MotionButton className="staff-secondary" disabled={page <= 1} onClick={() => setPage(value => value - 1)}>Sebelumnya</MotionButton><MotionButton className="staff-secondary" disabled={page >= totalPages} onClick={() => setPage(value => value + 1)}>Berikutnya</MotionButton></div></nav></> : <div className="staff-empty"><h3>{query ? "Guru tidak ditemukan" : "Belum ada data guru"}</h3><p>{query ? "Coba kata pencarian lain." : "Tambahkan akun guru untuk mulai bekerja bersama."}</p></div>}
-  <Dialog open={!!mode} title={mode === "create" ? "Tambah guru" : mode === "edit" ? "Ubah guru" : "Reset password"} onClose={() => setMode(null)}><form className="staff-form" onSubmit={save}>{mode !== "reset" ? <><label>Nama lengkap<input required minLength={2} value={name} onChange={e => setName(e.target.value)}/></label><label>Email<input required type="email" value={email} onChange={e => setEmail(e.target.value)}/></label>{mode === "edit" && <label className="staff-check"><input type="checkbox" checked={active} onChange={e => setActive(e.target.checked)}/>Akun aktif</label>}</> : <p>Atur password baru untuk {target?.fullName}.</p>}{mode !== "edit" && <label>Password {mode === "reset" ? "baru" : "awal"}<input required minLength={8} type="password" autoComplete="new-password" value={password} onChange={e => setPassword(e.target.value)}/></label>}<ErrorText error={error}/><div className="staff-dialog-actions"><MotionButton type="button" className="staff-secondary" onClick={() => setMode(null)}>Batal</MotionButton><MotionButton className="staff-primary" disabled={busy}>{busy ? "Menyimpan…" : "Simpan"}</MotionButton></div></form></Dialog></>;
+  const [teachers, setTeachers] = useState<Teacher[]>(() => {
+    const initial = queryCache.get<{ data: Teacher[]; meta: { total: number; totalPages: number } }>("/api/admin/teachers?page=1&limit=25");
+    return initial ? initial.data.data : [];
+  });
+  const [target, setTarget] = useState<Teacher | null>(null);
+  const [mode, setMode] = useState<"create" | "edit" | "reset" | null>(null);
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [active, setActive] = useState(true);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [page, setPage] = useState(1);
+  const [query, setQuery] = useState("");
+  const [totalPages, setTotalPages] = useState(0);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(() => {
+    const initial = queryCache.get<{ data: Teacher[]; meta: { total: number; totalPages: number } }>("/api/admin/teachers?page=1&limit=25");
+    return !initial;
+  });
+  const requestNumber = useRef(0);
+
+  const load = useCallback(async (force = false) => {
+    const request = ++requestNumber.current;
+    const params = new URLSearchParams({ page: String(page), limit: "25" });
+    if (query.trim()) params.set("search", query.trim());
+    const cacheKey = `/api/admin/teachers?${params}`;
+    const cached = queryCache.get<{ data: Teacher[]; meta: { total: number; totalPages: number } }>(cacheKey);
+    if (!cached || force) {
+      if (!teachers.length) setLoading(true);
+    }
+    try {
+      const data = await queryCache.fetch<{ data: Teacher[]; meta: { total: number; totalPages: number } }>(
+        cacheKey,
+        () => staffApi<{ data: Teacher[]; meta: { total: number; totalPages: number } }>(cacheKey),
+        60000
+      );
+      if (request === requestNumber.current) {
+        setTeachers(data.data);
+        setTotal(data.meta.total);
+        setTotalPages(data.meta.totalPages);
+        setError("");
+      }
+    } catch (e) {
+      if (request === requestNumber.current) setError(message(e));
+    } finally {
+      if (request === requestNumber.current) setLoading(false);
+    }
+  }, [page, query, teachers.length]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => void load(), 180);
+    const counter = requestNumber;
+    return () => {
+      clearTimeout(timer);
+      counter.current++;
+    };
+  }, [load]);
+
+  function open(next: "create" | "edit" | "reset", t?: Teacher) {
+    setTarget(t || null);
+    setMode(next);
+    setName(t?.fullName || "");
+    setEmail(t?.email || "");
+    setPassword("");
+    setActive(t?.isActive ?? true);
+    setError("");
+    setNotice("");
+  }
+
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      if (mode === "create") {
+        await staffSend("/api/admin/teachers", "POST", { fullName: name, email, password, role: "TEACHER" });
+      } else if (mode === "edit" && target) {
+        await staffSend(`/api/admin/teachers/${target.id}`, "PUT", { fullName: name, email, isActive: active });
+      } else if (mode === "reset" && target) {
+        await staffSend(`/api/admin/teachers/${target.id}/reset-password`, "POST", { newPassword: password });
+      }
+      setNotice(mode === "reset" ? "Password berhasil direset." : "Data guru berhasil disimpan.");
+      setMode(null);
+      queryCache.invalidate("/api/admin/teachers");
+      if (mode === "create" && page !== 1) setPage(1);
+      else await load(true);
+    } catch (e) {
+      setError(message(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <div className="staff-section-head">
+        <div>
+          <h2>Manajemen guru</h2>
+          <p>Kelola akun yang dapat membuat dan memantau ujian.</p>
+        </div>
+        <MotionButton className="staff-primary" onClick={() => open("create")}>
+          <Icon name="plus" size={16} /> Tambah guru
+        </MotionButton>
+      </div>
+      {notice && <p role="status">{notice}</p>}
+      <ErrorText error={!mode ? error : ""} />
+      <input
+        className="staff-search"
+        aria-label="Cari guru"
+        placeholder="Cari nama atau email"
+        value={query}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setPage(1);
+        }}
+      />
+      {loading && !teachers.length ? (
+        <ListRowsSkeleton label="Memuat daftar guru..." />
+      ) : teachers.length ? (
+        <>
+          <div className="staff-list">
+            {teachers.map((t) => (
+              <div className="staff-row staff-exam-row" key={t.id}>
+                <span>
+                  <strong>{t.fullName}</strong>
+                  <small>
+                    {t.email} · {t.role === "ADMIN" ? "Administrator" : "Guru"}
+                  </small>
+                </span>
+                <span className="staff-status">{t.isActive ? "Aktif" : "Nonaktif"}</span>
+                <div className="staff-row-actions">
+                  <MotionButton onClick={() => open("edit", t)}>Edit</MotionButton>
+                  <MotionButton onClick={() => open("reset", t)}>Reset password</MotionButton>
+                </div>
+              </div>
+            ))}
+          </div>
+          <nav className="staff-pagination" aria-label="Halaman guru">
+            <span>
+              Halaman {page} dari {totalPages} · {total} akun
+            </span>
+            <div>
+              <MotionButton className="staff-secondary" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>
+                Sebelumnya
+              </MotionButton>
+              <MotionButton
+                className="staff-secondary"
+                disabled={page >= totalPages}
+                onClick={() => setPage((value) => value + 1)}
+              >
+                Berikutnya
+              </MotionButton>
+            </div>
+          </nav>
+        </>
+      ) : (
+        <div className="staff-empty">
+          <h3>{query ? "Guru tidak ditemukan" : "Belum ada data guru"}</h3>
+          <p>{query ? "Coba kata pencarian lain." : "Tambahkan akun guru untuk mulai bekerja bersama."}</p>
+        </div>
+      )}
+      <Dialog
+        open={!!mode}
+        title={mode === "create" ? "Tambah guru" : mode === "edit" ? "Ubah guru" : "Reset password"}
+        onClose={() => setMode(null)}
+      >
+        <form className="staff-form" onSubmit={save}>
+          {mode !== "reset" ? (
+            <>
+              <label>
+                Nama lengkap
+                <input required minLength={2} value={name} onChange={(e) => setName(e.target.value)} />
+              </label>
+              <label>
+                Email
+                <input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+              </label>
+              {mode === "edit" && (
+                <label className="staff-check">
+                  <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} />
+                  Akun aktif
+                </label>
+              )}
+            </>
+          ) : (
+            <p>Atur password baru untuk {target?.fullName}.</p>
+          )}
+          {mode !== "edit" && (
+            <label>
+              Password {mode === "reset" ? "baru" : "awal"}
+              <input
+                required
+                minLength={8}
+                type="password"
+                autoComplete="new-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            </label>
+          )}
+          <ErrorText error={error} />
+          <div className="staff-dialog-actions">
+            <MotionButton type="button" className="staff-secondary" onClick={() => setMode(null)}>
+              Batal
+            </MotionButton>
+            <MotionButton className="staff-primary" disabled={busy}>
+              {busy ? "Menyimpan…" : "Simpan"}
+            </MotionButton>
+          </div>
+        </form>
+      </Dialog>
+    </>
+  );
 }

@@ -847,6 +847,34 @@ math-field::part(menu-toggle) {
   gap: 10px;
   font-size: 11px;
 }
+.staff-update-indicator {
+  position: fixed;
+  top: 14px;
+  right: 18px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid #e9e9ec;
+  border-radius: 999px;
+  font-size: 10px;
+  color: #62626c;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  z-index: 40;
+  pointer-events: none;
+}
+.staff-update-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #7867d9;
+  animation: staff-pulse 1.4s infinite ease-in-out;
+}
+@keyframes staff-pulse {
+  0%, 100% { opacity: 0.4; transform: scale(0.9); }
+  50% { opacity: 1; transform: scale(1.1); }
+}
 @media (max-width: 800px) {
   .staff-sidebar {
     position: fixed;
@@ -3122,6 +3150,7 @@ math-field::part(menu-toggle) {
   color: #76747d;
   margin: 0;
 }
+.proctor-banner-code,
 .proctor-banner-center {
   display: flex;
   align-items: center;
@@ -3134,6 +3163,7 @@ math-field::part(menu-toggle) {
   user-select: none;
   transition: all 0.12s;
 }
+.proctor-banner-code:hover,
 .proctor-banner-center:hover {
   background: #f4f3f9;
   border-color: #8765b6;
@@ -3197,12 +3227,12 @@ math-field::part(menu-toggle) {
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
 }
-@media (max-width: 990px) {
+@media (max-width: 1080px) {
   .proctor-metrics-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
-@media (max-width: 600px) {
+@media (max-width: 640px) {
   .proctor-metrics-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -3216,6 +3246,11 @@ math-field::part(menu-toggle) {
   display: flex;
   align-items: center;
   gap: 14px;
+  transition: transform 0.12s, box-shadow 0.12s;
+}
+.proctor-metric-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
 }
 .proctor-metric-icon {
   width: 40px;
@@ -3245,6 +3280,10 @@ math-field::part(menu-toggle) {
   background: #f3effc;
   color: #6d48b5;
 }
+.proctor-metric-icon.time {
+  background: rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+}
 .proctor-metric-info {
   display: flex;
   flex-direction: column;
@@ -3260,6 +3299,32 @@ math-field::part(menu-toggle) {
   font-weight: 750;
   color: #17171a;
   line-height: 1.1;
+}
+
+/* 5th Metric Card: Time Remaining (Dark Card) */
+.proctor-metric-card.time-card {
+  background: #17171a;
+  border-color: #17171a;
+  color: #ffffff;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.14);
+}
+.proctor-metric-card.time-card .proctor-metric-icon {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+.proctor-metric-card.time-card .proctor-metric-info span {
+  color: #a09fb0;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.proctor-metric-card.time-card .proctor-metric-info strong {
+  color: #ffffff;
+  font-size: 20px;
+  font-weight: 750;
+  letter-spacing: 0.03em;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Two-Column Main Split */
@@ -3332,13 +3397,19 @@ math-field::part(menu-toggle) {
   border-color: #7867d9;
   box-shadow: 0 0 0 3px rgba(120, 103, 217, 0.15);
 }
+.staff-app .proctor-search-box input,
 .proctor-search-box input {
-  border: 0;
-  background: transparent;
+  border: 0 !important;
+  background: transparent !important;
   font-size: 11px;
   color: #17171a;
-  outline: 0;
+  outline: 0 !important;
   width: 100%;
+  height: 100% !important;
+  min-height: unset !important;
+  padding: 0 !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
 }
 .proctor-tune-btn {
   width: 34px;
@@ -3394,6 +3465,35 @@ math-field::part(menu-toggle) {
   border-color: #7867d9;
   box-shadow: 0 6px 18px rgba(120, 103, 217, 0.08);
 }
+
+/* State Variants for Student Card */
+.proctor-student-card.is-locked {
+  background: #fff5f5;
+  border-color: #fecaca;
+}
+.proctor-student-card.is-locked:hover {
+  border-color: #f87171;
+  box-shadow: 0 6px 18px rgba(239, 68, 68, 0.09);
+}
+
+.proctor-student-card.is-completed {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+.proctor-student-card.is-completed:hover {
+  border-color: #86efac;
+  box-shadow: 0 6px 18px rgba(22, 148, 83, 0.09);
+}
+
+.proctor-student-card.is-warning {
+  background: #ffffff;
+  border-color: #e5e4ea;
+}
+.proctor-student-card.is-warning:hover {
+  border-color: #f59e0b;
+  box-shadow: 0 6px 18px rgba(245, 158, 11, 0.08);
+}
+
 .proctor-card-head {
   display: flex;
   justify-content: space-between;
@@ -3426,30 +3526,37 @@ math-field::part(menu-toggle) {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* Status Pills */
 .proctor-status-pill {
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 700;
-  padding: 3px 8px;
+  padding: 3px 9px;
   border-radius: 999px;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.01em;
   white-space: nowrap;
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 .proctor-status-pill.in-progress {
   background: #ebf9f1;
   color: #169453;
 }
 .proctor-status-pill.warning {
-  background: #fef3e7;
+  background: #fef3c7;
   color: #d97706;
 }
 .proctor-status-pill.completed {
-  background: #e8f7f0;
-  color: #0f766e;
+  background: #169453;
+  color: #ffffff;
+  box-shadow: 0 1px 3px rgba(22, 148, 83, 0.25);
 }
 .proctor-status-pill.locked {
-  background: #f5eefc;
-  color: #7c3aed;
+  background: #dc2626;
+  color: #ffffff;
+  box-shadow: 0 1px 3px rgba(220, 38, 38, 0.25);
 }
 .proctor-status-pill.waiting {
   background: #eaf2fd;
@@ -3468,6 +3575,12 @@ math-field::part(menu-toggle) {
   font-weight: 600;
   color: #33313b;
 }
+.proctor-student-card.is-completed .proctor-card-metrics {
+  border-color: #dcfce7;
+}
+.proctor-student-card.is-locked .proctor-card-metrics {
+  border-color: #fee2e2;
+}
 .proctor-card-metric-item {
   display: inline-flex;
   align-items: center;
@@ -3475,6 +3588,45 @@ math-field::part(menu-toggle) {
 }
 .proctor-card-metric-item.flagged-active {
   color: #dc2626;
+}
+
+/* Completed Grade Box */
+.proctor-completed-box {
+  background: #dcfce7;
+  border: 1px solid #86efac;
+  border-radius: 10px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.proctor-grade-badge {
+  background: #169453;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 800;
+  border-radius: 6px;
+  padding: 3px 7px;
+  flex: none;
+  letter-spacing: -0.02em;
+}
+.proctor-completed-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.proctor-completed-score {
+  font-size: 11px;
+  font-weight: 750;
+  color: #14532d;
+  line-height: 1.25;
+}
+.proctor-completed-sub {
+  font-size: 9px;
+  color: #166534;
+  opacity: 0.85;
+  line-height: 1.2;
 }
 
 /* Card Recent Activity Section */
@@ -3531,13 +3683,20 @@ math-field::part(menu-toggle) {
   padding-top: 10px;
   border-top: 1px solid #f1f0f4;
 }
-.proctor-btn-unlock {
+.proctor-student-card.is-completed .proctor-card-footer {
+  border-top-color: #dcfce7;
+}
+.proctor-student-card.is-locked .proctor-card-footer {
+  border-top-color: #fee2e2;
+}
+.proctor-btn-unlock,
+.proctor-btn-view-results {
   flex: 1;
   height: 32px;
   border: 1px solid #d5d4dc;
   border-radius: 8px;
   background: #ffffff;
-  color: #55525d;
+  color: #17171a;
   font-size: 10px;
   font-weight: 650;
   display: inline-flex;
@@ -3547,14 +3706,16 @@ math-field::part(menu-toggle) {
   cursor: pointer;
   transition: all 0.12s;
 }
-.proctor-btn-unlock:hover:not(:disabled) {
-  background: #f5eefc;
+.proctor-btn-unlock:hover:not(:disabled),
+.proctor-btn-view-results:hover {
+  background: #f5f4f8;
   border-color: #8765b6;
-  color: #533285;
+  color: #17171a;
 }
 .proctor-btn-unlock:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: default;
+  color: #8c8a94;
 }
 .proctor-btn-kick {
   flex: 1.25;
@@ -3839,6 +4000,17 @@ math-field::part(menu-toggle) {
   font-size: 9px;
   color: #76747d;
 }
+.proctor-lobby-row-bottom {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.proctor-lobby-time {
+  font-size: 9px;
+  color: #8c8a94;
+}
 .proctor-lobby-row-actions {
   display: flex;
   align-items: center;
@@ -3857,6 +4029,12 @@ math-field::part(menu-toggle) {
   align-items: center;
   gap: 4px;
   cursor: pointer;
+  transition: all 0.12s;
+}
+.proctor-btn-view:hover {
+  background: #f4f3f8;
+  color: #17171a;
+  border-color: #8765b6;
 }
 .proctor-btn-approve {
   height: 28px;

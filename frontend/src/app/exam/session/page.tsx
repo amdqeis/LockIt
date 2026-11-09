@@ -11,6 +11,7 @@ import { QuestionContent } from "@/components/QuestionContent";
 import { Dialog } from "@/components/Dialog";
 import Image from "next/image";
 import { useExamProctoring } from "@/lib/useExamProctoring";
+import { ExamSessionSkeleton } from "@/components/skeletons";
 
 function clock(seconds: number) {
   const value = Math.max(0, seconds);
@@ -298,7 +299,7 @@ export default function ExamSessionPage() {
     return () => observer.disconnect();
   }, [loading, session?.exam.settings.display_mode, questions]);
 
-  if (loading) return <main className="state-page" role="status">Memuat sesi ujian…</main>;
+  if (loading) return <ExamSessionSkeleton />;
   if (!waiting) return <main className="state-page"><h1>Sesi belum tersedia</h1><p role="alert">{error || "Periksa koneksi atau kembali ke halaman masuk."}</p><MotionButton className="secondary-button" onClick={() => void sync()}>Coba lagi</MotionButton><MotionButton className="text-button" onClick={() => router.push("/")}>Kembali</MotionButton></main>;
   const answeredCount = questions.filter(question => (answers[question.id] || "").trim().length > 0).length;
   const markedCount = questions.filter(question => flagged.includes(question.id)).length;

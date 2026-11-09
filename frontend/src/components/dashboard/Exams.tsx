@@ -9,6 +9,8 @@ import { Dialog } from "@/components/Dialog";
 import { QuestionContent } from "@/components/QuestionContent";
 import { getCurrentAcademicPeriod } from "@/lib/academic-year";
 import { staffApi, staffSend } from "@/lib/staff-api";
+import { queryCache } from "@/lib/data-cache";
+import { ExamListSkeleton, ExamQuestionSkeleton } from "@/components/skeletons";
 import type { Question } from "@/lib/api";
 import { ErrorText, Icon, message } from "./Dashboard";
 import type { Bank, Exam, Subject } from "./types";
@@ -101,11 +103,20 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
     category: searchParams.get("category") || "",
   }));
 
-  const [shown, setShown] = useState<Exam[]>([]);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [shown, setShown] = useState<Exam[]>(() => {
+    const initial = queryCache.get<{ items: Exam[]; nextCursor: string | null }>("/api/exams?limit=25");
+    return initial ? initial.data.items : [];
+  });
+  const [nextCursor, setNextCursor] = useState<string | null>(() => {
+    const initial = queryCache.get<{ items: Exam[]; nextCursor: string | null }>("/api/exams?limit=25");
+    return initial ? initial.data.nextCursor : null;
+  });
   const [cursors, setCursors] = useState<(string | null)[]>([null]);
   const [cursorIndex, setCursorIndex] = useState(0);
-  const [listLoading, setListLoading] = useState(true);
+  const [listLoading, setListLoading] = useState(() => {
+    const initial = queryCache.get<{ items: Exam[]; nextCursor: string | null }>("/api/exams?limit=25");
+    return !initial;
+  });
   const requestNumber = useRef(0);
 
   const parameters = useMemo(() => {
@@ -119,11 +130,19 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
     return params.toString();
   }, [filter, filters, cursors, cursorIndex]);
 
-  const reload = useCallback(async () => {
+  const reload = useCallback(async (force = false) => {
     const request = ++requestNumber.current;
-    setListLoading(true);
+    const currentKey = `/api/exams?${parameters}`;
+    const cached = queryCache.get<{ items: Exam[]; nextCursor: string | null }>(currentKey);
+    if (!cached || force) {
+      if (!shown.length) setListLoading(true);
+    }
     try {
-      const data = await staffApi<{ items: Exam[]; nextCursor: string | null }>(`/api/exams?${parameters}`);
+      const data = await queryCache.fetch<{ items: Exam[]; nextCursor: string | null }>(
+        currentKey,
+        () => staffApi<{ items: Exam[]; nextCursor: string | null }>(currentKey),
+        60000
+      );
       if (request === requestNumber.current) {
         setShown(data.items);
         setNextCursor(data.nextCursor);
@@ -134,7 +153,7 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
     } finally {
       if (request === requestNumber.current) setListLoading(false);
     }
-  }, [parameters]);
+  }, [parameters, shown.length]);
 
   useEffect(() => {
     const url = new URLSearchParams(parameters);
@@ -242,7 +261,9 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
       setRolloverNotice(
         `Tahun ajaran baru dimulai (${res.period.academicYear} · semester ${res.period.semester}). Sebanyak ${res.archivedCount} ujian lama berhasil diarsipkan.`
       );
-      await reload();
+      queryCache.invalidate("/api/exams");
+      queryCache.invalidate("/api/dashboard/overview");
+      await reload(true);
     } catch (e) {
       setError(message(e));
     } finally {
@@ -379,7 +400,9 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
   async function duplicate(id: string) {
     try {
       await staffSend(`/api/exams/${id}/duplicate`, "POST");
-      await reload();
+      queryCache.invalidate("/api/exams");
+      queryCache.invalidate("/api/dashboard/overview");
+      await reload(true);
     } catch (e) {
       setError(message(e));
     }
@@ -977,8 +1000,8 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
         </div>
       </details>
 
-      {listLoading ? (
-        <p role="status">Memuat daftar ujian…</p>
+      {listLoading && !shown.length ? (
+        <ExamListSkeleton />
       ) : shown.length ? (
         <>
           <div className="staff-list">
@@ -1081,7 +1104,7 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
                 </section>
               ))
             ) : (
-              !error && <p>Memuat soal…</p>
+              !error && <ExamQuestionSkeleton />
             )}
             <Link href={`/dashboard/monitoring?exam=${encodeURIComponent(view.id)}`} className="staff-primary staff-link-button">
               Buka monitoring <Icon name="arrow" size={16} />

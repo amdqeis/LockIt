@@ -6,6 +6,7 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { staffSend } from "@/lib/staff-api";
+import { prefetchRouteAndData } from "@/lib/prefetch";
 import "../dashboard/dashboard.css";
 
 export default function LoginPage() {
@@ -16,7 +17,11 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false);
   async function submit(e: FormEvent) {
     e.preventDefault(); setError(""); setBusy(true);
-    try { await staffSend("/api/auth/login", "POST", { email, password }); router.replace("/dashboard"); }
+    try {
+      await staffSend("/api/auth/login", "POST", { email, password });
+      prefetchRouteAndData("/dashboard", router);
+      router.replace("/dashboard");
+    }
     catch (err) { setError(err instanceof Error ? err.message : "Gagal masuk."); }
     finally { setBusy(false); }
   }

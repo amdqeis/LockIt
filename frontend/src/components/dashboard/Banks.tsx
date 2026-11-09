@@ -7,6 +7,8 @@ import { motion, useReducedMotion } from "framer-motion";
 import { Dialog } from "@/components/Dialog";
 import { QuestionContent } from "@/components/QuestionContent";
 import { staffApi, staffSend } from "@/lib/staff-api";
+import { queryCache } from "@/lib/data-cache";
+import { BankListSkeleton } from "@/components/skeletons";
 import EquationEditor, { docToText } from "./EquationEditor";
 import { ErrorText, Icon, message } from "./Dashboard";
 import type { Bank, BankQuestion, Subject } from "./types";
@@ -42,8 +44,14 @@ export function Banks({ teacherId }: { teacherId: string }) {
   const searchParams = useSearchParams();
   const reduceMotion = useReducedMotion();
 
-  const [subjects, setSubjects] = useState<Subject[]>([]);
-  const [banks, setBanks] = useState<Bank[]>([]);
+  const [subjects, setSubjects] = useState<Subject[]>(() => {
+    const initial = queryCache.get<Subject[]>("/api/subjects");
+    return initial ? initial.data : [];
+  });
+  const [banks, setBanks] = useState<Bank[]>(() => {
+    const initial = queryCache.get<{ items: Bank[]; nextCursor: string | null }>("/api/question-banks?limit=25");
+    return initial ? initial.data.items : [];
+  });
   const [folder, setFolder] = useState<string | null>(() => searchParams.get("folder") || null);
   const [folderOpen, setFolderOpen] = useState(false);
   const [bankOpen, setBankOpen] = useState(false);
@@ -83,21 +91,35 @@ export function Banks({ teacherId }: { teacherId: string }) {
   const [cursors, setCursors] = useState<(string | null)[]>([null]);
   const [cursorIndex, setCursorIndex] = useState(0);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [listLoading, setListLoading] = useState(true);
+  const [listLoading, setListLoading] = useState(() => {
+    const initialBanks = queryCache.get<{ items: Bank[]; nextCursor: string | null }>("/api/question-banks?limit=25");
+    return !initialBanks;
+  });
   const listRequest = useRef(0);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (force = false) => {
     const request = ++listRequest.current;
-    setListLoading(true);
+    const params = new URLSearchParams({ limit: "25" });
+    if (folder && folder !== "unassigned") params.set("subjectId", folder);
+    else if (folder === "unassigned") params.set("subjectId", "unassigned");
+    const cursor = cursors[cursorIndex];
+    if (cursor) params.set("cursor", cursor);
+    const banksKey = `/api/question-banks?${params}`;
+
+    const cachedSubjects = queryCache.get<Subject[]>("/api/subjects");
+    const cachedBanks = queryCache.get<{ items: Bank[]; nextCursor: string | null }>(banksKey);
+    if ((!cachedSubjects || !cachedBanks) || force) {
+      if (!banks.length) setListLoading(true);
+    }
+
     try {
-      const params = new URLSearchParams({ limit: "25" });
-      if (folder && folder !== "unassigned") params.set("subjectId", folder);
-      else if (folder === "unassigned") params.set("subjectId", "unassigned");
-      const cursor = cursors[cursorIndex];
-      if (cursor) params.set("cursor", cursor);
       const [s, b] = await Promise.all([
-        staffApi<Subject[]>("/api/subjects"),
-        staffApi<{ items: Bank[]; nextCursor: string | null }>(`/api/question-banks?${params}`),
+        queryCache.fetch<Subject[]>("/api/subjects", () => staffApi<Subject[]>("/api/subjects"), 300000),
+        queryCache.fetch<{ items: Bank[]; nextCursor: string | null }>(
+          banksKey,
+          () => staffApi<{ items: Bank[]; nextCursor: string | null }>(banksKey),
+          60000
+        ),
       ]);
       if (request === listRequest.current) {
         setSubjects(s);
@@ -110,7 +132,7 @@ export function Banks({ teacherId }: { teacherId: string }) {
     } finally {
       if (request === listRequest.current) setListLoading(false);
     }
-  }, [folder, cursors, cursorIndex]);
+  }, [folder, cursors, cursorIndex, banks.length]);
 
   useEffect(() => {
     window.history.replaceState(
@@ -138,10 +160,12 @@ export function Banks({ teacherId }: { teacherId: string }) {
     setError("");
     try {
       const s = await staffSend<Subject>("/api/subjects", "POST", { name: folderName });
+      queryCache.invalidate("/api/subjects");
+      queryCache.invalidate("/api/question-banks");
       switchFolder(s.id);
       setFolderName("");
       setFolderOpen(false);
-      await load();
+      await load(true);
     } catch (e) {
       setError(message(e));
     } finally {
@@ -155,9 +179,12 @@ export function Banks({ teacherId }: { teacherId: string }) {
     setError("");
     try {
       await staffSend(`/api/subjects/${folder}`, "DELETE");
+      queryCache.invalidate("/api/subjects");
+      queryCache.invalidate("/api/question-banks");
       setDeleteFolder(false);
       switchFolder(null);
       setNotice("Mata pelajaran berhasil dihapus.");
+      await load(true);
     } catch (e) {
       setError(message(e));
     } finally {
@@ -177,7 +204,8 @@ export function Banks({ teacherId }: { teacherId: string }) {
       });
       setMoveBank(null);
       setNotice("Bank soal berhasil dipindahkan.");
-      await load();
+      queryCache.invalidate("/api/question-banks");
+      await load(true);
     } catch (e) {
       setError(message(e));
     } finally {
@@ -199,7 +227,8 @@ export function Banks({ teacherId }: { teacherId: string }) {
       });
       setBankName("");
       setBankOpen(false);
-      await load();
+      queryCache.invalidate("/api/question-banks");
+      await load(true);
     } catch (e) {
       setError(message(e));
     } finally {
@@ -1487,8 +1516,8 @@ export function Banks({ teacherId }: { teacherId: string }) {
         </div>
       )}
 
-      {listLoading ? (
-        <p role="status">Memuat bank soal…</p>
+      {listLoading && !visible.length ? (
+        <BankListSkeleton />
       ) : visible.length > 0 ? (
         <>
           <div className="staff-list">

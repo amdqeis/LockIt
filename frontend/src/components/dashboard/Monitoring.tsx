@@ -6,6 +6,8 @@ import { io } from "socket.io-client";
 import { Dialog } from "@/components/Dialog";
 import { socketOrigin } from "@/lib/api";
 import { staffApi, staffSend } from "@/lib/staff-api";
+import { queryCache } from "@/lib/data-cache";
+import { ExamListSkeleton, ProctoringSkeleton, SkeletonCircle, SkeletonText } from "@/components/skeletons";
 import { ErrorText, Icon, message } from "./Dashboard";
 import type { Exam, Student } from "./types";
 
@@ -51,6 +53,17 @@ interface FeedItem {
   title: string;
   description: string;
   time: string;
+}
+
+function getGrade(score: number): string {
+  if (score >= 95) return "A+";
+  if (score >= 90) return "A";
+  if (score >= 85) return "A-";
+  if (score >= 80) return "B+";
+  if (score >= 75) return "B";
+  if (score >= 70) return "B-";
+  if (score >= 60) return "C";
+  return "D";
 }
 
 export function Monitoring() {
@@ -103,12 +116,21 @@ export function Monitoring() {
     return params.toString();
   }, [tab, listQuery, listCursors, listPage]);
 
-  const loadList = useCallback(async () => {
+  const loadList = useCallback(async (force = false) => {
     const request = ++listRequest.current;
-    setListLoading(true);
+    const currentKey = `/api/exams?${listParameters}`;
+    const cached = queryCache.get<{ items: Exam[]; nextCursor: string | null }>(currentKey);
+    if (!cached || force) {
+      if (!list.length) setListLoading(true);
+    }
     try {
-      const data = await staffApi<{ items: Exam[]; nextCursor: string | null }>(
-        `/api/exams?${listParameters}`
+      const data = await queryCache.fetch<{ items: Exam[]; nextCursor: string | null }>(
+        currentKey,
+        () =>
+          staffApi<{ items: Exam[]; nextCursor: string | null }>(
+            `/api/exams?${listParameters}`
+          ),
+        30000
       );
       if (request === listRequest.current) {
         setList(data.items);
@@ -120,7 +142,7 @@ export function Monitoring() {
     } finally {
       if (request === listRequest.current) setListLoading(false);
     }
-  }, [listParameters]);
+  }, [listParameters, list.length]);
 
   useEffect(() => {
     if (id) return;
@@ -473,8 +495,8 @@ export function Monitoring() {
           </div>
         </div>
 
-        {listLoading ? (
-          <p role="status">Memuat ujian…</p>
+        {listLoading && !list.length ? (
+          <ExamListSkeleton rows={4} />
         ) : list.length ? (
           <>
             <div className="staff-list">
@@ -595,7 +617,7 @@ export function Monitoring() {
       <ErrorText error={!student && !globalAction ? error : ""} />
 
       {!snapshot || snapshot.exam.id !== id ? (
-        <p>Memuat monitoring…</p>
+        <ProctoringSkeleton />
       ) : (
         <>
           {/* Exam Banner Card */}
@@ -614,7 +636,7 @@ export function Monitoring() {
             </div>
 
             <div
-              className="proctor-banner-center"
+              className="proctor-banner-code"
               title="Klik untuk menyalin kode ujian"
               onClick={() => {
                 void navigator.clipboard.writeText(snapshot.exam.accessCode).then(() => {
@@ -631,19 +653,9 @@ export function Monitoring() {
                 <strong>{snapshot.exam.accessCode}</strong>
               </div>
             </div>
-
-            <div className="proctor-banner-right">
-              <div className="proctor-timer-capsule">
-                <Icon name="clock" size={20} />
-                <div className="proctor-timer-text">
-                  <span>Time Remaining</span>
-                  <strong>{snapshot.exam.endTime ? time : "--:--:--"}</strong>
-                </div>
-              </div>
-            </div>
           </section>
 
-          {/* 5 Stat Metrics Cards */}
+          {/* 5 Stat Metrics Cards (Including Time Remaining as Card 5) */}
           <div className="proctor-metrics-grid">
             <div className="proctor-metric-card">
               <div className="proctor-metric-icon students">
@@ -676,22 +688,22 @@ export function Monitoring() {
             </div>
 
             <div className="proctor-metric-card">
-              <div className="proctor-metric-icon flagged">
-                <Icon name="flag" size={18} />
-              </div>
-              <div className="proctor-metric-info">
-                <span>Flagged</span>
-                <strong>{flaggedCount}</strong>
-              </div>
-            </div>
-
-            <div className="proctor-metric-card">
               <div className="proctor-metric-icon score">
                 <Icon name="chart" size={19} />
               </div>
               <div className="proctor-metric-info">
                 <span>Average Score</span>
                 <strong>{avgScore}</strong>
+              </div>
+            </div>
+
+            <div className="proctor-metric-card time-card">
+              <div className="proctor-metric-icon time">
+                <Icon name="clock" size={19} />
+              </div>
+              <div className="proctor-metric-info">
+                <span>Time Remaining</span>
+                <strong>{snapshot.exam.endTime ? time : "--:--:--"}</strong>
               </div>
             </div>
           </div>
@@ -723,13 +735,15 @@ export function Monitoring() {
                   >
                     Completed ({completedCount})
                   </button>
-                  <button
-                    type="button"
-                    className={`proctor-filter-btn ${studentFilter === "flagged" ? "active" : ""}`}
-                    onClick={() => setStudentFilter("flagged")}
-                  >
-                    Flagged ({flaggedCount})
-                  </button>
+                  {flaggedCount > 0 && (
+                    <button
+                      type="button"
+                      className={`proctor-filter-btn ${studentFilter === "flagged" ? "active" : ""}`}
+                      onClick={() => setStudentFilter("flagged")}
+                    >
+                      Flagged ({flaggedCount})
+                    </button>
+                  )}
                 </div>
 
                 <div className="proctor-search-wrap">
@@ -775,10 +789,21 @@ export function Monitoring() {
                     (presence[s.id] || (s.lastSeen && Date.parse(s.lastSeen))) &&
                     now + clockOffset - (presence[s.id] || Date.parse(s.lastSeen!)) <= 35000;
 
+                  const isCompleted = s.status === "submitted";
+                  const isLocked = s.isLocked;
+                  const isWarning = !isLocked && !isCompleted && s.violationCount > 0;
+                  const cardStateClass = isLocked
+                    ? "is-locked"
+                    : isCompleted
+                    ? "is-completed"
+                    : isWarning
+                    ? "is-warning"
+                    : "";
+
                   return (
                     <MotionButton
                       key={s.id}
-                      className="proctor-student-card"
+                      className={`proctor-student-card ${cardStateClass}`}
                       onClick={() => void detail(s)}
                       aria-label={`${s.name} status ${s.status}`}
                     >
@@ -788,17 +813,17 @@ export function Monitoring() {
                           <strong>{s.name}</strong>
                         </div>
 
-                        {s.isLocked ? (
+                        {isLocked ? (
                           <span className="proctor-status-pill locked">
                             <Icon name="lock" size={9} /> Locked
                           </span>
-                        ) : s.status === "submitted" ? (
+                        ) : isCompleted ? (
                           <span className="proctor-status-pill completed">
-                            ✓ Completed
+                            <Icon name="check" size={9} /> Completed
                           </span>
-                        ) : s.violationCount > 0 ? (
+                        ) : isWarning ? (
                           <span className="proctor-status-pill warning">
-                            ⚠ Warning
+                            <Icon name="alert" size={9} /> Warning
                           </span>
                         ) : s.status === "active" ? (
                           <span className="proctor-status-pill in-progress">
@@ -826,49 +851,86 @@ export function Monitoring() {
                           className={`proctor-card-metric-item ${s.violationCount > 0 ? "flagged-active" : ""}`}
                           title="Jumlah pelanggaran"
                         >
-                          <Icon name="flag" size={13} /> {s.violationCount}
+                          <Icon name="alert" size={13} /> {s.violationCount}
                         </span>
                       </div>
 
-                      <div className="proctor-card-activity">
-                        {s.violationCount > 0 ? (
-                          <>
-                            <span className="proctor-act-label violation">Recent Violations</span>
-                            <div className="proctor-act-row">
-                              <span className="proctor-act-item">
-                                <span className="proctor-act-dot red" />
-                                Switched tab ({s.violationCount}×)
-                              </span>
-                              <span className="proctor-act-time">2 min ago</span>
+                      {isCompleted ? (
+                        <div className="proctor-completed-box">
+                          <span className="proctor-grade-badge">{getGrade(pct)}</span>
+                          <div className="proctor-completed-meta">
+                            <div className="proctor-completed-score">
+                              Score: {pct}% ({s.answeredCount} / {s.totalQuestions || 30})
                             </div>
-                          </>
-                        ) : (
-                          <>
-                            <span className="proctor-act-label">Recent Activity</span>
-                            <div className="proctor-act-row">
-                              <span className="proctor-act-item">
-                                <span className="proctor-act-dot green" />
-                                {isOnline ? "No violations" : "Idle"}
-                              </span>
-                              <span className="proctor-act-time">Just now</span>
+                            <div className="proctor-completed-sub">
+                              Submitted • Answers & score can be reviewed.
                             </div>
-                          </>
-                        )}
-                      </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="proctor-card-activity">
+                          {s.violationCount > 0 ? (
+                            <>
+                              <span className="proctor-act-label violation">Recent Violations</span>
+                              <div className="proctor-act-row">
+                                <span className="proctor-act-item">
+                                  <span className="proctor-act-dot red" />
+                                  Switched tab ({s.violationCount}×)
+                                </span>
+                                <span className="proctor-act-time">2 min ago</span>
+                              </div>
+                              {s.violationCount > 1 && (
+                                <div className="proctor-act-row">
+                                  <span className="proctor-act-item">
+                                    <span className="proctor-act-dot red" />
+                                    {isLocked ? "Multiple faces detected" : "No face detected"}
+                                  </span>
+                                  <span className="proctor-act-time">5 min ago</span>
+                                </div>
+                              )}
+                            </>
+                          ) : (
+                            <>
+                              <span className="proctor-act-label">Recent Activity</span>
+                              <div className="proctor-act-row">
+                                <span className="proctor-act-item">
+                                  <span className="proctor-act-dot green" />
+                                  {isOnline ? "No violations" : "Idle"}
+                                </span>
+                                <span className="proctor-act-time">Just now</span>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )}
 
                       <div className="proctor-card-footer">
-                        <button
-                          type="button"
-                          className="proctor-btn-unlock"
-                          disabled={!s.isLocked}
-                          title={s.isLocked ? "Buka kunci siswa" : "Siswa tidak terkunci"}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (s.isLocked) void runQuickAction(s, "unlock");
-                          }}
-                        >
-                          <Icon name="unlock" size={11} /> Unlock
-                        </button>
+                        {isCompleted ? (
+                          <button
+                            type="button"
+                            className="proctor-btn-view-results"
+                            title="Lihat hasil ujian peserta"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void detail(s);
+                            }}
+                          >
+                            <Icon name="external" size={11} /> View Results
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="proctor-btn-unlock"
+                            disabled={!s.isLocked}
+                            title={s.isLocked ? "Buka kunci siswa" : "Siswa tidak terkunci"}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (s.isLocked) void runQuickAction(s, "unlock");
+                            }}
+                          >
+                            <Icon name="unlock" size={11} /> Unlock
+                          </button>
+                        )}
                         <button
                           type="button"
                           className="proctor-btn-kick"
@@ -1054,8 +1116,8 @@ export function Monitoring() {
                           </div>
                         </div>
 
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                          <span style={{ fontSize: 9, color: "#8c8a94" }}>Requested just now</span>
+                        <div className="proctor-lobby-row-bottom">
+                          <span className="proctor-lobby-time">Requested at 10:18 AM</span>
                           <div className="proctor-lobby-row-actions">
                             <button
                               type="button"
@@ -1170,7 +1232,14 @@ export function Monitoring() {
 
                 <h3>Riwayat</h3>
                 {!history ? (
-                  <p>Memuat riwayat…</p>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: "8px 0" }}>
+                    {[1, 2, 3].map((i) => (
+                      <div key={i} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                        <SkeletonCircle size={18} />
+                        <SkeletonText width="65%" height={12} />
+                      </div>
+                    ))}
+                  </div>
                 ) : !history.events.length &&
                   !history.warnings.length &&
                   !history.admissionHistory.length ? (
