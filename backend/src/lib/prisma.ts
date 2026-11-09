@@ -6,7 +6,7 @@ const globalForPrisma = globalThis as unknown as { prisma: PrismaClient | undefi
 // connection_limit di DATABASE_URL overrides default Prisma pool (default: num_cpus * 2 + 1)
 // Untuk ujian online: set ke 10-20 tergantung resource server.
 // Contoh: DATABASE_URL="postgresql://...?connection_limit=10&pool_timeout=20"
-const dbUrl = process.env.DATABASE_URL || process.env.DATABASE_zURL;
+const dbUrl = process.env.DATABASE_URL;
 
 export const prisma =
   globalForPrisma.prisma ??

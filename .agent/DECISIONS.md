@@ -140,3 +140,8 @@
 - Keputusan: Menghapus seluruh job `ci` dari workflow production, termasuk PostgreSQL `eduquas_test`, URL database lokal, kredensial dummy, dan langkah test/build terkait; deployment tetap hanya berjalan pada push `production`.
 - Alasan: Workflow deployment tidak boleh membuat atau memakai database test lokal; migrasi dijalankan oleh Docker Compose di server dengan `backend/.env` production.
 - Ditolak: Mengarahkan test ke database production karena test dapat mengubah atau menghapus data asli.
+
+### 2026-11-09 — Satu database runtime PostgreSQL dan tanpa seed demo production
+- Keputusan: Compose menonaktifkan Redis cache dan menghapus servicenya; deploy memakai `--remove-orphans` agar container Redis lama dilepas setelah deployment berhasil. Backend hanya membaca `DATABASE_URL`, dan seed demo ditolak di production serta memerlukan opt-in eksplisit di lingkungan lain.
+- Alasan: Menjaga satu-satunya penyimpanan data aplikasi tetap PostgreSQL yang diatur oleh `backend/.env`, tanpa membuat datastore atau akun/ujian dummy di production.
+- Ditolak: Menghapus volume media/upload yang bukan database dan menyimpan file aplikasi; menghubungkan proses build ke database production.

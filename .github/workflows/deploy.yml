@@ -32,4 +32,4 @@ jobs:
             test "$(git rev-parse HEAD)" = "${{ github.sha }}" || { echo "Production branch moved; deploy stopped."; exit 1; }
             docker compose build
             docker compose run --rm --no-deps backend node scripts/migrate-deploy.mjs
-            docker compose up -d --wait --wait-timeout 180
+            docker compose up -d --remove-orphans --wait --wait-timeout 180

@@ -2,7 +2,11 @@ import { PrismaClient, ExamStatus, StudentStatus, EventType } from "@prisma/clie
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 
-const dbUrl = process.env.DATABASE_URL || process.env.DATABASE_zURL;
+if (process.env.NODE_ENV === "production" || process.env.EDUQUAS_ALLOW_DEMO_SEED !== "1") {
+  throw new Error("Seed demo dinonaktifkan. Untuk database non-production, set EDUQUAS_ALLOW_DEMO_SEED=1 secara eksplisit.");
+}
+
+const dbUrl = process.env.DATABASE_URL;
 const prisma = new PrismaClient(
   dbUrl ? { datasources: { db: { url: dbUrl } } } : undefined
 );
