@@ -1,0 +1,6 @@
+# Replace the domain with the production hostname. Caddy must join caddy_net.
+eduquas.example.com {
+    @socket path /socket.io /socket.io/*
+    reverse_proxy @socket eduquas_backend:3000
+    reverse_proxy eduquas_frontend:3000
+}

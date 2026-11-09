@@ -1,17 +1,66 @@
-name: Deploy to Production
+name: CI and production deploy
 
 on:
+  pull_request:
   push:
-    branches:
-      - production
+    branches: [main, integration, production]
+
+permissions:
+  contents: read
 
 jobs:
-  deploy:
-    name: Deploy to Production Server
+  ci:
     runs-on: ubuntu-latest
-
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: key
+          POSTGRES_DB: eduquas_test
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 15437:5432
+        options: >-
+          --health-cmd "pg_isready -U key -d eduquas_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://key@127.0.0.1:15437/eduquas_test
+      JWT_ACCESS_SECRET: ci-access-secret
+      JWT_REFRESH_SECRET: ci-refresh-secret
+      STUDENT_SESSION_SECRET: ci-student-secret
+      EDUQUAS_TEMP_DB_TEST: "1"
+      EDUQUAS_QUESTION_MEDIA_DIR: /tmp/eduquas-ci-question-media
     steps:
-      - name: SSH and Deploy to VPS
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run prisma:generate --workspace=backend
+      - run: npm run lint
+      - run: npm run type-check --workspace=backend
+      - run: npm run type-check --workspace=frontend
+      - name: Initialize disposable test database
+        working-directory: backend
+        run: npx prisma db push --skip-generate
+      - name: Backend tests
+        working-directory: backend
+        run: node --import tsx --test --test-concurrency=1 $(find src -name '*.test.ts' -print)
+      - name: Build backend image
+        run: docker build -t eduquas-backend:ci backend
+      - name: Build frontend image
+        run: docker build -t eduquas-frontend:ci frontend
+
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/production'
+    needs: ci
+    runs-on: ubuntu-latest
+    concurrency:
+      group: eduquas-production
+      cancel-in-progress: false
+    steps:
+      - name: Deploy the verified commit
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SSH_HOST }}
@@ -20,18 +69,12 @@ jobs:
           port: ${{ secrets.SSH_PORT || 22 }}
           script_stop: true
           script: |
-            echo "🚀 Starting automated deployment..."
+            set -eu
             cd /srv/app/EduQuas
-
-            echo "📥 Pulling latest changes from branch production..."
             git fetch origin production
             git checkout production
-            git pull origin production
-
-            echo "🐳 Building and starting Docker containers..."
-            docker compose up -d --build --remove-orphans
-
-            echo "🧹 Cleaning up unused Docker images..."
-            docker image prune -f
-
-            echo "✅ Deployment completed successfully!"
+            git pull --ff-only origin production
+            test "$(git rev-parse HEAD)" = "${{ github.sha }}" || { echo "Production branch moved; deploy stopped."; exit 1; }
+            docker compose build
+            docker compose run --rm --no-deps backend node scripts/migrate-deploy.mjs
+            docker compose up -d --wait --wait-timeout 180

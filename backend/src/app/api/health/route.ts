@@ -1,24 +1,16 @@
-import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { successResponse, errorResponse } from "@/lib/response";
 
-export async function GET(req: NextRequest) {
+export async function GET() {
   try {
-    let dbStatus = "disconnected";
-    try {
-      await prisma.$queryRaw`SELECT 1`;
-      dbStatus = "connected";
-    } catch (dbErr: any) {
-      dbStatus = `error: ${dbErr.message || "database unreachable"}`;
-    }
-
+    await prisma.$queryRaw`SELECT 1`;
     return successResponse({
       status: "ok",
       timestamp: new Date().toISOString(),
-      database: dbStatus,
+      database: "connected",
       uptime: process.uptime(),
     });
-  } catch (err: any) {
-    return errorResponse("HEALTH_CHECK_FAILED", err.message || "Service check failed", 500);
+  } catch {
+    return errorResponse("HEALTH_CHECK_FAILED", "Database tidak tersedia", 503);
   }
 }

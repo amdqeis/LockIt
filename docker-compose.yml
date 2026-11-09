@@ -2,24 +2,27 @@ services:
   backend:
     build:
       context: ./backend
-      dockerfile: Dockerfile
     container_name: eduquas_backend
     env_file:
       - ./backend/.env
     environment:
-      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      NODE_ENV: production
+      PORT: 3000
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
     restart: unless-stopped
-    # Agar container bisa akses DB di host machine (Linux) jika DATABASE_URL pakai host.docker.internal
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "3001:3000"
+      - "127.0.0.1:3001:3000"
+    volumes:
+      - question_bank_media:/app/storage/question-bank
+      - exam_uploads:/app/public/uploads/exams
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:3000/api/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     networks:
       - caddy_net
       - cache_net
@@ -34,24 +37,28 @@ services:
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile
-      args:
-        # URL ini dipakai browser saat build untuk fetch ke backend
-        # Di production server: bisa di-override via env host (misal via Caddy: https://api.domain.com)
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001}
     container_name: eduquas_frontend
     environment:
-      - NODE_ENV=production
-      # URL internal antar-container untuk Next.js rewrites proxy (/api/* -> backend)
-      - INTERNAL_BACKEND_URL=http://backend:3000
-      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:3001}
+      NODE_ENV: production
+      INTERNAL_BACKEND_URL: http://backend:3000
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     networks:
       - caddy_net
+
+volumes:
+  question_bank_media:
+  exam_uploads:
 
 networks:
   caddy_net:
