@@ -125,3 +125,8 @@
 - Keputusan: Mengimplementasikan penilaian parsial untuk tipe soal `multi_select` dengan rumus penalti `max(0, (opsi_benar_dipilih / x * 100) - (opsi_salah_dipilih / n * 100)) * points / 100`, dihitung secara dinamis dari jawaban tersimpan (`selectedOption`) dan kunci jawaban (`correctAnswer` + `options`) tanpa migrasi skema database. Di antarmuka review siswa dan detail jawaban guru, sertakan perolehan poin dan poin maksimal per soal (misal `Poin: 2.5 / 10`) serta badge status (benar, sebagian benar, belum benar, menunggu penilaian guru).
 - Alasan: Memberikan penilaian yang adil dan akurat terhadap pemahaman siswa tanpa membiarkan pemilihan seluruh opsi mendapat skor penuh, sekaligus menjaga konsistensi nilai di seluruh ringkasan, riwayat, rekapitulasi matriks, dan ekspor CSV untuk percobaan lama maupun baru.
 - Ditolak: Mengubah skema database `Answer.isCorrect` menjadi float (skema tetap boolean/null) dan menerapkan penalti pada opsi benar yang tidak dipilih.
+
+### 2026-11-09 — Trigger CI/CD hanya pada branch production
+- Keputusan: Workflow `.github/workflows/deploy.yml` hanya berjalan pada event `push` ke branch `production`.
+- Alasan: Menjalankan pipeline dan deploy produksi hanya ketika perubahan masuk ke branch rilis yang dituju.
+- Ditolak: Trigger `pull_request`, push ke `integration`, atau branch lain karena berada di luar permintaan trigger khusus production.

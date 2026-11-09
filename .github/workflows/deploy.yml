@@ -1,9 +1,8 @@
 name: CI and production deploy
 
 on:
-  pull_request:
   push:
-    branches: [main, integration, production]
+    branches: [production]
 
 permissions:
   contents: read
