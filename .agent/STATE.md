@@ -1,6 +1,5 @@
 # EduQuas
 
-- Status: Skala tipografi dashboard guru di `frontend/src/app/dashboard/dashboard.css`, `Banks.tsx`, dan `Exams.tsx` telah diselaraskan persis dengan referensi `DESIGN/Example/src/styles.css` (base 11px, heading 26px, section 20px, tombol 11px/40px, badge 9px).
-- Audit & Deteksi: Skill `impeccable detect` melaporkan 0 isu/pelanggaran.
-- Verifikasi Teknis: `npx tsc --noEmit` lulus 0 error, `npm run lint` lulus 0 error/warning, test Playwright browser `bank-editor.cjs` dan `dashboard.cjs` lulus 100%.
-- Port: Seluruh port 3000-3002 dipastikan dalam kondisi tertutup dan bersih.
+- Status: Galat "Data ujian tidak valid" saat buat ujian baru telah diperbaiki. Skema Zod backend (`createExamSchema` di [`backend/src/app/api/exams/route.ts`](file:///home/key/Documents/project/LockIt/backend/src/app/api/exams/route.ts) dan `updateExamSchema` di [`backend/src/app/api/exams/[id]/route.ts`](file:///home/key/Documents/project/LockIt/backend/src/app/api/exams/[id]/route.ts)) kini menerima `description: null`, `categoryNumber: null`, `scheduledStartAt: null`, serta menyertakan rincian field error pada respons validasi. Sanitasi payload di [`frontend/src/components/dashboard/Exams.tsx`](file:///home/key/Documents/project/LockIt/frontend/src/components/dashboard/Exams.tsx) diselaraskan sehingga pembuatan ujian tanpa deskripsi/jadwal dapat tersimpan dengan sukses.
+- Verifikasi Teknis: `npx tsc --noEmit` 0 error di frontend & backend, `npm run lint` 0 error/warning, 8 unit test backend `route.test.ts` dan 17 unit test lib lulus 100%, test Playwright `test-create-exam-flow.cjs`, `verify-buat-ujian-visible.cjs`, `bank-editor.cjs`, `equation-layout-check.cjs`, `test-eq-click-direct-box.cjs`, dan `dashboard.cjs` lulus 100%.
+- Next steps: Siap untuk pengujian alur ujian langsung oleh pengguna.

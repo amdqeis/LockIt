@@ -73,7 +73,7 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
   const searchParams = useSearchParams();
   const reduceMotion = useReducedMotion();
 
-  const [isCreating, setIsCreating] = useState(false);
+  const [isCreating, setIsCreating] = useState(() => searchParams.get("create") === "true");
   const [activeStep, setActiveStep] = useState(0);
   const [rolloverOpen, setRolloverOpen] = useState(false);
   const [rolloverConfirmed, setRolloverConfirmed] = useState(false);
@@ -268,16 +268,27 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
 
     setBusy(true);
     try {
+      const rawCatNum = form.categoryNumber ? parseInt(form.categoryNumber, 10) : null;
+      const categoryNumber = rawCatNum && !isNaN(rawCatNum) && rawCatNum > 0 ? rawCatNum : null;
+
+      let scheduleIso: string | null = null;
+      if (form.scheduledStartAt) {
+        const d = new Date(form.scheduledStartAt);
+        if (!isNaN(d.getTime())) {
+          scheduleIso = d.toISOString();
+        }
+      }
+
       const payload = {
         title: form.title.trim(),
         description: form.description.trim() || null,
         className: form.className.trim(),
         academicYear: (form.academicYear || currentPeriod.academicYear).trim(),
         semester: form.semester,
-        category: form.category.trim(),
-        categoryNumber: form.categoryNumber ? Number(form.categoryNumber) : null,
+        category: form.category.trim() || "Quiz",
+        categoryNumber,
         durationMinutes: Number(form.durationMinutes),
-        scheduledStartAt: form.scheduledStartAt ? new Date(form.scheduledStartAt).toISOString() : null,
+        scheduledStartAt: scheduleIso,
         passingScore: passing,
         ...(editing ? { revision: editing.revision } : { subjectId: form.subjectId }),
         ...(!editing || replaceQuestions ? { bankId: bank!.id, bankRevision: bank!.revision, questionIds: ids } : {}),
@@ -882,18 +893,6 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
           <p>Siapkan ujian dan temukan pelaksanaan yang sedang berjalan.</p>
         </div>
         <div className="staff-action-wrap">
-          {teacherRole === "ADMIN" && (
-            <MotionButton
-              className="staff-secondary"
-              onClick={() => {
-                setError("");
-                setRolloverOpen(true);
-              }}
-              title="Arsipkan seluruh ujian aktif/draf/selesai dan mulai tahun ajaran baru"
-            >
-              <Icon name="archive" size={16} /> Mulai Tahun Ajaran Baru
-            </MotionButton>
-          )}
           <MotionButton
             className="staff-primary"
             onClick={() => {
@@ -907,6 +906,18 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
           >
             <Icon name="plus" size={16} /> Buat ujian
           </MotionButton>
+          {teacherRole === "ADMIN" && (
+            <MotionButton
+              className="staff-secondary"
+              onClick={() => {
+                setError("");
+                setRolloverOpen(true);
+              }}
+              title="Arsipkan seluruh ujian aktif/draf/selesai dan mulai tahun ajaran baru"
+            >
+              <Icon name="archive" size={16} /> Mulai Tahun Ajaran Baru
+            </MotionButton>
+          )}
         </div>
       </div>
 
@@ -1020,6 +1031,23 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
         <div className="staff-empty">
           <h3>{filter ? "Ujian tidak ditemukan" : "Belum ada ujian"}</h3>
           <p>{filter ? "Coba kata pencarian lain." : "Buat ujian untuk mulai mengatur peserta dan soal."}</p>
+          {!filter && (
+            <div style={{ marginTop: 14 }}>
+              <MotionButton
+                className="staff-primary"
+                onClick={() => {
+                  setError("");
+                  setEditing(null);
+                  setReplaceQuestions(false);
+                  setForm(initial);
+                  setActiveStep(0);
+                  setIsCreating(true);
+                }}
+              >
+                <Icon name="plus" size={16} /> Buat Ujian Baru
+              </MotionButton>
+            </div>
+          )}
         </div>
       )}
 

@@ -10,19 +10,19 @@ import { normalizeQuestionForDb } from "@/services/question-parser";
 
 const createExamSchema = z.object({
   title: z.string().min(3, "Judul ujian minimal 3 karakter"),
-  description: z.string().optional(),
+  description: z.string().nullable().optional(),
   durationMinutes: z.number().int().min(5, "Durasi minimal 5 menit").max(360, "Durasi maksimal 360 menit"),
-  subjectId: z.string().uuid().optional(),
-  className: z.string().trim().min(1).max(100).optional(),
-  academicYear: z.string().trim().min(1).max(30).optional(),
-  semester: z.enum(["ganjil", "genap"]).optional(),
-  category: z.string().trim().min(1).max(100).optional(),
+  subjectId: z.string().min(1).nullable().optional(),
+  className: z.string().trim().min(1).max(100).nullable().optional(),
+  academicYear: z.string().trim().min(1).max(30).nullable().optional(),
+  semester: z.enum(["ganjil", "genap"]).nullable().optional(),
+  category: z.string().trim().min(1).max(100).nullable().optional(),
   categoryNumber: z.number().int().positive().nullable().optional(),
-  scheduledStartAt: z.string().datetime().nullable().optional(),
-  passingScore: z.number().int().min(0).max(100).optional(),
-  bankId: z.string().uuid().optional(),
-  bankRevision: z.number().int().positive().optional(),
-  questionIds: z.array(z.string().uuid()).min(1).max(200).optional(),
+  scheduledStartAt: z.string().datetime({ offset: true }).nullable().optional(),
+  passingScore: z.number().int().min(0).max(100).nullable().optional(),
+  bankId: z.string().min(1).nullable().optional(),
+  bankRevision: z.number().int().positive().nullable().optional(),
+  questionIds: z.array(z.string().min(1)).min(1).max(200).nullable().optional(),
   violationPolicy: z
     .object({
       max_violations: z.number().int().min(1).default(3),
@@ -176,7 +176,16 @@ export async function POST(req: NextRequest) {
 
     const parsed = createExamSchema.safeParse(body);
     if (!parsed.success) {
-      return errorResponse("VALIDATION_ERROR", "Data ujian tidak valid", 400, parsed.error.flatten().fieldErrors);
+      const fieldErrors = parsed.error.flatten().fieldErrors;
+      const detailsStr = Object.entries(fieldErrors)
+        .map(([field, errs]) => `${field}: ${errs?.join(", ")}`)
+        .join("; ");
+      return errorResponse(
+        "VALIDATION_ERROR",
+        detailsStr ? `Data ujian tidak valid (${detailsStr})` : "Data ujian tidak valid",
+        400,
+        fieldErrors
+      );
     }
 
     const { title, description, durationMinutes, violationPolicy, settings, questions } = parsed.data;

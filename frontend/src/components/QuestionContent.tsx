@@ -3,7 +3,24 @@
 import katex from "katex";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 
-type Node = { type?: string; text?: string; attrs?: { latex?: string }; content?: Node[] };
+type Node = {
+  type?: string;
+  text?: string;
+  attrs?: { latex?: string; level?: number };
+  marks?: { type: string }[];
+  content?: Node[];
+};
+
+function applyMarks(element: ReactNode, marks?: { type: string }[]): ReactNode {
+  if (!marks || !marks.length) return element;
+  let wrapped = element;
+  for (const mark of marks) {
+    if (mark.type === "bold") wrapped = <strong>{wrapped}</strong>;
+    else if (mark.type === "italic") wrapped = <em>{wrapped}</em>;
+    else if (mark.type === "underline") wrapped = <u>{wrapped}</u>;
+  }
+  return wrapped;
+}
 
 function MathText({ latex, block = false }: { latex: string; block?: boolean }) {
   const ref = useRef<HTMLSpanElement>(null);
@@ -42,11 +59,17 @@ function renderText(text: string): ReactNode[] {
 }
 
 function nodeContent(node: Node, key: string): ReactNode {
-  if (node.type === "text") return <span key={key}>{renderText(node.text || "")}</span>;
+  if (node.type === "text") return <span key={key}>{applyMarks(renderText(node.text || ""), node.marks)}</span>;
   if (node.type === "hardBreak") return <br key={key} />;
   if (node.type === "equation" || node.type === "equationBlock") return <MathText key={key} latex={node.attrs?.latex || ""} block={node.type === "equationBlock"} />;
   const children = (node.content || []).map((child, index) => nodeContent(child, `${key}-${index}`));
-  return node.type === "doc" ? <span key={key}>{children}</span> : <span className="content-line" key={key}>{children.length ? children : "\u00a0"}</span>;
+  if (node.type === "doc") return <span key={key}>{children}</span>;
+  if (node.type === "paragraph") return <p className="content-line" key={key} style={{ margin: "2px 0" }}>{children.length ? children : "\u00a0"}</p>;
+  if (node.type === "heading") return <h4 key={key} style={{ margin: "6px 0 3px", fontSize: node.attrs?.level === 2 ? "14px" : "13px" }}>{children}</h4>;
+  if (node.type === "bulletList") return <ul key={key} style={{ margin: "4px 0", paddingLeft: "20px" }}>{children}</ul>;
+  if (node.type === "orderedList") return <ol key={key} style={{ margin: "4px 0", paddingLeft: "20px" }}>{children}</ol>;
+  if (node.type === "listItem") return <li key={key}>{children}</li>;
+  return <span className="content-line" key={key}>{children.length ? children : "\u00a0"}</span>;
 }
 
 function ImageContent({ src, alt }: { src: string; alt?: string | null }) {

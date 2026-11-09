@@ -9,7 +9,7 @@ import { QuestionContent } from "@/components/QuestionContent";
 import { staffApi, staffSend } from "@/lib/staff-api";
 import EquationEditor, { docToText } from "./EquationEditor";
 import { ErrorText, Icon, message } from "./Dashboard";
-import type { Bank, BankOption, BankQuestion, Subject } from "./types";
+import type { Bank, BankQuestion, Subject } from "./types";
 import { exportBankXml, importBankXml, readBankXml, type Backup } from "./bankXml";
 
 const blankDoc = (text = ""): JSONContent => ({
@@ -65,6 +65,9 @@ export function Banks({ teacherId }: { teacherId: string }) {
   const [questions, setQuestions] = useState<BankQuestion[]>([]);
   const [draftId, setDraftId] = useState<string | null>(null);
   const [draftRevision, setDraftRevision] = useState(0);
+  const [previewDevice, setPreviewDevice] = useState<"desktop" | "mobile">("desktop");
+  const [isEditingMeta, setIsEditingMeta] = useState(false);
+  const questionImgInputRef = useRef<HTMLInputElement>(null);
 
   // Pop-up preview modal for entire bank
   const [viewingBank, setViewingBank] = useState<Bank | null>(null);
@@ -217,6 +220,8 @@ export function Banks({ teacherId }: { teacherId: string }) {
   function startNewQuestionBank() {
     setError("");
     setIsNewBank(true);
+    setIsEditingMeta(true);
+    setPreviewDevice("desktop");
     const initialSubject = subjects[0];
     const initialBank: Bank = {
       id: "new-bank",
@@ -245,6 +250,8 @@ export function Banks({ teacherId }: { teacherId: string }) {
       const detail = await staffApi<Bank>(`/api/question-banks/${id}`);
       setSelected(detail);
       setIsNewBank(false);
+      setIsEditingMeta(false);
+      setPreviewDevice("desktop");
       setNewBankTitle(detail.title);
       setNewBankSubject(detail.subject);
       setNewBankSubjectId(detail.subjectId || "");
@@ -488,736 +495,888 @@ export function Banks({ teacherId }: { teacherId: string }) {
 
   // ─── IN-PLACE BANK SOAL STEPPER VIEW ───────────────────────────────────────
   if (editor && selected) {
+    const formattedDate = selected.updatedAt
+      ? new Date(selected.updatedAt).toLocaleDateString("id-ID", {
+          day: "numeric",
+          month: "short",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        })
+      : "7 Okt 2026, 10:24";
+
     return (
       <motion.section
-        className="entry exam-creator-entry"
+        className="bank-add-page exam-creator-entry"
         aria-labelledby="bank-creator-title"
         initial={reduceMotion ? false : { opacity: 0.85, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: reduceMotion ? 0 : 0.28, ease: [0.22, 1, 0.36, 1] }}
       >
-        <MotionButton
-          className="back-button"
-          type="button"
-          onClick={() => {
-            setEditor(false);
-            setSelected(null);
-            setIsNewBank(false);
-            setError("");
-          }}
-        >
-          ← Kembali ke daftar bank soal
-        </MotionButton>
+        <div className="bank-top-nav">
+          <MotionButton
+            className="bank-back-link"
+            type="button"
+            onClick={() => {
+              setEditor(false);
+              setSelected(null);
+              setIsNewBank(false);
+              setError("");
+            }}
+          >
+            ← Kembali ke daftar bank soal
+          </MotionButton>
 
-        <ol className="steps" aria-label="Tahapan kelola butir soal">
-          {stepNames.map((label, index) => (
-            <li
-              key={label}
-              className={index === activeStep ? "current" : index < activeStep ? "complete" : ""}
-              onClick={() => {
-                if (index < activeStep) setActiveStep(index);
-                else if (index === activeStep + 1) setActiveStep(index);
-              }}
-              style={{ cursor: index <= activeStep ? "pointer" : "default" }}
+          <ol className="bank-stepper" aria-label="Tahapan kelola butir soal">
+            {stepNames.map((label, index) => (
+              <li
+                key={label}
+                className={`bank-step-item ${index === activeStep ? "active" : index < activeStep ? "complete" : ""}`}
+                onClick={() => {
+                  if (index <= activeStep + 1) setActiveStep(index);
+                }}
+              >
+                <span className="bank-step-circle">{index + 1}</span>
+                <span>{label}</span>
+                {index < stepNames.length - 1 && <span className="bank-step-line" aria-hidden="true" />}
+              </li>
+            ))}
+          </ol>
+          <div style={{ width: 120 }} className="hide-on-mobile" />
+        </div>
+
+        {/* Bank Meta Banner Card */}
+        <div className="bank-meta-banner">
+          <span className="bank-meta-badge">Bank Soal</span>
+          <div className="bank-meta-title-row">
+            <h1 id="bank-creator-title" className="bank-meta-title">
+              {isNewBank ? (newBankTitle.trim() || "Bank Soal Baru") : selected.title}
+            </h1>
+            <button
+              type="button"
+              className="bank-meta-edit-btn"
+              aria-label="Ubah judul bank soal"
+              title="Ubah judul bank soal"
+              onClick={() => setIsEditingMeta(!isEditingMeta)}
             >
-              {index < stepNames.length - 1 && (
-                <span className="step-connector" aria-hidden="true">
-                  <motion.span
-                    initial={false}
-                    animate={{ scaleX: index < activeStep ? 1 : 0 }}
-                    transition={{ duration: reduceMotion ? 0 : 0.22 }}
+              <Icon name="pencil" size={13} />
+            </button>
+          </div>
+
+          {(isNewBank || isEditingMeta) && (
+            <div
+              style={{
+                display: "flex",
+                gap: 12,
+                margin: "10px 0 6px",
+                flexWrap: "wrap",
+                alignItems: "center",
+                background: "#fafafc",
+                padding: "10px 14px",
+                borderRadius: "10px",
+                border: "1px solid #e7e6ec",
+              }}
+            >
+              <div style={{ flex: 1, minWidth: 220 }}>
+                <label
+                  htmlFor="new-bank-title"
+                  style={{ display: "block", fontSize: "10px", fontWeight: 700, color: "#62626c", marginBottom: 4 }}
+                >
+                  Nama Bank Soal *
+                </label>
+                <input
+                  id="new-bank-title"
+                  className="bank-option-input"
+                  style={{
+                    border: "1px solid #c9c7cf",
+                    borderRadius: "8px",
+                    padding: "6px 12px",
+                    background: "#ffffff",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    width: "100%",
+                  }}
+                  placeholder="Contoh: Logika Matematika 1"
+                  value={newBankTitle}
+                  onChange={(e) => {
+                    setNewBankTitle(e.target.value);
+                    if (selected) setSelected({ ...selected, title: e.target.value });
+                  }}
+                />
+              </div>
+
+              <div style={{ flex: 1, minWidth: 200 }}>
+                <label
+                  htmlFor="new-bank-subject"
+                  style={{ display: "block", fontSize: "10px", fontWeight: 700, color: "#62626c", marginBottom: 4 }}
+                >
+                  Mata Pelajaran *
+                </label>
+                {subjects.length > 0 ? (
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <select
+                      id="new-bank-subject"
+                      style={{
+                        border: "1px solid #c9c7cf",
+                        borderRadius: "8px",
+                        padding: "6px 10px",
+                        background: "#ffffff",
+                        fontSize: "11px",
+                        fontWeight: 550,
+                        flex: 1,
+                        height: 34,
+                      }}
+                      value={newBankSubjectId}
+                      onChange={(e) => {
+                        const sid = e.target.value;
+                        setNewBankSubjectId(sid);
+                        const found = subjects.find((s) => s.id === sid);
+                        if (found) {
+                          setNewBankSubject(found.name);
+                          if (selected) setSelected({ ...selected, subject: found.name, subjectId: found.id });
+                        }
+                      }}
+                    >
+                      {subjects.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                        </option>
+                      ))}
+                      <option value="__new__">+ Tulis mapel baru...</option>
+                    </select>
+                    {newBankSubjectId === "__new__" && (
+                      <input
+                        placeholder="Ketik mapel..."
+                        value={newBankSubject}
+                        onChange={(e) => {
+                          setNewBankSubject(e.target.value);
+                          if (selected) setSelected({ ...selected, subject: e.target.value });
+                        }}
+                        style={{
+                          border: "1px solid #c9c7cf",
+                          borderRadius: "8px",
+                          padding: "6px 10px",
+                          background: "#ffffff",
+                          fontSize: "11px",
+                          flex: 1,
+                          height: 34,
+                        }}
+                      />
+                    )}
+                  </div>
+                ) : (
+                  <input
+                    id="new-bank-subject"
+                    style={{
+                      border: "1px solid #c9c7cf",
+                      borderRadius: "8px",
+                      padding: "6px 12px",
+                      background: "#ffffff",
+                      fontSize: "11px",
+                      width: "100%",
+                      height: 34,
+                    }}
+                    placeholder="Contoh: Matematika"
+                    value={newBankSubject}
+                    onChange={(e) => {
+                      setNewBankSubject(e.target.value);
+                      if (selected) setSelected({ ...selected, subject: e.target.value });
+                    }}
                   />
+                )}
+              </div>
+            </div>
+          )}
+
+          <div className="bank-meta-row">
+            <span className="bank-meta-item">
+              <Icon name="book" size={13} />
+              {selected.subject || newBankSubject || "Matematika"}
+            </span>
+            <span className="bank-meta-item">
+              <Icon name="file" size={13} />
+              {questions.length} Soal
+            </span>
+            <span className="bank-meta-item">
+              <Icon name="clock" size={13} />
+              Diperbarui: {formattedDate}
+            </span>
+          </div>
+        </div>
+
+        <ErrorText error={error} />
+
+        {/* ─── TAHAP 1: BUAT SOAL (SPLIT VIEW EDITOR & PREVIEW) ───────── */}
+        {activeStep === 0 && currentQ && (
+          <>
+            {questions.length > 1 && (
+              <div className="bank-nav-strip" style={{ margin: "2px 0 0" }}>
+                <span style={{ fontSize: "11px", fontWeight: 650, color: "#62626c", marginRight: "4px" }}>
+                  Butir Soal:
                 </span>
-              )}
-              <span className="step-number">{index + 1}</span>
-              <span>{label}</span>
-            </li>
-          ))}
-        </ol>
+                {questions.map((_, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    className={`bank-q-pill ${currentQuestionIndex === idx ? "active" : ""}`}
+                    onClick={() => setCurrentQuestionIndex(idx)}
+                    title={`Pilih nomor ${idx + 1}`}
+                  >
+                    {idx + 1}
+                  </button>
+                ))}
+                <MotionButton
+                  type="button"
+                  className="bank-icon-btn"
+                  title="Tambah butir soal"
+                  aria-label="Tambah butir soal"
+                  onClick={() => {
+                    const next = [...questions, newQuestion()];
+                    updateQuestions(next);
+                    setCurrentQuestionIndex(next.length - 1);
+                  }}
+                >
+                  <Icon name="plus" size={14} />
+                </MotionButton>
+                <MotionButton
+                  type="button"
+                  className="bank-icon-btn danger"
+                  disabled={questions.length <= 1}
+                  title="Hapus butir soal saat ini"
+                  aria-label="Hapus butir soal saat ini"
+                  onClick={() => {
+                    if (questions.length <= 1) return;
+                    const next = questions.filter((_, idx) => idx !== currentQuestionIndex);
+                    updateQuestions(next);
+                    setCurrentQuestionIndex(Math.max(0, currentQuestionIndex - 1));
+                  }}
+                >
+                  <Icon name="trash" size={14} />
+                </MotionButton>
+              </div>
+            )}
 
-        <div className="entry-frame">
-          <div className="entry-card-surface" />
-          <div className="entry-body">
-            <ErrorText error={error} />
-
-            {/* ─── TAHAP 1: BUAT SOAL (SPLIT VIEW EDITOR & PREVIEW) ───────── */}
-            {activeStep === 0 && currentQ && (
-              <>
-                <div style={{ marginBottom: 16 }}>
-                  <h1 id="bank-creator-title">
-                    {isNewBank ? (newBankTitle.trim() || "Buat Bank Soal Baru") : selected.title}
-                  </h1>
-                  <p className="lead" style={{ margin: "4px 0 0" }}>
-                    Susun butir soal lengkap dengan rumus matematika, gambar, pilihan jawaban, dan pratinjau langsung.
+            <div className="bank-two-col-grid">
+              {/* Kolom Kiri: Form Buat Soal Baru */}
+              <section className="bank-card">
+                <div className="bank-card-head">
+                  <h3>Buat Soal Baru</h3>
+                  <p>
+                    Lengkapi pertanyaan, pilihan jawaban, dan pengaturan soal. Hasilnya dapat langsung dilihat di panel pratinjau.
                   </p>
                 </div>
 
-                {/* Form Nama Bank & Mapel jika membuat bank baru */}
-                {isNewBank && (
-                  <div className="exam-creator-grid" style={{ marginBottom: 18, background: "#f8f8fa", padding: 14, borderRadius: 12, border: "1px solid #e7e6ec" }}>
-                    <div className="exam-creator-field">
-                      <label htmlFor="new-bank-title">Nama Bank Soal *</label>
+                {/* Jenis Soal & Bobot Poin */}
+                <div className="bank-field-row">
+                  <div>
+                    <label style={{ display: "block", fontSize: "11px", fontWeight: 600, color: "#17171a", marginBottom: 6 }}>
+                      Jenis Soal *
+                    </label>
+                    <div className="bank-select-shell">
+                      <select
+                        value={currentQ.type}
+                        onChange={(e) =>
+                          updateQuestion(currentQuestionIndex, {
+                            type: e.target.value as BankQuestion["type"],
+                          })
+                        }
+                      >
+                        <option value="single_choice">Pilihan Ganda</option>
+                        <option value="multi_select">Pilihan Jamak</option>
+                        <option value="short_answer">Isian Singkat</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style={{ display: "block", fontSize: "11px", fontWeight: 600, color: "#17171a", marginBottom: 6 }}>
+                      Bobot Poin *
+                    </label>
+                    <div className="bank-point-shell">
                       <input
-                        id="new-bank-title"
-                        required
-                        placeholder="Contoh: Penilaian Harian Matematika Aljabar"
-                        value={newBankTitle}
-                        onChange={(e) => {
-                          setNewBankTitle(e.target.value);
-                          if (selected) setSelected({ ...selected, title: e.target.value });
-                        }}
+                        type="number"
+                        min="1"
+                        max="100"
+                        value={currentQ.points}
+                        onChange={(e) =>
+                          updateQuestion(currentQuestionIndex, {
+                            points: Math.max(1, Number(e.target.value) || 1),
+                          })
+                        }
                       />
+                      <span className="bank-point-suffix">Poin</span>
                     </div>
-                    <div className="exam-creator-field">
-                      <label htmlFor="new-bank-subject">Mata Pelajaran *</label>
-                      {subjects.length > 0 ? (
-                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                          <select
-                            id="new-bank-subject"
-                            value={newBankSubjectId}
-                            onChange={(e) => {
-                              const sid = e.target.value;
-                              setNewBankSubjectId(sid);
-                              const found = subjects.find((s) => s.id === sid);
-                              if (found) {
-                                setNewBankSubject(found.name);
-                                if (selected) setSelected({ ...selected, subject: found.name, subjectId: found.id });
-                              }
-                            }}
-                            style={{ flex: 1, minWidth: 160 }}
-                          >
-                            {subjects.map((s) => (
-                              <option key={s.id} value={s.id}>
-                                {s.name}
-                              </option>
-                            ))}
-                            <option value="__new__">+ Tulis mata pelajaran baru...</option>
-                          </select>
-                          {newBankSubjectId === "__new__" && (
-                            <input
-                              placeholder="Ketik mata pelajaran baru"
-                              value={newBankSubject}
-                              onChange={(e) => {
-                                setNewBankSubject(e.target.value);
-                                if (selected) setSelected({ ...selected, subject: e.target.value });
-                              }}
-                              style={{ flex: 1, minWidth: 160 }}
-                            />
-                          )}
-                        </div>
-                      ) : (
+                  </div>
+                </div>
+
+                {/* Pertanyaan * */}
+                <div style={{ marginTop: 4 }}>
+                  <label style={{ display: "block", fontSize: "11px", fontWeight: 600, color: "#17171a", marginBottom: 6 }}>
+                    Pertanyaan *
+                  </label>
+                  <EquationEditor
+                    label={`Isi soal ${currentQuestionIndex + 1}`}
+                    value={(currentQ.content as JSONContent) || blankDoc()}
+                    onChange={(doc) =>
+                      updateQuestion(currentQuestionIndex, {
+                        content: doc,
+                        questionText: docToText(doc),
+                      })
+                    }
+                    onImageClick={() => questionImgInputRef.current?.click()}
+                  />
+                  <input
+                    ref={questionImgInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    style={{ display: "none" }}
+                    onChange={(e) =>
+                      e.target.files?.[0] && void upload(e.target.files[0], currentQuestionIndex)
+                    }
+                  />
+                  {currentQ.imageUrl && (
+                    <div className="bank-attached-img">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={currentQ.imageUrl} alt={currentQ.imageAlt || "Lampiran soal"} />
+                      <div style={{ flex: 1, display: "flex", gap: 8, alignItems: "center" }}>
                         <input
-                          id="new-bank-subject"
-                          required
-                          placeholder="Contoh: Matematika, IPA, Bahasa Indonesia"
-                          value={newBankSubject}
-                          onChange={(e) => {
-                            setNewBankSubject(e.target.value);
-                            if (selected) setSelected({ ...selected, subject: e.target.value });
-                          }}
+                          className="bank-option-input"
+                          style={{ border: "1px solid #d5d4dc", borderRadius: 6, padding: "4px 8px" }}
+                          placeholder="Keterangan alternatif gambar (alt)..."
+                          value={currentQ.imageAlt || ""}
+                          onChange={(e) =>
+                            updateQuestion(currentQuestionIndex, { imageAlt: e.target.value })
+                          }
                         />
-                      )}
+                        <button
+                          type="button"
+                          className="bank-toolbar-btn"
+                          style={{ color: "#de5558" }}
+                          title="Hapus gambar"
+                          onClick={() =>
+                            updateQuestion(currentQuestionIndex, { imageUrl: undefined, imageAlt: undefined })
+                          }
+                        >
+                          <Icon name="trash" size={13} />
+                        </button>
+                      </div>
                     </div>
+                  )}
+                </div>
+
+                {/* Pilihan Jawaban * */}
+                {currentQ.type === "short_answer" ? (
+                  <div
+                    style={{
+                      marginTop: 18,
+                      padding: "12px 14px",
+                      borderRadius: "10px",
+                      background: "#fffbeb",
+                      border: "1px solid #fef3c7",
+                      color: "#92400e",
+                      fontSize: "11px",
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    Soal isian singkat tidak membutuhkan pilihan ganda. Siswa akan mengetikkan jawaban secara mandiri pada saat ujian dan dinilai manual oleh guru.
+                  </div>
+                ) : (
+                  <div>
+                    <div className="bank-options-head">
+                      <label>Pilihan Jawaban *</label>
+                      <div className="bank-options-stepper">
+                        <span>Jumlah opsi</span>
+                        <button
+                          type="button"
+                          className="bank-step-btn"
+                          title="Kurangi opsi"
+                          disabled={currentQ.options.length <= 2}
+                          onClick={() => {
+                            if (currentQ.options.length <= 2) return;
+                            const next = currentQ.options.slice(0, -1);
+                            const removed = currentQ.options[currentQ.options.length - 1];
+                            updateQuestion(currentQuestionIndex, {
+                              options: next,
+                              correctAnswer: currentQ.correctAnswer === removed.id ? null : currentQ.correctAnswer,
+                              correctAnswers: (currentQ.correctAnswers || []).filter((id) => id !== removed.id),
+                            });
+                          }}
+                        >
+                          −
+                        </button>
+                        <strong style={{ minWidth: 14, textAlign: "center", color: "#17171a" }}>
+                          {currentQ.options.length}
+                        </strong>
+                        <button
+                          type="button"
+                          className="bank-step-btn"
+                          title="Tambah opsi"
+                          disabled={currentQ.options.length >= 6}
+                          onClick={() => {
+                            if (currentQ.options.length >= 6) return;
+                            const id = ["A", "B", "C", "D", "E", "F"].find(
+                              (key) => !currentQ.options.some((o) => o.id === key)
+                            );
+                            if (id) {
+                              updateQuestion(currentQuestionIndex, {
+                                options: [...currentQ.options, { id, label: id, text: "", content: blankDoc() }],
+                              });
+                            }
+                          }}
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="bank-options-list">
+                      {currentQ.options.map((opt, j) => {
+                        const isKey =
+                          currentQ.type === "multi_select"
+                            ? !!currentQ.correctAnswers?.includes(opt.id)
+                            : currentQ.correctAnswer === opt.id;
+                        return (
+                          <div
+                            key={opt.id}
+                            className={`bank-option-row ${isKey ? "is-selected" : ""}`}
+                          >
+                            <span className="bank-option-drag" title="Ubah urutan">
+                              :::
+                            </span>
+                            <input
+                              type={currentQ.type === "multi_select" ? "checkbox" : "radio"}
+                              name={`key-q-${currentQuestionIndex}`}
+                              checked={isKey}
+                              onChange={(e) => {
+                                updateQuestion(
+                                  currentQuestionIndex,
+                                  currentQ.type === "multi_select"
+                                    ? {
+                                        correctAnswers: e.target.checked
+                                          ? [...(currentQ.correctAnswers || []), opt.id]
+                                          : (currentQ.correctAnswers || []).filter((id) => id !== opt.id),
+                                      }
+                                    : { correctAnswer: opt.id }
+                                );
+                              }}
+                              aria-label={`Pilih opsi ${opt.label || String.fromCharCode(65 + j)} sebagai kunci`}
+                              title="Klik untuk menjadikan kunci jawaban"
+                            />
+                            <input
+                              className="bank-option-input"
+                              placeholder={`Tulis pilihan jawaban ${opt.label || String.fromCharCode(65 + j)}...`}
+                              value={opt.text || ""}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                const nextOptions = currentQ.options.map((item, k) =>
+                                  k === j ? { ...item, text: val, content: blankDoc(val) } : item
+                                );
+                                updateQuestion(currentQuestionIndex, { options: nextOptions });
+                              }}
+                            />
+                            {currentQ.options.length > 2 && (
+                              <button
+                                type="button"
+                                className="bank-option-trash"
+                                title="Hapus opsi"
+                                aria-label={`Hapus pilihan ${opt.label || String.fromCharCode(65 + j)}`}
+                                onClick={() => {
+                                  const next = currentQ.options.filter((_, k) => k !== j);
+                                  updateQuestion(currentQuestionIndex, {
+                                    options: next,
+                                    correctAnswer: currentQ.correctAnswer === opt.id ? null : currentQ.correctAnswer,
+                                    correctAnswers: (currentQ.correctAnswers || []).filter((id) => id !== opt.id),
+                                  });
+                                }}
+                              >
+                                <Icon name="trash" size={13} />
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {currentQ.options.length < 6 && (
+                      <button
+                        type="button"
+                        className="bank-add-opt-btn"
+                        onClick={() => {
+                          const id = ["A", "B", "C", "D", "E", "F"].find(
+                            (key) => !currentQ.options.some((o) => o.id === key)
+                          );
+                          if (id) {
+                            updateQuestion(currentQuestionIndex, {
+                              options: [...currentQ.options, { id, label: id, text: "", content: blankDoc() }],
+                            });
+                          }
+                        }}
+                      >
+                        <Icon name="plus" size={12} /> Tambah Opsi
+                      </button>
+                    )}
                   </div>
                 )}
 
-                {/* Strip Penunjuk Nomor Soal & CTA Simbol-Saja */}
-                <div className="bank-nav-strip">
-                  <span style={{ fontSize: "11px", fontWeight: 650, color: "#62626c", marginRight: "4px" }}>
-                    Butir Soal:
-                  </span>
-                  {questions.map((_, idx) => (
-                    <button
-                      key={idx}
-                      type="button"
-                      className={`bank-q-pill ${currentQuestionIndex === idx ? "active" : ""}`}
-                      onClick={() => setCurrentQuestionIndex(idx)}
-                      title={`Pilih nomor ${idx + 1}`}
-                    >
-                      {idx + 1}
-                    </button>
-                  ))}
-                  <MotionButton
+                {/* Footer Actions */}
+                <div className="bank-card-footer">
+                  <button
                     type="button"
-                    className="bank-icon-btn"
-                    title="Tambah butir soal"
-                    aria-label="Tambah butir soal"
+                    className="bank-btn-add-more"
                     onClick={() => {
                       const next = [...questions, newQuestion()];
                       updateQuestions(next);
                       setCurrentQuestionIndex(next.length - 1);
                     }}
                   >
-                    <Icon name="plus" size={14} />
-                  </MotionButton>
-                  <MotionButton
-                    type="button"
-                    className="bank-icon-btn danger"
-                    disabled={questions.length <= 1}
-                    title="Hapus butir soal saat ini"
-                    aria-label="Hapus butir soal saat ini"
-                    onClick={() => {
-                      if (questions.length <= 1) return;
-                      const next = questions.filter((_, idx) => idx !== currentQuestionIndex);
-                      updateQuestions(next);
-                      setCurrentQuestionIndex(Math.max(0, currentQuestionIndex - 1));
-                    }}
-                  >
-                    <Icon name="trash" size={14} />
-                  </MotionButton>
-                </div>
+                    + Simpan & Tambah Soal Lagi
+                  </button>
 
-                {/* Two-Column Layout: Left Editor, Right Live Preview */}
-                <div className="bank-creator-split">
-                  {/* Left Column: Question Editor */}
-                  <div className="staff-form" style={{ gap: 16 }}>
-                    <div className="exam-creator-grid">
-                      <div className="exam-creator-field">
-                        <label>Jenis Soal</label>
-                        <select
-                          value={currentQ.type}
-                          onChange={(e) =>
-                            updateQuestion(currentQuestionIndex, {
-                              type: e.target.value as BankQuestion["type"],
-                            })
-                          }
-                        >
-                          <option value="single_choice">Pilihan tunggal (Auto-grade)</option>
-                          <option value="multi_select">Pilihan jamak (Auto-grade)</option>
-                          <option value="short_answer">Isian singkat (Penilaian manual)</option>
-                        </select>
-                      </div>
-
-                      <div className="exam-creator-field">
-                        <label>Bobot Poin</label>
-                        <input
-                          type="number"
-                          min="1"
-                          max="100"
-                          value={currentQ.points}
-                          onChange={(e) =>
-                            updateQuestion(currentQuestionIndex, {
-                              points: Math.max(1, Number(e.target.value) || 1),
-                            })
-                          }
-                        />
-                      </div>
-                    </div>
-
-                    <div
-                      style={{
-                        fontSize: "11px",
-                        padding: "8px 12px",
-                        borderRadius: "8px",
-                        background: currentQ.type === "short_answer" ? "#fffbeb" : "#eff6ff",
-                        border: "1px solid",
-                        borderColor: currentQ.type === "short_answer" ? "#fef3c7" : "#dbeafe",
-                        color: currentQ.type === "short_answer" ? "#92400e" : "#1e40af",
-                        lineHeight: 1.5,
+                  <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                    <button
+                      type="button"
+                      className="bank-btn-cancel"
+                      onClick={() => {
+                        setEditor(false);
+                        setSelected(null);
+                        setIsNewBank(false);
                       }}
                     >
-                      {currentQ.type === "short_answer"
-                        ? "Penilaian manual: Jawaban berupa teks bebas yang dinilai langsung oleh guru."
-                        : "Penilaian otomatis: Sistem menilai jawaban secara langsung berdasarkan kunci yang dipilih."}
-                    </div>
+                      Batal
+                    </button>
+                    <MotionButton
+                      type="button"
+                      className="bank-btn-save"
+                      aria-label="Lanjutkan ke Pratinjau Siswa →"
+                      onClick={() => setActiveStep(1)}
+                    >
+                      <span>✓</span> Simpan Soal
+                    </MotionButton>
+                  </div>
+                </div>
+              </section>
 
-                    <div className="exam-creator-field">
-                      <label>Pertanyaan Soal #{currentQuestionIndex + 1}</label>
-                      <EquationEditor
-                        label={`Isi soal ${currentQuestionIndex + 1}`}
-                        value={(currentQ.content as JSONContent) || blankDoc()}
-                        onChange={(doc) =>
-                          updateQuestion(currentQuestionIndex, {
-                            content: doc,
-                            questionText: docToText(doc),
-                          })
-                        }
-                      />
+              {/* Kolom Kanan: Pratinjau Soal Siswa */}
+              <aside className="bank-card">
+                <div className="bank-card-head">
+                  <div className="bank-preview-head-row">
+                    <div>
+                      <h3>Pratinjau Soal</h3>
+                      <p>Tampilan soal seperti yang akan dilihat oleh siswa.</p>
                     </div>
-
-                    <div className="exam-creator-field">
-                      <label>Gambar Soal (Opsional)</label>
-                      <input
-                        type="file"
-                        accept="image/png,image/jpeg,image/webp"
-                        onChange={(e) =>
-                          e.target.files?.[0] && void upload(e.target.files[0], currentQuestionIndex)
-                        }
-                      />
-                      {currentQ.imageUrl && (
-                        <div style={{ marginTop: 8, display: "flex", gap: 10, alignItems: "center" }}>
-                          <input
-                            placeholder="Keterangan alternatif gambar (alt)"
-                            value={currentQ.imageAlt || ""}
-                            onChange={(e) =>
-                              updateQuestion(currentQuestionIndex, { imageAlt: e.target.value })
-                            }
-                            style={{ flex: 1 }}
-                          />
-                          <MotionButton
-                            type="button"
-                            className="bank-icon-btn danger"
-                            title="Hapus gambar soal"
-                            aria-label="Hapus gambar soal"
-                            onClick={() =>
-                              updateQuestion(currentQuestionIndex, {
-                                imageUrl: undefined,
-                                imageAlt: undefined,
-                              })
-                            }
-                          >
-                            ×
-                          </MotionButton>
-                        </div>
-                      )}
+                    <div className="bank-device-toggle" role="tablist" aria-label="Pilih tampilan pratinjau">
+                      <button
+                        type="button"
+                        className={`bank-device-btn ${previewDevice === "desktop" ? "active" : ""}`}
+                        title="Tampilan Desktop"
+                        aria-label="Tampilan Desktop"
+                        onClick={() => setPreviewDevice("desktop")}
+                      >
+                        <Icon name="display" size={14} />
+                      </button>
+                      <button
+                        type="button"
+                        className={`bank-device-btn ${previewDevice === "mobile" ? "active" : ""}`}
+                        title="Tampilan Mobile"
+                        aria-label="Tampilan Mobile"
+                        onClick={() => setPreviewDevice("mobile")}
+                      >
+                        <Icon name="phone" size={14} />
+                      </button>
                     </div>
+                  </div>
+                </div>
 
-                    {/* Answer Key & Options Section */}
+                <div className={`bank-student-preview-shell ${previewDevice === "mobile" ? "is-mobile" : ""}`}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                    <span className="bank-preview-tag">
+                      {currentQ.type === "single_choice"
+                        ? "Pilihan Ganda"
+                        : currentQ.type === "multi_select"
+                        ? "Pilihan Jamak"
+                        : "Isian Singkat"}
+                    </span>
+                    <span style={{ fontSize: "11px", fontWeight: 700, color: "#17171a" }}>
+                      {currentQ.points} Poin
+                    </span>
+                  </div>
+
+                  <div style={{ marginBottom: 16, fontSize: "12px", lineHeight: 1.6, color: "#17171a" }}>
+                    <QuestionContent
+                      content={currentQ.content}
+                      text={currentQ.questionText || "Tulis pertanyaan soal di sebelah kiri..."}
+                      imageUrl={currentQ.imageUrl}
+                      imageAlt={currentQ.imageAlt}
+                    />
+                  </div>
+
+                  {currentQ.type === "short_answer" ? (
                     <div style={{ marginTop: 12 }}>
-                      <h4 style={{ fontSize: "12px", margin: "0 0 8px", color: "var(--staff-ink)", fontWeight: 650 }}>
-                        {currentQ.type === "short_answer" ? "Format Jawaban" : "Pilihan Jawaban & Kunci"}
-                      </h4>
-
-                      {currentQ.type === "short_answer" ? (
-                        <div className="staff-note" style={{ margin: 0 }}>
-                          Siswa akan diberikan kolom input isian singkat saat ujian. Jawaban tidak dinilai otomatis oleh sistem.
-                        </div>
-                      ) : (
-                        <div className="staff-options">
-                          {currentQ.options.map((o, j) => (
-                            <div key={o.id} style={{ display: "grid", gap: 8, position: "relative" }}>
-                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                                <label className="staff-check" style={{ cursor: "pointer", fontWeight: 600 }}>
-                                  <input
-                                    type={currentQ.type === "multi_select" ? "checkbox" : "radio"}
-                                    name={`key-q-${currentQuestionIndex}`}
-                                    checked={
-                                      currentQ.type === "multi_select"
-                                        ? !!currentQ.correctAnswers?.includes(o.id)
-                                        : currentQ.correctAnswer === o.id
-                                    }
-                                    onChange={(e) =>
-                                      updateQuestion(
-                                        currentQuestionIndex,
-                                        currentQ.type === "multi_select"
-                                          ? {
-                                              correctAnswers: e.target.checked
-                                                ? [...(currentQ.correctAnswers || []), o.id]
-                                                : (currentQ.correctAnswers || []).filter((id) => id !== o.id),
-                                            }
-                                          : { correctAnswer: o.id }
-                                      )
-                                    }
-                                  />
-                                  Kunci Jawaban ({o.label || String.fromCharCode(65 + j)})
-                                </label>
-
-                                {currentQ.options.length > 2 && (
-                                  <MotionButton
-                                    type="button"
-                                    className="bank-icon-btn danger"
-                                    title={`Hapus pilihan ${o.label || j + 1}`}
-                                    aria-label={`Hapus pilihan ${o.label || j + 1}`}
-                                    onClick={() =>
-                                      updateQuestion(currentQuestionIndex, {
-                                        options: currentQ.options.filter((_, k) => k !== j),
-                                        correctAnswer: currentQ.correctAnswer === o.id ? null : currentQ.correctAnswer,
-                                        correctAnswers: (currentQ.correctAnswers || []).filter((id) => id !== o.id),
-                                      })
-                                    }
-                                  >
-                                    ×
-                                  </MotionButton>
-                                )}
-                              </div>
-
-                              <EquationEditor
-                                label={`Pilihan ${j + 1} soal ${currentQuestionIndex + 1}`}
-                                value={(o.content as JSONContent) || blankDoc(o.text)}
-                                onChange={(doc) => {
-                                  const options: BankOption[] = currentQ.options.map((opt, k) =>
-                                    k === j ? { ...opt, content: doc, text: docToText(doc) } : opt
-                                  );
-                                  updateQuestion(currentQuestionIndex, { options });
-                                }}
-                              />
-
-                              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                                <label className="staff-secondary staff-file" style={{ fontSize: "11px", padding: "6px 12px" }}>
-                                  Gambar pilihan
-                                  <input
-                                    type="file"
-                                    accept="image/png,image/jpeg,image/webp"
-                                    onChange={(e) =>
-                                      e.target.files?.[0] && void upload(e.target.files[0], currentQuestionIndex, j)
-                                    }
-                                  />
-                                </label>
-                                {o.imageUrl && (
-                                  <MotionButton
-                                    type="button"
-                                    className="bank-icon-btn danger"
-                                    title="Hapus gambar pilihan"
-                                    aria-label="Hapus gambar pilihan"
-                                    onClick={() =>
-                                      updateQuestion(currentQuestionIndex, {
-                                        options: currentQ.options.map((opt, k) =>
-                                          k === j ? { ...opt, imageUrl: undefined, imageAlt: undefined } : opt
-                                        ),
-                                      })
-                                    }
-                                  >
-                                    ×
-                                  </MotionButton>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-
-                          {currentQ.options.length < 6 && (
-                            <MotionButton
-                              type="button"
-                              className="staff-secondary"
-                              style={{ justifySelf: "start" }}
-                              onClick={() => {
-                                const id = ["A", "B", "C", "D", "E", "F"].find(
-                                  (key) => !currentQ.options.some((o) => o.id === key)
-                                );
-                                if (id) {
-                                  updateQuestion(currentQuestionIndex, {
-                                    options: [...currentQ.options, { id, label: id, text: "", content: blankDoc() }],
-                                  });
-                                }
-                              }}
-                            >
-                              <Icon name="plus" size={14} /> Tambah pilihan
-                            </MotionButton>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="exam-creator-actions" style={{ marginTop: 24 }}>
-                      <MotionButton
-                        type="button"
-                        className="secondary-button"
-                        onClick={() => {
-                          setEditor(false);
-                          setSelected(null);
-                          setIsNewBank(false);
+                      <input
+                        type="text"
+                        disabled
+                        placeholder="Siswa mengetikkan jawaban di sini..."
+                        style={{
+                          width: "100%",
+                          padding: "10px 14px",
+                          borderRadius: "10px",
+                          border: "1px dashed #d5d4dc",
+                          background: "#fafafc",
+                          fontSize: "11px",
+                          color: "#8c8a94",
                         }}
-                      >
-                        Batal
-                      </MotionButton>
-                      <MotionButton
-                        type="button"
-                        className="primary-button"
-                        onClick={() => setActiveStep(1)}
-                      >
-                        Lanjutkan ke Pratinjau Siswa →
-                      </MotionButton>
+                      />
                     </div>
+                  ) : (
+                    <div className="bank-student-options" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      {currentQ.options.map((opt, oIdx) => {
+                        const isKey =
+                          currentQ.type === "multi_select"
+                            ? currentQ.correctAnswers?.includes(opt.id)
+                            : currentQ.correctAnswer === opt.id;
+                        return (
+                          <div
+                            key={opt.id}
+                            className={`bank-preview-opt ${isKey ? "is-selected" : ""}`}
+                          >
+                            <input
+                              type={currentQ.type === "multi_select" ? "checkbox" : "radio"}
+                              checked={!!isKey}
+                              readOnly
+                            />
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <QuestionContent
+                                content={opt.content}
+                                text={opt.text || `Pilihan ${opt.label || String.fromCharCode(65 + oIdx)}`}
+                                imageUrl={opt.imageUrl}
+                                imageAlt={opt.imageAlt}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </aside>
+            </div>
+          </>
+        )}
+
+        {/* ─── TAHAP 2: PRATINJAU SISWA LENGKAP ───────────────────────── */}
+        {activeStep === 1 && (
+          <div className="bank-card">
+            <h1 id="bank-creator-title" className="bank-card-title">
+              Pratinjau Lembar Soal Siswa
+            </h1>
+            <p className="lead" style={{ margin: "4px 0 20px" }}>
+              Berikut tampilan lengkap seluruh {questions.length} butir soal seperti yang akan dilihat oleh siswa pada saat ujian.
+            </p>
+
+            <div className="bank-full-preview-list">
+              {questions.map((q, idx) => (
+                <section key={idx} className="bank-student-card" style={{ padding: 16 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                    <span style={{ fontWeight: 650, fontSize: "12px" }}>Nomor {idx + 1}</span>
+                    <span style={{ fontSize: "11px", color: "var(--staff-muted)", fontWeight: 600 }}>
+                      {q.points} Poin · {q.type === "short_answer" ? "Penilaian manual" : "Auto-grade"}
+                    </span>
                   </div>
 
-                  {/* Right Column: Live Student Preview */}
-                  <aside className="bank-preview-panel">
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <span className="bank-preview-badge">Pratinjau Siswa · Butir {currentQuestionIndex + 1}</span>
-                      <span style={{ fontSize: "11px", color: "var(--staff-muted)", fontWeight: 650 }}>
-                        {currentQ.points} Poin
-                      </span>
+                  <div className="bank-student-qtext">
+                    <QuestionContent
+                      content={q.content}
+                      text={q.questionText || "(Pertanyaan belum diisi)"}
+                      imageUrl={q.imageUrl}
+                      imageAlt={q.imageAlt}
+                    />
+                  </div>
+
+                  {q.type === "short_answer" ? (
+                    <div style={{ marginTop: 10 }}>
+                      <input
+                        type="text"
+                        disabled
+                        placeholder="Kolom isian siswa..."
+                        style={{
+                          width: "100%",
+                          padding: "8px 12px",
+                          borderRadius: "8px",
+                          border: "1px dashed #d5d4dc",
+                          background: "#f9f8fb",
+                          fontSize: "11px",
+                        }}
+                      />
                     </div>
-
-                    <div className="bank-student-card">
-                      <div className="bank-student-qtext">
-                        <QuestionContent
-                          content={currentQ.content}
-                          text={currentQ.questionText || "Tulis pertanyaan soal di sebelah kiri..."}
-                          imageUrl={currentQ.imageUrl}
-                          imageAlt={currentQ.imageAlt}
-                        />
-                      </div>
-
-                      {currentQ.type === "short_answer" ? (
-                        <div style={{ marginTop: 12 }}>
-                          <label style={{ fontSize: "10px", color: "var(--staff-muted)", display: "block", marginBottom: 4 }}>
-                            Jawaban Siswa:
-                          </label>
-                          <input
-                            type="text"
-                            disabled
-                            placeholder="Siswa mengetikkan jawaban di sini..."
-                            style={{
-                              width: "100%",
-                              padding: "8px 12px",
-                              borderRadius: "8px",
-                              border: "1px dashed #d5d4dc",
-                              background: "#f9f8fb",
-                              fontSize: "11px",
-                            }}
-                          />
-                        </div>
-                      ) : (
-                        <div className="bank-student-options">
-                          {currentQ.options.map((opt, oIdx) => {
-                            const isKey =
-                              currentQ.type === "multi_select"
-                                ? currentQ.correctAnswers?.includes(opt.id)
-                                : currentQ.correctAnswer === opt.id;
-                            return (
-                              <div
-                                key={opt.id}
-                                className={`bank-student-opt ${isKey ? "selected" : ""}`}
+                  ) : (
+                    <div className="bank-student-options" style={{ marginTop: 12 }}>
+                      {q.options.map((o, j) => {
+                        const isKey =
+                          q.type === "multi_select"
+                            ? q.correctAnswers?.includes(o.id)
+                            : q.correctAnswer === o.id;
+                        return (
+                          <div
+                            key={o.id}
+                            className={`bank-student-opt ${isKey ? "selected" : ""}`}
+                          >
+                            <input
+                              type={q.type === "multi_select" ? "checkbox" : "radio"}
+                              checked={!!isKey}
+                              readOnly
+                            />
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <QuestionContent
+                                content={o.content}
+                                text={o.text || `Pilihan ${o.label || String.fromCharCode(65 + j)}`}
+                                imageUrl={o.imageUrl}
+                                imageAlt={o.imageAlt}
+                              />
+                            </div>
+                            {isKey && (
+                              <span
+                                style={{
+                                  fontSize: "10px",
+                                  fontWeight: 700,
+                                  color: "#7867d9",
+                                  textTransform: "uppercase",
+                                }}
                               >
-                                <input
-                                  type={currentQ.type === "multi_select" ? "checkbox" : "radio"}
-                                  checked={!!isKey}
-                                  readOnly
-                                />
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                  <QuestionContent
-                                    content={opt.content}
-                                    text={opt.text || `Pilihan ${opt.label || String.fromCharCode(65 + oIdx)}`}
-                                    imageUrl={opt.imageUrl}
-                                    imageAlt={opt.imageAlt}
-                                  />
-                                </div>
-                                {isKey && (
-                                  <span
-                                    style={{
-                                      fontSize: "10px",
-                                      fontWeight: 700,
-                                      color: "#7867d9",
-                                      letterSpacing: "0.06em",
-                                      textTransform: "uppercase",
-                                    }}
-                                  >
-                                    Kunci
-                                  </span>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
+                                Kunci
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
-                  </aside>
-                </div>
-              </>
-            )}
+                  )}
+                </section>
+              ))}
+            </div>
 
-            {/* ─── TAHAP 2: PRATINJAU SISWA LENGKAP ───────────────────────── */}
-            {activeStep === 1 && (
-              <>
-                <h1 id="bank-creator-title">Pratinjau Lembar Soal Siswa</h1>
-                <p className="lead">
-                  Berikut tampilan lengkap seluruh {questions.length} butir soal seperti yang akan dilihat oleh siswa pada saat ujian.
-                </p>
-
-                <div className="bank-full-preview-list">
-                  {questions.map((q, idx) => (
-                    <section key={idx} className="bank-student-card" style={{ padding: 16 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                        <span style={{ fontWeight: 650, fontSize: "12px" }}>Nomor {idx + 1}</span>
-                        <span style={{ fontSize: "11px", color: "var(--staff-muted)", fontWeight: 600 }}>
-                          {q.points} Poin · {q.type === "short_answer" ? "Penilaian manual" : "Auto-grade"}
-                        </span>
-                      </div>
-
-                      <div className="bank-student-qtext">
-                        <QuestionContent
-                          content={q.content}
-                          text={q.questionText || "(Pertanyaan belum diisi)"}
-                          imageUrl={q.imageUrl}
-                          imageAlt={q.imageAlt}
-                        />
-                      </div>
-
-                      {q.type === "short_answer" ? (
-                        <div style={{ marginTop: 10 }}>
-                          <input
-                            type="text"
-                            disabled
-                            placeholder="Kolom isian siswa..."
-                            style={{
-                              width: "100%",
-                              padding: "8px 12px",
-                              borderRadius: "8px",
-                              border: "1px dashed #d5d4dc",
-                              background: "#f9f8fb",
-                              fontSize: "11px",
-                            }}
-                          />
-                        </div>
-                      ) : (
-                        <div className="bank-student-options" style={{ marginTop: 12 }}>
-                          {q.options.map((o, j) => {
-                            const isKey =
-                              q.type === "multi_select"
-                                ? q.correctAnswers?.includes(o.id)
-                                : q.correctAnswer === o.id;
-                            return (
-                              <div
-                                key={o.id}
-                                className={`bank-student-opt ${isKey ? "selected" : ""}`}
-                              >
-                                <input
-                                  type={q.type === "multi_select" ? "checkbox" : "radio"}
-                                  checked={!!isKey}
-                                  readOnly
-                                />
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                  <QuestionContent
-                                    content={o.content}
-                                    text={o.text || `Pilihan ${o.label || String.fromCharCode(65 + j)}`}
-                                    imageUrl={o.imageUrl}
-                                    imageAlt={o.imageAlt}
-                                  />
-                                </div>
-                                {isKey && (
-                                  <span
-                                    style={{
-                                      fontSize: "10px",
-                                      fontWeight: 700,
-                                      color: "#7867d9",
-                                      textTransform: "uppercase",
-                                    }}
-                                  >
-                                    Kunci
-                                  </span>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </section>
-                  ))}
-                </div>
-
-                <div className="exam-creator-actions" style={{ marginTop: 24 }}>
-                  <MotionButton
-                    type="button"
-                    className="secondary-button"
-                    onClick={() => setActiveStep(0)}
-                  >
-                    ← Kembali ke Buat Soal
-                  </MotionButton>
-                  <MotionButton
-                    type="button"
-                    className="primary-button"
-                    onClick={() => setActiveStep(2)}
-                  >
-                    Lanjutkan ke Konfirmasi Unggah →
-                  </MotionButton>
-                </div>
-              </>
-            )}
-
-            {/* ─── TAHAP 3: KONFIRMASI UNGGAH SOAL ───────────────────────── */}
-            {activeStep === 2 && (
-              <>
-                <h1 id="bank-creator-title">Konfirmasi Unggah Bank Soal</h1>
-                <p className="lead">
-                  Periksa ringkasan soal sebelum disimpan sebagai draf atau diterbitkan langsung ke bank soal.
-                </p>
-
-                <div className="bank-summary-grid">
-                  <div className="bank-summary-stat">
-                    <span>Total Butir Soal</span>
-                    <strong>{questions.length}</strong>
-                  </div>
-                  <div className="bank-summary-stat">
-                    <span>Pilihan Tunggal (Auto)</span>
-                    <strong>{questions.filter((q) => q.type === "single_choice").length}</strong>
-                  </div>
-                  <div className="bank-summary-stat">
-                    <span>Pilihan Jamak (Auto)</span>
-                    <strong>{questions.filter((q) => q.type === "multi_select").length}</strong>
-                  </div>
-                  <div className="bank-summary-stat">
-                    <span>Isian Singkat (Manual)</span>
-                    <strong>{questions.filter((q) => q.type === "short_answer").length}</strong>
-                  </div>
-                  <div className="bank-summary-stat">
-                    <span>Total Bobot Poin</span>
-                    <strong>{questions.reduce((acc, q) => acc + (q.points || 0), 0)}</strong>
-                  </div>
-                </div>
-
-                {/* Validation Warnings */}
-                {(() => {
-                  const emptyQuestions = questions
-                    .map((q, i) => (!q.questionText?.trim() ? i + 1 : null))
-                    .filter(Boolean);
-                  const missingKeys = questions
-                    .map((q, i) =>
-                      q.type === "single_choice" && !q.correctAnswer
-                        ? i + 1
-                        : q.type === "multi_select" && (!q.correctAnswers || !q.correctAnswers.length)
-                        ? i + 1
-                        : null
-                    )
-                    .filter(Boolean);
-
-                  return (
-                    <>
-                      {emptyQuestions.length > 0 && (
-                        <p className="staff-note" style={{ background: "#fff5f5", borderColor: "#fed7d7", color: "#c53030" }}>
-                          Perhatian: Butir nomor {emptyQuestions.join(", ")} belum memiliki isi pertanyaan.
-                        </p>
-                      )}
-                      {missingKeys.length > 0 && (
-                        <p className="staff-note" style={{ background: "#fffaf0", borderColor: "#feebc8", color: "#c05621" }}>
-                          Peringatan: Butir nomor {missingKeys.join(", ")} belum memiliki kunci jawaban yang dipilih.
-                        </p>
-                      )}
-                    </>
-                  );
-                })()}
-
-                <div className="exam-creator-actions" style={{ marginTop: 28 }}>
-                  <MotionButton
-                    type="button"
-                    className="secondary-button"
-                    onClick={() => setActiveStep(1)}
-                  >
-                    ← Kembali ke Pratinjau
-                  </MotionButton>
-
-                  <div style={{ display: "flex", gap: 10, marginLeft: "auto", flexWrap: "wrap" }}>
-                    {!isNewBank && (
-                      <MotionButton
-                        type="button"
-                        className="staff-secondary"
-                        disabled={busy}
-                        onClick={() => setDiscard(true)}
-                      >
-                        Hapus Draf
-                      </MotionButton>
-                    )}
-                    <MotionButton
-                      type="button"
-                      className="secondary-button"
-                      disabled={busy}
-                      onClick={() => void saveDraft(false)}
-                    >
-                      {busy ? "Menyimpan…" : "Simpan Draf"}
-                    </MotionButton>
-                    <MotionButton
-                      type="button"
-                      className="primary-button"
-                      disabled={busy}
-                      onClick={() => void saveDraft(true)}
-                    >
-                      {busy ? "Menyimpan…" : "Simpan ke Bank Soal"}
-                    </MotionButton>
-                  </div>
-                </div>
-              </>
-            )}
+            <div className="exam-creator-actions" style={{ marginTop: 24 }}>
+              <MotionButton
+                type="button"
+                className="secondary-button"
+                onClick={() => setActiveStep(0)}
+              >
+                ← Kembali ke Buat Soal
+              </MotionButton>
+              <MotionButton
+                type="button"
+                className="primary-button"
+                onClick={() => setActiveStep(2)}
+              >
+                Lanjutkan ke Konfirmasi Unggah →
+              </MotionButton>
+            </div>
           </div>
-        </div>
+        )}
+
+        {/* ─── TAHAP 3: KONFIRMASI UNGGAH SOAL ───────────────────────── */}
+        {activeStep === 2 && (
+          <div className="bank-card">
+            <h1 id="bank-creator-title" className="bank-card-title">
+              Konfirmasi Unggah Bank Soal
+            </h1>
+            <p className="lead" style={{ margin: "4px 0 20px" }}>
+              Periksa ringkasan soal sebelum disimpan sebagai draf atau diterbitkan langsung ke bank soal.
+            </p>
+
+            <div className="bank-summary-grid">
+              <div className="bank-summary-stat">
+                <span>Total Butir Soal</span>
+                <strong>{questions.length}</strong>
+              </div>
+              <div className="bank-summary-stat">
+                <span>Pilihan Tunggal (Auto)</span>
+                <strong>{questions.filter((q) => q.type === "single_choice").length}</strong>
+              </div>
+              <div className="bank-summary-stat">
+                <span>Pilihan Jamak (Auto)</span>
+                <strong>{questions.filter((q) => q.type === "multi_select").length}</strong>
+              </div>
+              <div className="bank-summary-stat">
+                <span>Isian Singkat (Manual)</span>
+                <strong>{questions.filter((q) => q.type === "short_answer").length}</strong>
+              </div>
+              <div className="bank-summary-stat">
+                <span>Total Bobot Poin</span>
+                <strong>{questions.reduce((acc, q) => acc + (q.points || 0), 0)}</strong>
+              </div>
+            </div>
+
+            {/* Validation Warnings */}
+            {(() => {
+              const emptyQuestions = questions
+                .map((q, i) => (!q.questionText?.trim() ? i + 1 : null))
+                .filter(Boolean);
+              const missingKeys = questions
+                .map((q, i) =>
+                  q.type === "single_choice" && !q.correctAnswer
+                    ? i + 1
+                    : q.type === "multi_select" && (!q.correctAnswers || !q.correctAnswers.length)
+                    ? i + 1
+                    : null
+                )
+                .filter(Boolean);
+
+              return (
+                <>
+                  {emptyQuestions.length > 0 && (
+                    <p className="staff-note" style={{ background: "#fff5f5", borderColor: "#fed7d7", color: "#c53030" }}>
+                      Perhatian: Butir nomor {emptyQuestions.join(", ")} belum memiliki isi pertanyaan.
+                    </p>
+                  )}
+                  {missingKeys.length > 0 && (
+                    <p className="staff-note" style={{ background: "#fffaf0", borderColor: "#feebc8", color: "#c05621" }}>
+                      Peringatan: Butir nomor {missingKeys.join(", ")} belum memiliki kunci jawaban yang dipilih.
+                    </p>
+                  )}
+                </>
+              );
+            })()}
+
+            <div className="exam-creator-actions" style={{ marginTop: 28 }}>
+              <MotionButton
+                type="button"
+                className="secondary-button"
+                onClick={() => setActiveStep(1)}
+              >
+                ← Kembali ke Pratinjau
+              </MotionButton>
+
+              <div style={{ display: "flex", gap: 10, marginLeft: "auto", flexWrap: "wrap" }}>
+                {!isNewBank && (
+                  <MotionButton
+                    type="button"
+                    className="staff-secondary"
+                    disabled={busy}
+                    onClick={() => setDiscard(true)}
+                  >
+                    Hapus Draf
+                  </MotionButton>
+                )}
+                <MotionButton
+                  type="button"
+                  className="secondary-button"
+                  disabled={busy}
+                  onClick={() => void saveDraft(false)}
+                >
+                  {busy ? "Menyimpan…" : "Simpan Draf"}
+                </MotionButton>
+                <MotionButton
+                  type="button"
+                  className="primary-button"
+                  disabled={busy}
+                  onClick={() => void saveDraft(true)}
+                >
+                  {busy ? "Menyimpan…" : "Simpan ke Bank Soal"}
+                </MotionButton>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Modal Discard Draft */}
         <Dialog open={discard} title="Hapus draf soal?" onClose={() => setDiscard(false)}>
