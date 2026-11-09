@@ -7,7 +7,8 @@
 - CI/CD: Workflow `.github/workflows/deploy.yml` kini hanya terpicu oleh push ke branch `production`; trigger pull request dan branch lain dihapus.
 - CI/CD: Job CI beserta PostgreSQL disposable `eduquas_test` dan kredensial dummy dihapus; workflow kini hanya deploy pada push `production`.
 - Database deploy memakai `backend/.env` yang tersedia di server production lewat `docker-compose.yml`; file kredensial server tidak dibaca atau ditampilkan.
-- Verifikasi workflow: Deploy production sudah mencapai server dan berhenti aman pada guard checksum riwayat migrasi sebelum menjalankan migrasi atau mengaktifkan image baru.
-- Blocker deploy: Nama atau checksum pada tabel `_prisma_migrations` production belum cocok dengan migration files di commit; penyebab spesifik menunggu pemeriksaan read-only terhadap riwayat database production.
+- Verifikasi workflow: Deploy sebelumnya berhenti sebelum `docker compose up`; setelah reset database dan bootstrap manual, pipeline GitHub belum dijalankan ulang.
+- Database production `eduquas.public` telah dikosongkan atas persetujuan eksplisit, lalu schema dibangun kembali dari baseline terverifikasi: 16 tabel aplikasi kosong dan 7 migration tercatat; tidak ada seed demo.
+- Blocker checksum terselesaikan pada database aktif; deploy berikutnya hanya akan lolos jika commit production membawa schema dan migration baseline yang sama.
 - Pemeriksaan target DB: Prisma memakai provider PostgreSQL dan `backend/.env` berisi `DATABASE_URL` PostgreSQL non-local; Compose backend memuat file tersebut tanpa override URL database.
 - Pengamanan runtime: Redis cache dinonaktifkan di Compose, fallback URL typo `DATABASE_zURL` dihapus, dan seed data demo memerlukan opt-in serta ditolak di production.

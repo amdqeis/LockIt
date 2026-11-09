@@ -145,3 +145,8 @@
 - Keputusan: Compose menonaktifkan Redis cache dan menghapus servicenya; deploy memakai `--remove-orphans` agar container Redis lama dilepas setelah deployment berhasil. Backend hanya membaca `DATABASE_URL`, dan seed demo ditolak di production serta memerlukan opt-in eksplisit di lingkungan lain.
 - Alasan: Menjaga satu-satunya penyimpanan data aplikasi tetap PostgreSQL yang diatur oleh `backend/.env`, tanpa membuat datastore atau akun/ujian dummy di production.
 - Ditolak: Menghapus volume media/upload yang bukan database dan menyimpan file aplikasi; menghubungkan proses build ke database production.
+
+### 2026-11-09 — Reset schema PostgreSQL production yang disetujui pengguna
+- Keputusan: Mengosongkan schema `public` pada database `eduquas` secara transaksional, lalu menjalankan `bootstrap-database.mjs` setelah baseline hash cocok; seed demo tidak dijalankan.
+- Alasan: Riwayat/checksum deployment tidak cocok dan migration pertama memerlukan tabel lama (`students`), sehingga replay migration dari schema kosong bukan jalur bootstrap yang valid.
+- Ditolak: Mengubah checksum `_prisma_migrations` secara manual atau menjalankan `migrate reset`; prosedur bootstrap repo menjaga schema saat ini dan mencatat tujuh migration baseline dengan benar.
