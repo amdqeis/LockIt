@@ -1,6 +1,6 @@
 # EduQuas
 
-- Status: Panel Monitoring dan kartu hero Overview telah diperbarui menjadi card terpadu yang menampilkan ujian sedang berlangsung dan ujian yang akan datang secara simultan tanpa tab switcher eksklusif.
-- Hasil: Tab switcher Berlangsung/Persiapan pada Monitoring dihapus; card terpadu memuat dua kolom (Sedang Berlangsung & Akan Datang) dengan aksi buka monitoring/sesi langsung; kartu hero Overview kini menampilkan daftar interaktif kedua kelompok status beserta metriknya.
-- Verifikasi: Type-check dan lint frontend/backend lulus (0 error), mechanical design detector lulus (0 temuan), build produksi kedua workspace 100% sukses, unit test backend lulus (27 tests).
-- Catatan: Perubahan CSS dan komponen menjaga kontras tinggi, hierarki tipografi ringkas, dan kompatibilitas responsif di semua ukuran layar tanpa emoji.
+- Status: Pipeline CI/CD telah dimigrasikan untuk memindahkan seluruh proses build image Docker ke GitHub Actions (GHCR) dengan tag sha immutable dan rotasi log.
+- Hasil: .github/workflows/deploy.yml kini melakukan buildx dan push ke GHCR dengan cache gha, VPS hanya menjalankan pull dan up -d; docker-compose.yml menggunakan referensi image registry dengan log driver 10m/3 files; workflow_dispatch mendukung rollback manual via input image_tag.
+- Verifikasi: Sintaks YAML valid, docker compose config valid dengan substitusi IMAGE_TAG, lint dan type-check frontend dan backend lulus 100% (0 error).
+- Langkah VPS berikutnya: Inisialisasi IMAGE_TAG di .env VPS, deploy rilis baru, lalu jalankan docker builder prune -a -f manual untuk membebaskan cache lama 10 GB.

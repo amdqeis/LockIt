@@ -6,10 +6,10 @@ Use `Caddyfile.example` as a starting point on the existing Caddy server and att
 
 ## First installation on an empty database
 
-The migration history begins with alterations to existing tables and cannot initialize an empty database. Before the first production deployment, create a dedicated empty PostgreSQL database and build the images:
+The migration history begins with alterations to existing tables and cannot initialize an empty database. Before the first production deployment, create a dedicated empty PostgreSQL database and pull the images:
 
 ```sh
-docker compose build
+docker compose pull
 docker compose run --rm --no-deps backend node scripts/bootstrap-database.mjs
 docker compose up -d --wait --wait-timeout 180
 ```

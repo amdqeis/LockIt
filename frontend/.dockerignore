@@ -7,3 +7,5 @@ node_modules
 *.tsbuildinfo
 npm-debug.log*
 .DS_Store
+tests
+*.md

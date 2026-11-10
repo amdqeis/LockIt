@@ -8,11 +8,12 @@ RUN apk add --no-cache curl openssl postgresql16-client
 COPY package.json package-lock.json ./
 RUN npm ci
 
+# Generate Prisma client before copying rest of source for better layer caching
+COPY prisma ./prisma
+RUN npx prisma generate
+
 # Copy source
 COPY . .
-
-# Generate Prisma client
-RUN npx prisma generate
 
 RUN DATABASE_URL="postgresql://build:build@127.0.0.1:5432/build" \
     JWT_ACCESS_SECRET="build-only-access-secret" \

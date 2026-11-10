@@ -1,7 +1,6 @@
 services:
   backend:
-    build:
-      context: ./backend
+    image: ${REGISTRY:-ghcr.io/amdqeis/lockit}/backend:${IMAGE_TAG:-latest}
     container_name: eduquas_backend
     env_file:
       - ./backend/.env
@@ -24,12 +23,16 @@ services:
       timeout: 5s
       retries: 12
       start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - caddy_net
 
   frontend:
-    build:
-      context: ./frontend
+    image: ${REGISTRY:-ghcr.io/amdqeis/lockit}/frontend:${IMAGE_TAG:-latest}
     container_name: eduquas_frontend
     environment:
       NODE_ENV: production
@@ -46,6 +49,11 @@ services:
       timeout: 5s
       retries: 12
       start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - caddy_net
 
