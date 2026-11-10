@@ -96,14 +96,11 @@ jobs:
 
       - name: Deploy production commit
         uses: appleboy/ssh-action@v1.0.3
-        env:
-          DEPLOY_TAG: ${{ steps.deploy_tag.outputs.val }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
-          envs: DEPLOY_TAG
           script_stop: true
           script: |
             set -eu
@@ -111,14 +108,11 @@ jobs:
             git fetch origin production
             git checkout production
             git pull --ff-only origin production
-            if [ "${{ github.event_name }}" = "push" ]; then
-              test "$(git rev-parse HEAD)" = "${{ github.sha }}" || { echo "Production branch moved; deploy stopped."; exit 1; }
-            fi
-            if grep -q '^IMAGE_TAG=' .env 2>/dev/null; then
-              sed -i "s/^IMAGE_TAG=.*/IMAGE_TAG=${DEPLOY_TAG}/" .env
-            else
-              echo "IMAGE_TAG=${DEPLOY_TAG}" >> .env
-            fi
+            test "${{ github.event_name }}" != "push" || test "$(git rev-parse HEAD)" = "${{ github.sha }}" || { echo "Production branch moved; deploy stopped."; exit 1; }
+            DEPLOY_TAG="${{ steps.deploy_tag.outputs.val }}"
+            touch .env
+            sed -i '/^IMAGE_TAG=/d' .env
+            echo "IMAGE_TAG=${DEPLOY_TAG}" >> .env
             docker compose pull
             docker compose run --rm --no-deps backend node scripts/migrate-deploy.mjs
             docker compose up -d --remove-orphans --wait --wait-timeout 180
