@@ -76,7 +76,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     sheet.getCell("A5").value = "Jumlah Soal:";
     sheet.getCell("B5").value = exam._count.questions;
 
-    sheet.getCell("C3").value = "Kelas / Rombel:";
+    sheet.getCell("C3").value = "Kelas:";
     sheet.getCell("D3").value = className;
     sheet.getCell("C4").value = "Kategori Ujian:";
     sheet.getCell("D4").value = examType;

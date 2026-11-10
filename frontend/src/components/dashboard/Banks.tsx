@@ -3,6 +3,7 @@ import { MotionButton } from "@/components/MotionButton";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import type { JSONContent } from "@tiptap/core";
 import { useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { motion, useReducedMotion } from "framer-motion";
 import { Dialog } from "@/components/Dialog";
 import { QuestionContent } from "@/components/QuestionContent";
@@ -55,10 +56,8 @@ export function Banks({ teacherId }: { teacherId: string }) {
     const initial = queryCache.get<{ items: Bank[]; nextCursor: string | null }>("/api/question-banks?limit=25");
     return initial ? initial.data.items : [];
   });
-  const [folder, setFolder] = useState<string | null>(() => searchParams.get("folder") || null);
-  const [folderOpen, setFolderOpen] = useState(false);
+  const [folder, setFolder] = useState<string | null>(() => searchParams.get("subjectId") || searchParams.get("folder") || null);
   const [bankOpen, setBankOpen] = useState(false);
-  const [folderName, setFolderName] = useState("");
   const [bankName, setBankName] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -70,6 +69,10 @@ export function Banks({ teacherId }: { teacherId: string }) {
   const [newBankTitle, setNewBankTitle] = useState("");
   const [newBankSubject, setNewBankSubject] = useState("");
   const [newBankSubjectId, setNewBankSubjectId] = useState("");
+  const [newBankGradeId, setNewBankGradeId] = useState("");
+  const [masterLoading, setMasterLoading] = useState(true);
+  const [masterError, setMasterError] = useState("");
+  const masterRequest = useRef(0);
 
   const [activeStep, setActiveStep] = useState(0);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
@@ -100,17 +103,32 @@ export function Banks({ teacherId }: { teacherId: string }) {
   });
   const listRequest = useRef(0);
 
-  useEffect(() => {
-    let active = true;
-    staffApi<GradeLevel[]>("/api/academic/grade-levels")
-      .then((gls) => {
-        if (active) setGradeLevels(gls);
-      })
-      .catch(() => {});
-    return () => {
-      active = false;
-    };
+  const refreshMaster = useCallback(async () => {
+    const request = ++masterRequest.current;
+    try {
+      const [levels, items] = await Promise.all([
+        staffApi<GradeLevel[]>("/api/academic/grade-levels"),
+        staffApi<Subject[]>("/api/subjects"),
+      ]);
+      if (request !== masterRequest.current) return;
+      setGradeLevels(levels);
+      setSubjects(items);
+      queryCache.set("/api/subjects", items, 300000);
+      setMasterError("");
+    } catch (err) {
+      if (request === masterRequest.current) setMasterError(message(err));
+    } finally {
+      if (request === masterRequest.current) setMasterLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void refreshMaster(), 0);
+    const onFocus = () => { void refreshMaster(); };
+    const requestRef = masterRequest;
+    window.addEventListener("focus", onFocus);
+    return () => { window.clearTimeout(timer); requestRef.current++; window.removeEventListener("focus", onFocus); };
+  }, [refreshMaster]);
 
   const load = useCallback(async (force = false) => {
     const request = ++listRequest.current;
@@ -122,23 +140,19 @@ export function Banks({ teacherId }: { teacherId: string }) {
     if (cursor) params.set("cursor", cursor);
     const banksKey = `/api/question-banks?${params}`;
 
-    const cachedSubjects = queryCache.get<Subject[]>("/api/subjects");
     const cachedBanks = queryCache.get<{ items: Bank[]; nextCursor: string | null }>(banksKey);
-    if ((!cachedSubjects || !cachedBanks) || force) {
+    if (!cachedBanks || force) {
       if (!banks.length) setListLoading(true);
     }
 
     try {
-      const [s, b] = await Promise.all([
-        queryCache.fetch<Subject[]>("/api/subjects", () => staffApi<Subject[]>("/api/subjects"), 300000),
-        queryCache.fetch<{ items: Bank[]; nextCursor: string | null }>(
-          banksKey,
-          () => staffApi<{ items: Bank[]; nextCursor: string | null }>(banksKey),
-          60000
-        ),
-      ]);
+      if (force) queryCache.invalidate(banksKey);
+      const b = await queryCache.fetch<{ items: Bank[]; nextCursor: string | null }>(
+        banksKey,
+        () => staffApi<{ items: Bank[]; nextCursor: string | null }>(banksKey),
+        60000
+      );
       if (request === listRequest.current) {
-        setSubjects(s);
         setBanks(b.items);
         setNextCursor(b.nextCursor);
         setError("");
@@ -152,7 +166,7 @@ export function Banks({ teacherId }: { teacherId: string }) {
 
   useEffect(() => {
     const params = new URLSearchParams();
-    if (folder) params.set("folder", folder);
+    if (folder) params.set("subjectId", folder);
     if (selectedGradeId) params.set("gradeLevelId", selectedGradeId);
     window.history.replaceState(
       window.history.state,
@@ -167,29 +181,18 @@ export function Banks({ teacherId }: { teacherId: string }) {
     };
   }, [folder, selectedGradeId, load]);
 
+  useEffect(() => {
+    if (masterLoading || !selectedGradeId || !folder || folder === "unassigned") return;
+    const subject = subjects.find((item) => item.id === folder);
+    if (!subject || subject.gradeLevelId === selectedGradeId) return;
+    const timer = window.setTimeout(() => { setFolder(null); setCursors([null]); setCursorIndex(0); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [masterLoading, selectedGradeId, folder, subjects]);
+
   function switchFolder(value: string | null) {
     setFolder(value);
     setCursors([null]);
     setCursorIndex(0);
-  }
-
-  async function createFolder(e: FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError("");
-    try {
-      const s = await staffSend<Subject>("/api/subjects", "POST", { name: folderName });
-      queryCache.invalidate("/api/subjects");
-      queryCache.invalidate("/api/question-banks");
-      switchFolder(s.id);
-      setFolderName("");
-      setFolderOpen(false);
-      await load(true);
-    } catch (e) {
-      setError(message(e));
-    } finally {
-      setBusy(false);
-    }
   }
 
   async function removeFolder() {
@@ -203,6 +206,7 @@ export function Banks({ teacherId }: { teacherId: string }) {
       setDeleteFolder(false);
       switchFolder(null);
       setNotice("Mata pelajaran berhasil dihapus.");
+      await refreshMaster();
       await load(true);
     } catch (e) {
       setError(message(e));
@@ -270,7 +274,7 @@ export function Banks({ teacherId }: { teacherId: string }) {
     setIsNewBank(true);
     setIsEditingMeta(true);
     setPreviewDevice("desktop");
-    const initialSubject = subjects[0];
+    const initialSubject = subjects.find((subject) => subject.id === folder && subject.gradeLevelId && (!selectedGradeId || subject.gradeLevelId === selectedGradeId));
     const initialBank: Bank = {
       id: "new-bank",
       title: "",
@@ -283,7 +287,8 @@ export function Banks({ teacherId }: { teacherId: string }) {
     setSelected(initialBank);
     setNewBankTitle("");
     setNewBankSubject(initialSubject?.name || "");
-    setNewBankSubjectId(initialSubject?.id || (subjects.length ? subjects[0].id : "__new__"));
+    setNewBankSubjectId(initialSubject?.id || "");
+    setNewBankGradeId(initialSubject?.gradeLevelId || selectedGradeId);
     setDraftId(null);
     setDraftRevision(0);
     setActiveStep(0);
@@ -303,6 +308,7 @@ export function Banks({ teacherId }: { teacherId: string }) {
       setNewBankTitle(detail.title);
       setNewBankSubject(detail.subject);
       setNewBankSubjectId(detail.subjectId || "");
+      setNewBankGradeId(detail.subjectFolder?.gradeLevelId || subjects.find((subject) => subject.id === detail.subjectId)?.gradeLevelId || "");
       setDraftId(null);
       setDraftRevision(0);
       setActiveStep(0);
@@ -366,41 +372,43 @@ export function Banks({ teacherId }: { teacherId: string }) {
     try {
       let targetBank = selected;
 
-      // Jika membuat bank soal baru langsung dari editor
+      if (!newBankTitle.trim()) {
+        setError("Nama bank soal wajib diisi.");
+        setActiveStep(0);
+        return;
+      }
+
       if (isNewBank) {
-        if (!newBankTitle.trim()) {
-          setError("Nama bank soal wajib diisi.");
-          setBusy(false);
+        const subject = subjects.find((item) => item.id === newBankSubjectId && item.gradeLevelId === newBankGradeId && !item.isArchived && !item.gradeLevel?.isArchived);
+        if (!newBankGradeId || !subject) {
+          setError("Pilih tingkat dan mata pelajaran yang aktif.");
           setActiveStep(0);
           return;
         }
-        if (!newBankSubject.trim()) {
-          setError("Mata pelajaran wajib dipilih atau diisi.");
-          setBusy(false);
-          setActiveStep(0);
-          return;
-        }
-
-        let subjectId = newBankSubjectId && newBankSubjectId !== "__new__" ? newBankSubjectId : null;
-        let subjectName = newBankSubject.trim();
-
-        // Buat subject jika belum ada
-        if (!subjectId) {
-          const createdSubject = await staffSend<Subject>("/api/subjects", "POST", { name: subjectName });
-          subjectId = createdSubject.id;
-          subjectName = createdSubject.name;
-        }
-
-        // Buat QuestionBank
         const createdBank = await staffSend<Bank>("/api/question-banks", "POST", {
           title: newBankTitle.trim(),
-          subject: subjectName,
-          subjectId,
+          subject: subject.name,
+          subjectId: subject.id,
         });
 
         targetBank = createdBank;
         setSelected(createdBank);
         setIsNewBank(false);
+        queryCache.invalidate("/api/question-banks");
+      } else if (newBankTitle.trim() !== selected.title || newBankSubjectId !== (selected.subjectId || "")) {
+        if (newBankSubjectId !== (selected.subjectId || "") && !subjects.some((subject) => subject.id === newBankSubjectId && subject.gradeLevelId === newBankGradeId && !subject.isArchived && !subject.gradeLevel?.isArchived)) {
+          setError("Pilih mata pelajaran yang aktif pada tingkat ini.");
+          setActiveStep(0);
+          return;
+        }
+        const updated = await staffSend<Bank>(`/api/question-banks/${selected.id}`, "PATCH", {
+          revision: selected.revision,
+          title: newBankTitle.trim(),
+          ...(newBankSubjectId !== (selected.subjectId || "") ? { subjectId: newBankSubjectId } : {}),
+        });
+        targetBank = { ...selected, ...updated };
+        setSelected(targetBank);
+        queryCache.invalidate("/api/question-banks");
       }
 
       const content = { questions, bankRevision: targetBank.revision };
@@ -432,6 +440,7 @@ export function Banks({ teacherId }: { teacherId: string }) {
         setSelected(null);
         setEditor(false);
         setNotice("Soal berhasil disimpan ke bank soal.");
+        queryCache.invalidate("/api/question-banks");
         await load();
       } else {
         setNotice("Draf soal berhasil disimpan.");
@@ -551,7 +560,7 @@ export function Banks({ teacherId }: { teacherId: string }) {
           hour: "2-digit",
           minute: "2-digit",
         })
-      : "7 Okt 2026, 10:24";
+      : "Belum disimpan";
 
     return (
       <motion.section
@@ -598,7 +607,7 @@ export function Banks({ teacherId }: { teacherId: string }) {
           <span className="bank-meta-badge">Bank Soal</span>
           <div className="bank-meta-title-row">
             <h1 id="bank-creator-title" className="bank-meta-title">
-              {isNewBank ? (newBankTitle.trim() || "Bank Soal Baru") : selected.title}
+              {newBankTitle.trim() || "Bank Soal Baru"}
             </h1>
             <button
               type="button"
@@ -646,100 +655,40 @@ export function Banks({ teacherId }: { teacherId: string }) {
                   }}
                   placeholder="Contoh: Logika Matematika 1"
                   value={newBankTitle}
-                  onChange={(e) => {
-                    setNewBankTitle(e.target.value);
-                    if (selected) setSelected({ ...selected, title: e.target.value });
-                  }}
+                  onChange={(e) => setNewBankTitle(e.target.value)}
                 />
               </div>
 
-              <div style={{ flex: 1, minWidth: 200 }}>
-                <label
-                  htmlFor="new-bank-subject"
-                  style={{ display: "block", fontSize: "10px", fontWeight: 700, color: "#62626c", marginBottom: 4 }}
-                >
-                  Mata Pelajaran *
-                </label>
-                {subjects.length > 0 ? (
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <select
-                      id="new-bank-subject"
-                      style={{
-                        border: "1px solid #c9c7cf",
-                        borderRadius: "8px",
-                        padding: "6px 10px",
-                        background: "#ffffff",
-                        fontSize: "11px",
-                        fontWeight: 550,
-                        flex: 1,
-                        height: 34,
-                      }}
-                      value={newBankSubjectId}
-                      onChange={(e) => {
-                        const sid = e.target.value;
-                        setNewBankSubjectId(sid);
-                        const found = subjects.find((s) => s.id === sid);
-                        if (found) {
-                          setNewBankSubject(found.name);
-                          if (selected) setSelected({ ...selected, subject: found.name, subjectId: found.id });
-                        }
-                      }}
-                    >
-                      {subjects.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.name}
-                        </option>
-                      ))}
-                      <option value="__new__">+ Tulis mapel baru...</option>
-                    </select>
-                    {newBankSubjectId === "__new__" && (
-                      <input
-                        placeholder="Ketik mapel..."
-                        value={newBankSubject}
-                        onChange={(e) => {
-                          setNewBankSubject(e.target.value);
-                          if (selected) setSelected({ ...selected, subject: e.target.value });
-                        }}
-                        style={{
-                          border: "1px solid #c9c7cf",
-                          borderRadius: "8px",
-                          padding: "6px 10px",
-                          background: "#ffffff",
-                          fontSize: "11px",
-                          flex: 1,
-                          height: 34,
-                        }}
-                      />
-                    )}
-                  </div>
-                ) : (
-                  <input
-                    id="new-bank-subject"
-                    style={{
-                      border: "1px solid #c9c7cf",
-                      borderRadius: "8px",
-                      padding: "6px 12px",
-                      background: "#ffffff",
-                      fontSize: "11px",
-                      width: "100%",
-                      height: 34,
-                    }}
-                    placeholder="Contoh: Matematika"
-                    value={newBankSubject}
-                    onChange={(e) => {
-                      setNewBankSubject(e.target.value);
-                      if (selected) setSelected({ ...selected, subject: e.target.value });
-                    }}
-                  />
-                )}
+              <div className="bank-master-field">
+                <label htmlFor="new-bank-grade">Tingkat *</label>
+                <select id="new-bank-grade" value={newBankGradeId} required disabled={masterLoading || (!isNewBank && !!selected.subjectFolder?.gradeLevelId)} onChange={(e) => { setNewBankGradeId(e.target.value); setNewBankSubjectId(""); setNewBankSubject(""); }}>
+                  <option value="">Pilih tingkat</option>
+                  {newBankGradeId && !gradeLevels.some((grade) => grade.id === newBankGradeId) && <option value={newBankGradeId} disabled>{selected.subjectFolder?.gradeLevel?.name || "Tingkat tidak tersedia"}</option>}
+                  {gradeLevels.filter((grade) => !grade.isArchived).map((grade) => <option key={grade.id} value={grade.id}>{grade.name}</option>)}
+                </select>
               </div>
+              <div className="bank-master-field">
+                <label htmlFor="new-bank-subject">Mata Pelajaran *</label>
+                <select id="new-bank-subject" value={newBankSubjectId} required disabled={masterLoading || !newBankGradeId} onChange={(e) => {
+                  const subject = subjects.find((item) => item.id === e.target.value);
+                  setNewBankSubjectId(e.target.value);
+                  setNewBankSubject(subject?.name || "");
+                }}>
+                  <option value="">Pilih mata pelajaran</option>
+                  {newBankSubjectId && !subjects.some((subject) => subject.id === newBankSubjectId) && <option value={newBankSubjectId} disabled>{newBankSubject || "Mata pelajaran tidak tersedia"} (arsip)</option>}
+                  {subjects.filter((subject) => subject.gradeLevelId === newBankGradeId && !subject.isArchived && !subject.gradeLevel?.isArchived).map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}
+                </select>
+              </div>
+              {masterLoading && <p className="bank-master-note" role="status">Memuat tingkat dan mata pelajaran...</p>}
+              {masterError && <p className="bank-master-note" role="alert">{masterError} <button type="button" className="action-link" onClick={() => void refreshMaster()}>Coba lagi</button></p>}
+              {!masterLoading && !masterError && (!gradeLevels.length || (newBankGradeId && !subjects.some((subject) => subject.gradeLevelId === newBankGradeId && !subject.isArchived))) && <p className="bank-master-note">Belum ada {gradeLevels.length ? "mata pelajaran pada tingkat ini" : "tingkat"}. <Link href={`/dashboard/kelas-mapel${newBankGradeId ? `?gradeLevelId=${encodeURIComponent(newBankGradeId)}` : ""}`} target="_blank" rel="noopener noreferrer">Kelola Kelas &amp; Mapel (tab baru)</Link></p>}
             </div>
           )}
 
           <div className="bank-meta-row">
             <span className="bank-meta-item">
               <Icon name="book" size={13} />
-              {selected.subject || newBankSubject || "Matematika"}
+              {newBankSubject || "Pilih mata pelajaran"}
             </span>
             <span className="bank-meta-item">
               <Icon name="file" size={13} />
@@ -747,7 +696,7 @@ export function Banks({ teacherId }: { teacherId: string }) {
             </span>
             <span className="bank-meta-item">
               <Icon name="clock" size={13} />
-              Diperbarui: {formattedDate}
+              {selected.updatedAt ? `Diperbarui: ${formattedDate}` : formattedDate}
             </span>
           </div>
         </div>
@@ -1474,9 +1423,9 @@ export function Banks({ teacherId }: { teacherId: string }) {
           <p>Susun dan kelola butir soal ujian bersama berdasarkan mata pelajaran.</p>
         </div>
         <div className="staff-action-wrap">
-          <MotionButton className="staff-secondary" onClick={() => setFolderOpen(true)}>
-            <Icon name="plus" size={16} /> Mata pelajaran
-          </MotionButton>
+          <Link className="staff-secondary" href={`/dashboard/kelas-mapel${selectedGradeId ? `?gradeLevelId=${encodeURIComponent(selectedGradeId)}` : ""}`}>
+            <Icon name="plus" size={16} /> Kelola mata pelajaran
+          </Link>
           <label className="staff-secondary staff-file">
             Impor XML
             <input
@@ -1488,7 +1437,7 @@ export function Banks({ teacherId }: { teacherId: string }) {
               }}
             />
           </label>
-          <MotionButton className="staff-primary" onClick={() => startNewQuestionBank()}>
+          <MotionButton className="staff-primary" disabled={masterLoading} onClick={() => startNewQuestionBank()}>
             <Icon name="plus" size={16} /> Buat Soal
           </MotionButton>
         </div>
@@ -1519,7 +1468,7 @@ export function Banks({ teacherId }: { teacherId: string }) {
       </div>
 
       {notice && <p role="status" className="staff-note" style={{ background: "#edfdf5", borderColor: "#c6f6d5", color: "#22543d" }}>{notice}</p>}
-      <ErrorText error={!selected && !folderOpen && !bankOpen && !backup && !moveBank && !deleteFolder && !viewingBank ? error : ""} />
+      <ErrorText error={!selected && !bankOpen && !backup && !moveBank && !deleteFolder && !viewingBank ? error : ""} />
 
       <div className="staff-folder-tabs">
         <MotionButton className={!folder ? "active" : ""} onClick={() => switchFolder(null)}>
@@ -1638,7 +1587,7 @@ export function Banks({ teacherId }: { teacherId: string }) {
           <h3>Belum ada bank soal</h3>
           <p>Mulai susun butir soal pertama Anda untuk pelaksanaan ujian.</p>
           <div style={{ marginTop: 16 }}>
-            <MotionButton className="staff-primary" onClick={() => startNewQuestionBank()}>
+            <MotionButton className="staff-primary" disabled={masterLoading} onClick={() => startNewQuestionBank()}>
               <Icon name="plus" size={16} /> Buat Soal Sekarang
             </MotionButton>
           </div>
@@ -1826,26 +1775,6 @@ export function Banks({ teacherId }: { teacherId: string }) {
             </MotionButton>
           </div>
         </div>
-      </Dialog>
-
-      {/* Dialog Create Folder */}
-      <Dialog open={folderOpen} title="Buat mata pelajaran" onClose={() => setFolderOpen(false)}>
-        <form className="staff-form" onSubmit={createFolder}>
-          <label>
-            Nama mata pelajaran
-            <input
-              autoFocus
-              required
-              maxLength={100}
-              value={folderName}
-              onChange={(e) => setFolderName(e.target.value)}
-            />
-          </label>
-          <ErrorText error={error} />
-          <MotionButton className="staff-primary" disabled={busy}>
-            Simpan
-          </MotionButton>
-        </form>
       </Dialog>
 
       {/* Dialog Create Bank */}

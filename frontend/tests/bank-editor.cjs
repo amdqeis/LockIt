@@ -19,6 +19,7 @@ const executablePath = process.env.CHROMIUM_PATH || '/usr/bin/chromium';
     title: 'Aljabar',
     subject: 'Matematika',
     subjectId: 'subject-1',
+    subjectFolder: { id: 'subject-1', name: 'Matematika', gradeLevelId: 'grade-1', gradeLevel: { id: 'grade-1', name: 'Tingkat X' } },
     revision: 1,
     _count: { questions: 0 },
     questions: [],
@@ -31,8 +32,10 @@ const executablePath = process.env.CHROMIUM_PATH || '/usr/bin/chromium';
     let data = [];
     if (url.pathname === '/api/auth/me') {
       data = { id: 'teacher-1', fullName: 'Guru Uji', email: 'guru@example.invalid', role: 'ADMIN', isActive: true };
+    } else if (url.pathname === '/api/academic/grade-levels') {
+      data = [{ id: 'grade-1', name: 'Tingkat X' }];
     } else if (url.pathname === '/api/subjects') {
-      data = [{ id: 'subject-1', name: 'Matematika', _count: { banks: 1 } }];
+      data = [{ id: 'subject-1', name: 'Matematika', gradeLevelId: 'grade-1', gradeLevel: { id: 'grade-1', name: 'Tingkat X' }, _count: { banks: 1 } }];
     } else if (url.pathname === '/api/question-banks' && req.method() === 'POST') {
       const body = req.postDataJSON();
       data = { id: 'bank-new', title: body.title, subject: body.subject, revision: 1 };
@@ -128,6 +131,7 @@ const executablePath = process.env.CHROMIUM_PATH || '/usr/bin/chromium';
 
     await page.locator('input[type=file][accept^=".xml"]').setInputFiles(target);
     await page.getByRole('dialog', { name: 'Preview impor XML' }).waitFor();
+    await page.getByRole('dialog', { name: 'Preview impor XML' }).getByLabel('Mata pelajaran tujuan').selectOption('subject-1');
     await page.getByRole('button', { name: 'Impor sebagai draf' }).click();
     await page.waitForFunction(() => !!document.querySelector('.exam-creator-entry'));
     assert.equal(imported, true);

@@ -4,6 +4,17 @@ const { chromium } = require('playwright-core');
 
 const origin = process.env.EDUQUAS_TEST_FRONTEND_URL || 'http://localhost:3000';
 const executablePath = process.env.CHROMIUM_PATH || '/usr/bin/chromium';
+function contrast(foreground, background) {
+  const parse = (color) => color.match(/[\d.]+/g).map(Number);
+  const fg = parse(foreground);
+  const bg = parse(background);
+  const alpha = bg[3] ?? 1;
+  const surface = bg.slice(0, 3).map((channel) => channel * alpha + 255 * (1 - alpha));
+  const luminance = (rgb) => rgb.slice(0, 3).map((value) => value / 255).map((value) => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4).reduce((sum, value, index) => sum + value * [0.2126, 0.7152, 0.0722][index], 0);
+  const light = luminance(surface);
+  const ink = luminance(fg);
+  return (Math.max(light, ink) + 0.05) / (Math.min(light, ink) + 0.05);
+}
 const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/a2kAAAAASUVORK5CYII=', 'base64');
 const questions = [
   { id: 'q1', orderIndex: 0, type: 'single_choice', questionText: 'Hitung $x^2$', content: { type: 'doc', content: [{ type: 'text', text: 'Hitung ' }, { type: 'equation', attrs: { latex: `\\frac{${Array.from({ length: 22 }, (_, i) => `x_{${i + 1}}`).join('+')}}{2}` } }] }, imageUrl: '/api/question-banks/media/test', imageAlt: 'Gambar soal', points: 1, options: [{ label: 'AA', text: 'Pilihan $x+1$', imageUrl: '/uploads/exams/test.png' }, { label: 'A', text: 'Pilihan lain' }] },
@@ -18,7 +29,7 @@ async function setup(browser, options = {}) {
   page.setDefaultTimeout(15000);
   const saved = {};
   const items = options.many ? Array.from({ length: 25 }, (_, index) => ({ ...questions[0], id: `many-${index}`, orderIndex: index })) : questions;
-  const state = { locked: false, online: true };
+  const state = { locked: !!options.locked, online: true };
   let submitted = false;
   const end = new Date(Date.now() + 60 * 60 * 1000).toISOString();
   await page.route('**/api/**', route => {
@@ -30,14 +41,15 @@ async function setup(browser, options = {}) {
     if (!state.online && url.pathname.startsWith('/api/exam-session')) return route.abort();
     if (url.pathname === '/api/exam-session/waiting') return route.fulfill({ json: { success: true, data: { student: { id: 'student-1', name: 'Siswa Uji', nisn: '1234567890', status: 'active', isLocked: state.locked }, exam: { id: 'exam-1', title: 'Ujian matematika', accessCode: 'ABC123', status: 'active', durationMinutes: 60, endTime: end, serverTime: now } } } });
     if (url.pathname === '/api/exam-session') return route.fulfill({ json: { success: true, data: { student: { id: 'student-1', name: 'Siswa Uji', nisn: '1234567890', isLocked: false }, exam: { id: 'exam-1', title: 'Ujian matematika', description: 'Persamaan dan gambar', endTime: end, settings: { display_mode: options.mode || 'one_by_one' }, violationPolicy: {} }, questions: items, totalQuestions: items.length, hasMore: false, answers: Object.entries(saved).map(([questionId, selectedOption]) => ({ questionId, selectedOption })), serverTime: now } } });
-    if (url.pathname === '/api/exam-session/answer') { const body = route.request().postDataJSON(); saved[body.questionId] = body.selectedOption; return route.fulfill({ json: { success: true, data: { selectedOption: body.selectedOption } } }); }
+    if (url.pathname === '/api/exam-session/answer') { if (state.locked) return route.fulfill({ status: 423, json: { success: false, error: { code: 'STUDENT_LOCKED', message: 'Ujian terkunci.' } } }); const body = route.request().postDataJSON(); saved[body.questionId] = body.selectedOption; return route.fulfill({ json: { success: true, data: { selectedOption: body.selectedOption } } }); }
     if (url.pathname === '/api/exam-session/heartbeat') return route.fulfill({ json: { success: true, data: { isLocked: state.locked, isExamActive: true, serverTime: now, warning: null } } });
     if (url.pathname === '/api/exam-session/submit') { submitted = true; return route.fulfill({ json: { success: true, data: {} } }); }
     return route.fulfill({ json: { success: true, data: { items: [], nextCursor: null } } });
   });
   await page.route('**/uploads/exams/**', route => route.fulfill({ status: 200, contentType: 'image/png', body: image }));
   await page.goto(`${origin}/exam/session`);
-  await page.getByRole('heading', { name: 'Ujian matematika' }).waitFor();
+  if (options.locked) await page.getByRole('alertdialog', { name: 'Ujian terkunci' }).waitFor();
+  else await page.getByRole('heading', { name: 'Ujian matematika' }).waitFor();
   return { page, context, saved, state, end, isSubmitted: () => submitted };
 }
 
@@ -175,11 +187,17 @@ async function setup(browser, options = {}) {
     await failure.page.waitForTimeout(800);
     failure.state.locked = true;
     await failure.page.evaluate(() => dispatchEvent(new Event('online')));
-    await failure.page.getByRole('heading', { name: 'Sesi terkunci sementara' }).waitFor();
+    const lockScreen = failure.page.getByRole('alertdialog', { name: 'Ujian terkunci' });
+    await lockScreen.waitFor();
     assert.equal(await failure.page.locator('.choice input').first().isDisabled(), true);
+    await failure.page.keyboard.press('Escape');
+    await failure.page.mouse.click(5, 5);
+    assert.equal(await lockScreen.isVisible(), true, 'lock cannot be dismissed');
+    assert.equal(await failure.page.evaluate(() => document.elementFromPoint(5, 5)?.closest('dialog')?.className), 'exam-lock-screen');
+    assert.equal(await failure.page.evaluate(() => document.body.style.overflow), 'hidden');
     failure.state.locked = false;
     await failure.page.evaluate(() => dispatchEvent(new Event('online')));
-    await failure.page.getByRole('heading', { name: 'Sesi terkunci sementara' }).waitFor({ state: 'detached' });
+    await lockScreen.waitFor({ state: 'detached' });
     assert.equal(await failure.page.locator('.choice input').first().isChecked(), true);
     failure.state.online = false;
     await failure.page.evaluate(() => dispatchEvent(new Event('online')));
@@ -192,6 +210,50 @@ async function setup(browser, options = {}) {
     const expected = Math.floor((Date.parse(failure.end) - Date.now()) / 1000);
     assert.ok(Math.abs(Number(seconds.match(/\d+/)?.[0]) - expected) < 5, 'timer follows server end time');
     await failure.context.close();
+    for (const width of [320, 390, 1440]) {
+      const locked = await setup(browser, { locked: true, width });
+      const screen = locked.page.getByRole('alertdialog', { name: 'Ujian terkunci' });
+      assert.equal(await screen.isVisible(), true);
+      const rect = await screen.boundingBox();
+      assert.equal(rect.width, width);
+      const colors = await screen.evaluate((dialog) => ({ foreground: getComputedStyle(dialog.querySelector('p')).color, background: getComputedStyle(dialog, '::backdrop').backgroundColor }));
+      assert.ok(contrast(colors.foreground, colors.background) >= 4.5, 'lock message contrast');
+      assert.equal(await locked.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+      assert.equal(await locked.page.getByText('Waktu ujian tetap berjalan.', { exact: false }).count(), 1);
+      await locked.page.screenshot({ path: `/tmp/eduquas-lock-${width}.png` });
+      await locked.page.reload();
+      await screen.waitFor();
+      locked.state.online = false;
+      await locked.page.evaluate(() => dispatchEvent(new Event('online')));
+      await screen.getByText('Koneksi terputus.', { exact: false }).waitFor();
+      locked.state.online = true;
+      locked.state.locked = false;
+      await locked.page.evaluate(() => dispatchEvent(new Event('online')));
+      await screen.waitFor({ state: 'detached' });
+      await locked.context.close();
+    }
+    const duringConfirm = await setup(browser);
+    await duringConfirm.page.getByRole('button', { name: /Soal 3, belum diisi/ }).click();
+    await duringConfirm.page.getByRole('button', { name: 'Kumpulkan jawaban' }).click();
+    await duringConfirm.page.getByRole('dialog', { name: 'Periksa sebelum mengumpulkan' }).waitFor();
+    duringConfirm.state.locked = true;
+    await duringConfirm.page.evaluate(() => dispatchEvent(new Event('online')));
+    await duringConfirm.page.getByRole('alertdialog', { name: 'Ujian terkunci' }).waitFor();
+    assert.equal(await duringConfirm.page.getByRole('dialog', { name: 'Periksa sebelum mengumpulkan' }).count(), 0);
+    await duringConfirm.context.close();
+    const pending = await setup(browser);
+    await pending.page.locator('.choice input').first().check();
+    pending.state.locked = true;
+    await pending.page.evaluate(() => dispatchEvent(new Event('online')));
+    await pending.page.getByRole('alertdialog', { name: 'Ujian terkunci' }).waitFor();
+    assert.equal(pending.saved.q1, undefined, 'answer remains pending while locked');
+    pending.state.locked = false;
+    await pending.page.evaluate(() => dispatchEvent(new Event('online')));
+    await pending.page.getByRole('alertdialog', { name: 'Ujian terkunci' }).waitFor({ state: 'detached' });
+    await pending.page.waitForFunction(() => document.querySelector('.choice input')?.checked);
+    await pending.page.waitForTimeout(700);
+    assert.equal(pending.saved.q1, 'AA', 'pending answer saves after unlock');
+    await pending.context.close();
     console.log('PASS: responsive navigator, neutral global timer, structured math/media, answer types, autosave, flags, submit, all-at-once, blocked storage, media failure, lock/unlock and reconnect');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

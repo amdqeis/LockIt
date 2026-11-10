@@ -206,13 +206,13 @@ export async function POST(req: NextRequest) {
     const exam = await retrySerializable(() => prisma.$transaction(async (tx) => {
       const selection = parsed.data;
       const classroom = selection.classroomId ? await tx.classroom.findUnique({ where: { id: selection.classroomId }, include: { gradeLevel: true } }) : null;
-      if (selection.classroomId && !classroom) throw new AppError("NOT_FOUND", "Rombel tidak ditemukan", 404);
+      if (selection.classroomId && !classroom) throw new AppError("NOT_FOUND", "Kelas tidak ditemukan", 404);
 
       const subject = selection.subjectId ? await tx.subject.findUnique({ where: { id: selection.subjectId }, include: { gradeLevel: true } }) : null;
       if (selection.subjectId && !subject) throw new AppError("NOT_FOUND", "Mata pelajaran tidak ditemukan", 404);
 
       if (classroom && subject && classroom.gradeLevelId !== subject.gradeLevelId) {
-        throw new AppError("VALIDATION_ERROR", "Rombel dan mata pelajaran harus berada dalam tingkat yang sama.", 400);
+        throw new AppError("VALIDATION_ERROR", "Kelas dan mata pelajaran harus berada dalam tingkat yang sama.", 400);
       }
 
       const bank = selection.bankId ? await tx.questionBank.findUnique({ where: { id: selection.bankId }, include: { questions: { orderBy: { orderIndex: "asc" } }, subjectFolder: true } }) : null;

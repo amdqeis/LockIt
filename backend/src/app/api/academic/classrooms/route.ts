@@ -8,7 +8,7 @@ import { normalizeName } from "@/lib/academic";
 
 const createSchema = z.object({
   gradeLevelId: z.string().min(1, "Tingkat wajib dipilih"),
-  name: z.string().trim().min(1, "Nama rombel tidak boleh kosong").max(50),
+  name: z.string().trim().min(1, "Nama kelas tidak boleh kosong").max(50),
 });
 
 export async function GET(req: NextRequest) {
@@ -40,7 +40,7 @@ export async function GET(req: NextRequest) {
     return successResponse(classrooms);
   } catch (err) {
     if (err instanceof AppError) return errorResponse(err.code, err.message, err.statusCode, err.details);
-    return errorResponse("INTERNAL_SERVER_ERROR", safeErrorMessage(err, "Gagal mengambil daftar rombel"), 500);
+    return errorResponse("INTERNAL_SERVER_ERROR", safeErrorMessage(err, "Gagal mengambil daftar kelas"), 500);
   }
 }
 
@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
     if (!body) return errorResponse("INVALID_BODY", "Request body harus berupa JSON", 400);
 
     const parsed = createSchema.safeParse(body);
-    if (!parsed.success) return errorResponse("VALIDATION_ERROR", "Data rombel tidak valid", 400, parsed.error.flatten().fieldErrors);
+    if (!parsed.success) return errorResponse("VALIDATION_ERROR", "Data kelas tidak valid", 400, parsed.error.flatten().fieldErrors);
 
     const { gradeLevelId } = parsed.data;
     const name = parsed.data.name.trim();
@@ -59,7 +59,7 @@ export async function POST(req: NextRequest) {
 
     const gradeLevel = await prisma.gradeLevel.findUnique({ where: { id: gradeLevelId } });
     if (!gradeLevel) return errorResponse("NOT_FOUND", "Tingkat tidak ditemukan", 404);
-    if (gradeLevel.isArchived) return errorResponse("CONFLICT", "Tingkat yang diarsipkan tidak dapat menerima rombel baru.", 409);
+    if (gradeLevel.isArchived) return errorResponse("CONFLICT", "Tingkat yang diarsipkan tidak dapat menerima kelas baru.", 409);
 
     const existing = await prisma.classroom.findUnique({
       where: {
@@ -79,7 +79,7 @@ export async function POST(req: NextRequest) {
         });
         return successResponse(unarchived, 200);
       }
-      return errorResponse("CONFLICT", `Rombel "${name}" sudah terdaftar pada tingkat tersebut.`, 409);
+      return errorResponse("CONFLICT", `Kelas "${name}" sudah terdaftar pada tingkat tersebut.`, 409);
     }
 
     const created = await prisma.classroom.create({
@@ -98,7 +98,7 @@ export async function POST(req: NextRequest) {
     return successResponse(created, 201);
   } catch (err) {
     if (err instanceof AppError) return errorResponse(err.code, err.message, err.statusCode, err.details);
-    return errorResponse("INTERNAL_SERVER_ERROR", safeErrorMessage(err, "Gagal menambahkan rombel"), 500);
+    return errorResponse("INTERNAL_SERVER_ERROR", safeErrorMessage(err, "Gagal menambahkan kelas"), 500);
   }
 }
 

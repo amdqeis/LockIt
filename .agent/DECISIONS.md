@@ -165,3 +165,8 @@
 - Keputusan: Mengadopsi hierarki Tingkat (`GradeLevel`) → Mata Pelajaran (`Subject`) → Bank Soal (`QuestionBank`), dengan Ujian (`Exam`) terikat ke satu Rombel (`Classroom`) dan satu Mata Pelajaran. Guru dan Admin memiliki akses kolaboratif penuh ke seluruh data; `teacherId` digunakan untuk atribusi pembuat/pengubah. Sesi ujian peserta mengingat nama dan NISN via cookie `studentBrowser` (`GET /api/student-profile`) dengan prefill otomatis yang tetap dapat diedit. Backup & restore dijalankan oleh koordinator asinkron tunggal menggunakan `pg_dump -Fc` / `pg_restore`, proteksi mode pemeliharaan HTTP 503, safety snapshot darurat, pembatalan sesi instan via rotasi `sessionVersion`, serta pencegahan backup saat ada ujian aktif.
 - Alasan: Menghilangkan ambiguitas materi lintas tingkat (misal Matematika X vs XI), memungkinkan kolaborasi guru tanpa sekat kepemilikan kaku, mencegah inkonsistensi data saat backup/restore, dan mempercepat proses masuk ujian siswa tanpa membatasi perbaikan identitas.
 - Ditolak: Menambahkan `gradeLevelId` redundan pada QuestionBank (tingkat diturunkan dari Subject); sistem penugasan izin per-ujian yang rumit; backup otomatis berkala tanpa pengawasan; serta menimpa input siswa saat identitas diedit secara manual.
+
+### 2026-11-10 — Penguncian layar dan jawaban tertunda
+- Keputusan: Status kunci sesi mengendalikan dialog modal browser yang tidak dapat ditutup siswa; antrean jawaban dicoba kembali setelah sinkronisasi menyatakan sesi terbuka.
+- Alasan: Fokus keyboard dan dialog pengumpulan harus mengikuti status kunci, sedangkan jawaban yang belum terkirim harus bertahan saat koneksi atau status berubah.
+- Ditolak: Lapisan visual tanpa pengendalian fokus dan pengiriman ulang jawaban sebelum status sesi diperbarui.

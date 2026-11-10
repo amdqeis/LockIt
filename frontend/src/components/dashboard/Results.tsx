@@ -256,7 +256,7 @@ export function Results() {
         />
         <div className="staff-segment">
           <MotionButton className={mode === "hierarchy" ? "active" : ""} onClick={() => { setMode("hierarchy"); setPage(1); }}>
-            Hierarki Rombel
+            Hierarki Kelas
           </MotionButton>
           <MotionButton className={mode === "list" ? "active" : ""} onClick={() => { setMode("list"); setPage(1); }}>
             Daftar

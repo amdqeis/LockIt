@@ -42,7 +42,7 @@ export function parseLegacyClassName(raw: string): { gradeLevelName: string; cla
 export async function assertGradeLevelNotReferenced(gradeLevelId: string): Promise<void> {
   const classroomCount = await prisma.classroom.count({ where: { gradeLevelId } });
   if (classroomCount > 0) {
-    throw new AppError("CONFLICT", "Tingkat masih memiliki rombel terdaftar. Hapus atau pindahkan rombel terlebih dahulu.", 409);
+    throw new AppError("CONFLICT", "Tingkat masih memiliki kelas terdaftar. Hapus atau pindahkan kelas terlebih dahulu.", 409);
   }
   const subjectCount = await prisma.subject.count({ where: { gradeLevelId } });
   if (subjectCount > 0) {
@@ -53,7 +53,7 @@ export async function assertGradeLevelNotReferenced(gradeLevelId: string): Promi
 export async function assertClassroomNotReferenced(classroomId: string): Promise<void> {
   const examCount = await prisma.exam.count({ where: { classroomId } });
   if (examCount > 0) {
-    throw new AppError("CONFLICT", "Rombel masih digunakan oleh ujian. Arsipkan rombel sebagai gantinya.", 409);
+    throw new AppError("CONFLICT", "Kelas masih digunakan oleh ujian. Arsipkan kelas sebagai gantinya.", 409);
   }
 }
 

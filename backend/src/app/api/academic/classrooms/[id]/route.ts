@@ -25,11 +25,11 @@ export async function GET(req: NextRequest, { params }: Context) {
         _count: { select: { exams: true } },
       },
     });
-    if (!classroom) return errorResponse("NOT_FOUND", "Rombel tidak ditemukan", 404);
+    if (!classroom) return errorResponse("NOT_FOUND", "Kelas tidak ditemukan", 404);
     return successResponse(classroom);
   } catch (err) {
     if (err instanceof AppError) return errorResponse(err.code, err.message, err.statusCode, err.details);
-    return errorResponse("INTERNAL_SERVER_ERROR", safeErrorMessage(err, "Gagal mengambil data rombel"), 500);
+    return errorResponse("INTERNAL_SERVER_ERROR", safeErrorMessage(err, "Gagal mengambil data kelas"), 500);
   }
 }
 
@@ -41,18 +41,18 @@ export async function PUT(req: NextRequest, { params }: Context) {
     if (!body) return errorResponse("INVALID_BODY", "Request body harus berupa JSON", 400);
 
     const parsed = updateSchema.safeParse(body);
-    if (!parsed.success) return errorResponse("VALIDATION_ERROR", "Data rombel tidak valid", 400, parsed.error.flatten().fieldErrors);
+    if (!parsed.success) return errorResponse("VALIDATION_ERROR", "Data kelas tidak valid", 400, parsed.error.flatten().fieldErrors);
 
     const existing = await prisma.classroom.findUnique({
       where: { id },
       include: { _count: { select: { exams: true } } },
     });
-    if (!existing) return errorResponse("NOT_FOUND", "Rombel tidak ditemukan", 404);
+    if (!existing) return errorResponse("NOT_FOUND", "Kelas tidak ditemukan", 404);
 
     const targetGradeLevelId = parsed.data.gradeLevelId ?? existing.gradeLevelId;
     if (parsed.data.gradeLevelId && parsed.data.gradeLevelId !== existing.gradeLevelId) {
       if (existing._count.exams > 0) {
-        return errorResponse("CONFLICT", "Tingkat suatu rombel yang sudah digunakan oleh ujian tidak dapat diubah.", 409);
+        return errorResponse("CONFLICT", "Tingkat suatu kelas yang sudah digunakan oleh ujian tidak dapat diubah.", 409);
       }
       const newGrade = await prisma.gradeLevel.findUnique({ where: { id: parsed.data.gradeLevelId } });
       if (!newGrade) return errorResponse("NOT_FOUND", "Tingkat tujuan tidak ditemukan", 404);
@@ -71,7 +71,7 @@ export async function PUT(req: NextRequest, { params }: Context) {
         },
       });
       if (conflict && conflict.id !== id) {
-        return errorResponse("CONFLICT", `Rombel "${newName}" sudah terdaftar pada tingkat tersebut.`, 409);
+        return errorResponse("CONFLICT", `Kelas "${newName}" sudah terdaftar pada tingkat tersebut.`, 409);
       }
     }
 
@@ -91,7 +91,7 @@ export async function PUT(req: NextRequest, { params }: Context) {
     return successResponse(updated);
   } catch (err) {
     if (err instanceof AppError) return errorResponse(err.code, err.message, err.statusCode, err.details);
-    return errorResponse("INTERNAL_SERVER_ERROR", safeErrorMessage(err, "Gagal memperbarui rombel"), 500);
+    return errorResponse("INTERNAL_SERVER_ERROR", safeErrorMessage(err, "Gagal memperbarui kelas"), 500);
   }
 }
 
@@ -101,7 +101,7 @@ export async function DELETE(req: NextRequest, { params }: Context) {
     const { id } = await params;
 
     const existing = await prisma.classroom.findUnique({ where: { id } });
-    if (!existing) return errorResponse("NOT_FOUND", "Rombel tidak ditemukan", 404);
+    if (!existing) return errorResponse("NOT_FOUND", "Kelas tidak ditemukan", 404);
 
     await assertClassroomNotReferenced(id);
 
@@ -109,7 +109,7 @@ export async function DELETE(req: NextRequest, { params }: Context) {
     return successResponse({ deleted: true });
   } catch (err) {
     if (err instanceof AppError) return errorResponse(err.code, err.message, err.statusCode, err.details);
-    return errorResponse("INTERNAL_SERVER_ERROR", safeErrorMessage(err, "Gagal menghapus rombel"), 500);
+    return errorResponse("INTERNAL_SERVER_ERROR", safeErrorMessage(err, "Gagal menghapus kelas"), 500);
   }
 }
 

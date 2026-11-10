@@ -166,7 +166,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       let classroom = null;
       if (targetClassroomId) {
         classroom = await prisma.classroom.findUnique({ where: { id: targetClassroomId }, include: { gradeLevel: true } });
-        if (!classroom) return errorResponse("NOT_FOUND", "Rombel tidak ditemukan", 404);
+        if (!classroom) return errorResponse("NOT_FOUND", "Kelas tidak ditemukan", 404);
         updateData.classroomId = classroom.id;
         updateData.className = classroom.name;
       } else if (parsed.data.className !== undefined) {
@@ -182,7 +182,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       }
 
       if (classroom && subject && classroom.gradeLevelId !== subject.gradeLevelId) {
-        return errorResponse("VALIDATION_ERROR", "Rombel dan mata pelajaran harus berada dalam tingkat yang sama.", 400);
+        return errorResponse("VALIDATION_ERROR", "Kelas dan mata pelajaran harus berada dalam tingkat yang sama.", 400);
       }
 
       for (const key of ["academicYear", "semester", "category", "categoryNumber", "passingScore"] as const) {

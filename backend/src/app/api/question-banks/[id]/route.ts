@@ -9,7 +9,7 @@ export async function GET(req: NextRequest, { params }: Context) {
   try {
     await bankTeacher(req);
     const { id } = await params;
-    const bank = await prisma.questionBank.findUnique({ where: { id }, include: { questions: { orderBy: { orderIndex: "asc" } }, drafts: { where: { committedAt: null }, orderBy: { updatedAt: "desc" } } } });
+    const bank = await prisma.questionBank.findUnique({ where: { id }, include: { subjectFolder: { include: { gradeLevel: true } }, questions: { orderBy: { orderIndex: "asc" } }, drafts: { where: { committedAt: null }, orderBy: { updatedAt: "desc" } } } });
     return bank ? successResponse(bank) : errorResponse("NOT_FOUND", "Bank soal tidak ditemukan", 404);
   } catch (err) { return bankError(err); }
 }
@@ -26,8 +26,9 @@ export async function PATCH(req: NextRequest, { params }: Context) {
       });
       if (!current) return errorResponse("NOT_FOUND", "Bank soal tidak ditemukan", 404);
 
-      const folder = await prisma.subject.findUnique({ where: { id: data.subjectId } });
+      const folder = await prisma.subject.findUnique({ where: { id: data.subjectId }, include: { gradeLevel: true } });
       if (!folder) return errorResponse("NOT_FOUND", "Mata pelajaran tidak ditemukan", 404);
+      if (!folder.gradeLevelId || folder.isArchived || folder.gradeLevel?.isArchived) return errorResponse("VALIDATION_ERROR", "Pilih mata pelajaran dan tingkat yang aktif.", 400);
 
       if (current.subjectFolder?.gradeLevelId && folder.gradeLevelId && current.subjectFolder.gradeLevelId !== folder.gradeLevelId) {
         return errorResponse("VALIDATION_ERROR", "Pemindahan bank antar-mapel dibatasi dalam tingkat yang sama.", 400);

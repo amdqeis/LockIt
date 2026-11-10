@@ -171,13 +171,13 @@ export async function POST(req: NextRequest) {
       }
 
       const classroom = await prisma.classroom.findUnique({ where: { id: data.classroomId } });
-      if (!classroom) return errorResponse("NOT_FOUND", "Rombel tidak ditemukan", 404);
+      if (!classroom) return errorResponse("NOT_FOUND", "Kelas tidak ditemukan", 404);
 
       const subject = await prisma.subject.findUnique({ where: { id: data.subjectId } });
       if (!subject) return errorResponse("NOT_FOUND", "Mata pelajaran tidak ditemukan", 404);
 
       if (classroom.gradeLevelId !== subject.gradeLevelId) {
-        return errorResponse("VALIDATION_ERROR", "Rombel dan mata pelajaran harus berada dalam tingkat yang sama.", 400);
+        return errorResponse("VALIDATION_ERROR", "Kelas dan mata pelajaran harus berada dalam tingkat yang sama.", 400);
       }
 
       const updated = await prisma.exam.update({

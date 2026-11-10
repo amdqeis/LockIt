@@ -1,8 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { staffApi, staffSend } from "@/lib/staff-api";
+import { queryCache } from "@/lib/data-cache";
 import { Dialog } from "@/components/Dialog";
 import { MotionButton } from "@/components/MotionButton";
 import { ErrorText, Icon, message } from "./Dashboard";
@@ -34,7 +36,7 @@ type Subject = {
   normalizedName: string;
   isArchived: boolean;
   gradeLevel?: { id: string; name: string } | null;
-  _count?: { questionBanks: number; exams: number };
+  _count?: { banks: number; exams: number };
 };
 
 type LegacyMappingReport = {
@@ -66,9 +68,14 @@ type Props = {
 
 export function AcademicManagement({ teacherRole }: Props = {}) {
   void teacherRole;
+  const searchParams = useSearchParams();
   const [gradeLevels, setGradeLevels] = useState<GradeLevel[]>([]);
-  const [selectedGradeId, setSelectedGradeId] = useState<string>("");
-  const [activeTab, setActiveTab] = useState<"classrooms" | "subjects" | "legacy">("classrooms");
+  const [selectedGradeId, setSelectedGradeId] = useState<string>(() => searchParams.get("gradeLevelId") || "");
+  const selectedGradeRef = useRef(selectedGradeId);
+  const [loadedGradeId, setLoadedGradeId] = useState("");
+  const [gradeLoadError, setGradeLoadError] = useState("");
+  const [gradeLoadVersion, setGradeLoadVersion] = useState(0);
+  const [legacyOpen, setLegacyOpen] = useState(false);
 
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
@@ -90,6 +97,9 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
   const [subjectModalOpen, setSubjectModalOpen] = useState(false);
   const [subjectNameInput, setSubjectNameInput] = useState("");
   const [editingSubject, setEditingSubject] = useState<Subject | null>(null);
+  const [newSubjectName, setNewSubjectName] = useState("");
+  const [subjectError, setSubjectError] = useState("");
+  const [subjectBusy, setSubjectBusy] = useState(false);
 
   const [mappingBusy, setMappingBusy] = useState(false);
 
@@ -109,7 +119,7 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
     if (!gradeId) return;
     try {
       const data = await staffApi<Classroom[]>(`/api/academic/classrooms?gradeLevelId=${encodeURIComponent(gradeId)}&includeArchived=true`);
-      setClassrooms(data);
+      if (selectedGradeRef.current === gradeId) setClassrooms(data);
     } catch (err) {
       setError(message(err));
     }
@@ -119,7 +129,7 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
     if (!gradeId) return;
     try {
       const data = await staffApi<Subject[]>(`/api/subjects?gradeLevelId=${encodeURIComponent(gradeId)}&includeArchived=true`);
-      setSubjects(data);
+      if (selectedGradeRef.current === gradeId) setSubjects(data);
     } catch (err) {
       setError(message(err));
     }
@@ -140,7 +150,7 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
       .then((data) => {
         if (!active) return;
         setGradeLevels(data);
-        if (data.length > 0 && !selectedGradeId) {
+        if (data.length > 0 && !data.some((grade) => grade.id === selectedGradeId)) {
           setSelectedGradeId(data[0].id);
         }
       })
@@ -155,6 +165,7 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
 
   useEffect(() => {
     if (!selectedGradeId) return;
+    selectedGradeRef.current = selectedGradeId;
     let active = true;
     Promise.all([
       staffApi<Classroom[]>(`/api/academic/classrooms?gradeLevelId=${encodeURIComponent(selectedGradeId)}&includeArchived=true`),
@@ -164,15 +175,17 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
         if (!active) return;
         setClassrooms(cls);
         setSubjects(subs);
+        setGradeLoadError("");
+        setLoadedGradeId(selectedGradeId);
       })
       .catch((err) => {
-        if (active) setError(message(err));
+        if (active) { setClassrooms([]); setSubjects([]); setGradeLoadError(message(err)); setLoadedGradeId(selectedGradeId); }
       });
     return () => { active = false; };
-  }, [selectedGradeId]);
+  }, [selectedGradeId, gradeLoadVersion]);
 
   useEffect(() => {
-    if (activeTab !== "legacy") return;
+    if (!legacyOpen) return;
     let active = true;
     staffApi<LegacyMappingReport>("/api/academic/legacy-mapping")
       .then((data) => {
@@ -182,9 +195,10 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
         if (active) setError(message(err));
       });
     return () => { active = false; };
-  }, [activeTab]);
+  }, [legacyOpen]);
 
   const selectedGrade = gradeLevels.find(g => g.id === selectedGradeId);
+  const gradeContentLoading = !!selectedGradeId && loadedGradeId !== selectedGradeId;
 
   // Grade CRUD
   async function handleSaveGrade(e: React.FormEvent) {
@@ -198,7 +212,10 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
       } else {
         const created = await staffSend<GradeLevel>("/api/academic/grade-levels", "POST", { name: gradeNameInput.trim() });
         setSuccessNotice(`Tingkat "${gradeNameInput.trim()}" berhasil dibuat.`);
+        selectedGradeRef.current = created.id;
         setSelectedGradeId(created.id);
+        setNewSubjectName("");
+        setSubjectError("");
       }
       setGradeModalOpen(false);
       setGradeNameInput("");
@@ -228,13 +245,13 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
     try {
       if (editingClassroom) {
         await staffSend(`/api/academic/classrooms/${editingClassroom.id}`, "PUT", { name: classroomNameInput.trim() });
-        setSuccessNotice(`Rombel "${classroomNameInput.trim()}" berhasil diperbarui.`);
+        setSuccessNotice(`Kelas "${classroomNameInput.trim()}" berhasil diperbarui.`);
       } else {
         await staffSend("/api/academic/classrooms", "POST", {
           gradeLevelId: selectedGradeId,
           name: classroomNameInput.trim(),
         });
-        setSuccessNotice(`Rombel "${classroomNameInput.trim()}" berhasil ditambahkan.`);
+        setSuccessNotice(`Kelas "${classroomNameInput.trim()}" berhasil ditambahkan.`);
       }
       setClassroomModalOpen(false);
       setClassroomNameInput("");
@@ -249,7 +266,7 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
     setError("");
     try {
       await staffSend(`/api/academic/classrooms/${classroom.id}`, "PUT", { isArchived: !classroom.isArchived });
-      setSuccessNotice(`Rombel "${classroom.name}" berhasil ${classroom.isArchived ? "dipulihkan" : "diarsipkan"}.`);
+      setSuccessNotice(`Kelas "${classroom.name}" berhasil ${classroom.isArchived ? "dipulihkan" : "diarsipkan"}.`);
       if (selectedGradeId) await loadClassrooms(selectedGradeId);
     } catch (err) {
       setError(message(err));
@@ -265,13 +282,8 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
       if (editingSubject) {
         await staffSend(`/api/subjects/${editingSubject.id}`, "PUT", { name: subjectNameInput.trim() });
         setSuccessNotice(`Mata pelajaran "${subjectNameInput.trim()}" berhasil diperbarui.`);
-      } else {
-        await staffSend("/api/subjects", "POST", {
-          name: subjectNameInput.trim(),
-          gradeLevelId: selectedGradeId,
-        });
-        setSuccessNotice(`Mata pelajaran "${subjectNameInput.trim()}" berhasil ditambahkan.`);
       }
+      queryCache.invalidate("/api/subjects");
       setSubjectModalOpen(false);
       setSubjectNameInput("");
       setEditingSubject(null);
@@ -281,10 +293,31 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
     }
   }
 
+  async function handleCreateSubject(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newSubjectName.trim() || !selectedGradeId || subjectBusy || gradeContentLoading) return;
+    const gradeId = selectedGradeId;
+    const name = newSubjectName.trim();
+    setSubjectBusy(true);
+    setSubjectError("");
+    try {
+      await staffSend("/api/subjects", "POST", { name, gradeLevelId: gradeId });
+      queryCache.invalidate("/api/subjects");
+      setNewSubjectName("");
+      setSuccessNotice(`Mata pelajaran "${name}" tersimpan di ${selectedGrade?.name}.`);
+      await loadSubjects(gradeId);
+    } catch (err) {
+      setSubjectError(message(err));
+    } finally {
+      setSubjectBusy(false);
+    }
+  }
+
   async function handleArchiveSubject(subject: Subject) {
     setError("");
     try {
       await staffSend(`/api/subjects/${subject.id}`, "PUT", { isArchived: !subject.isArchived });
+      queryCache.invalidate("/api/subjects");
       setSuccessNotice(`Mata pelajaran "${subject.name}" berhasil ${subject.isArchived ? "dipulihkan" : "diarsipkan"}.`);
       if (selectedGradeId) await loadSubjects(selectedGradeId);
     } catch (err) {
@@ -345,7 +378,7 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
         classroomId: targetClassroomId,
         subjectId: targetSubjectId,
       });
-      setSuccessNotice("Ujian berhasil dipetakan ke rombel dan mata pelajaran.");
+      setSuccessNotice("Ujian berhasil dipetakan ke kelas dan mata pelajaran.");
       await loadLegacyReport();
       if (selectedGradeId) await loadClassrooms(selectedGradeId);
     } catch (err) {
@@ -361,7 +394,7 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
         <div>
           <h2>Kelas & Mata Pelajaran</h2>
           <p className="academic-desc">
-            Kelola master tingkat, rombongan belajar (rombel), dan mata pelajaran sebagai acuan ujian dan bank soal.
+            Kelola master tingkat, kelas, dan mata pelajaran sebagai acuan ujian dan bank soal.
           </p>
         </div>
         <div className="academic-header-actions">
@@ -397,7 +430,8 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
               key={gl.id}
               type="button"
               className={`grade-pill ${gl.id === selectedGradeId ? "active" : ""} ${gl.isArchived ? "archived" : ""}`}
-              onClick={() => setSelectedGradeId(gl.id)}
+              disabled={subjectBusy}
+              onClick={() => { if (gl.id === selectedGradeId) return; selectedGradeRef.current = gl.id; setSelectedGradeId(gl.id); setNewSubjectName(""); setSubjectError(""); setGradeLoadError(""); setSuccessNotice(""); }}
             >
               <span>{gl.name}</span>
               {gl.isArchived && <small>(Arsip)</small>}
@@ -433,44 +467,12 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
         )}
       </div>
 
-      {/* Tabs */}
-      <div className="academic-tabs" role="tablist">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === "classrooms"}
-          className={`academic-tab ${activeTab === "classrooms" ? "active" : ""}`}
-          onClick={() => setActiveTab("classrooms")}
-        >
-          Rombel ({classrooms.length})
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === "subjects"}
-          className={`academic-tab ${activeTab === "subjects" ? "active" : ""}`}
-          onClick={() => setActiveTab("subjects")}
-        >
-          Mata Pelajaran ({subjects.length})
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === "legacy"}
-          className={`academic-tab ${activeTab === "legacy" ? "active" : ""}`}
-          onClick={() => setActiveTab("legacy")}
-        >
-          Perlu Dipetakan {legacyReport && legacyReport.summary.totalUnmapped > 0 ? `(${legacyReport.summary.totalUnmapped})` : ""}
-        </button>
-      </div>
-
-      {/* Tab 1: Rombel */}
-      {activeTab === "classrooms" && (
-        <section className="academic-tab-content" aria-label="Daftar Rombel">
+      {gradeContentLoading ? <p className="staff-note" role="status">Memuat kelas dan mata pelajaran untuk {selectedGrade?.name || "tingkat ini"}...</p> : gradeLoadError ? <p className="staff-error" role="alert">{gradeLoadError} <button className="action-link" type="button" onClick={() => { setLoadedGradeId(""); setGradeLoadError(""); setGradeLoadVersion((version) => version + 1); }}>Coba lagi</button></p> : selectedGrade && <>
+        <section className="academic-tab-content" aria-label="Daftar Kelas">
           <div className="tab-content-head">
             <div>
-              <h3>Rombongan Belajar — {selectedGrade ? selectedGrade.name : "Pilih Tingkat"}</h3>
-              <p>Rombel adalah kelas yang terikat pada tingkat ini. Setiap ujian ditugaskan ke satu rombel.</p>
+              <h3>Daftar Kelas — {selectedGrade ? selectedGrade.name : "Pilih Tingkat"}</h3>
+              <p>Daftar kelas yang terikat pada tingkat ini. Setiap ujian ditugaskan ke satu kelas.</p>
             </div>
             {selectedGrade && (
               <MotionButton
@@ -481,7 +483,7 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
                   setClassroomModalOpen(true);
                 }}
               >
-                <Icon name="plus" size={14} /> Tambah Rombel
+                <Icon name="plus" size={14} /> Tambah Kelas
               </MotionButton>
             )}
           </div>
@@ -524,7 +526,7 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
             ))}
             {classrooms.length === 0 && (
               <div className="academic-empty-state">
-                <p>Belum ada rombel pada tingkat ini.</p>
+                <p>Belum ada kelas pada tingkat ini.</p>
                 {selectedGrade && (
                   <button
                     type="button"
@@ -535,36 +537,29 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
                       setClassroomModalOpen(true);
                     }}
                   >
-                    Tambah Rombel Pertama
+                    Tambah Kelas Pertama
                   </button>
                 )}
               </div>
             )}
           </div>
         </section>
-      )}
-
-      {/* Tab 2: Mata Pelajaran */}
-      {activeTab === "subjects" && (
         <section className="academic-tab-content" aria-label="Daftar Mata Pelajaran">
           <div className="tab-content-head">
             <div>
               <h3>Mata Pelajaran — {selectedGrade ? selectedGrade.name : "Pilih Tingkat"}</h3>
               <p>Mata pelajaran unik per tingkat. Bank soal dan ujian mengacu pada mata pelajaran ini.</p>
             </div>
-            {selectedGrade && (
-              <MotionButton
-                className="staff-primary"
-                onClick={() => {
-                  setEditingSubject(null);
-                  setSubjectNameInput("");
-                  setSubjectModalOpen(true);
-                }}
-              >
-                <Icon name="plus" size={14} /> Tambah Mata Pelajaran
-              </MotionButton>
-            )}
           </div>
+
+          <form className="academic-subject-create" onSubmit={handleCreateSubject}>
+            <div className="academic-subject-field">
+              <label htmlFor="new-subject-name">Nama mata pelajaran untuk {selectedGrade.name}</label>
+              <input id="new-subject-name" className="staff-input" value={newSubjectName} onChange={(e) => { setNewSubjectName(e.target.value); setSubjectError(""); }} placeholder="Contoh: Matematika" maxLength={100} required disabled={subjectBusy} aria-describedby={subjectError ? "new-subject-error" : undefined} />
+              {subjectError && <p id="new-subject-error" className="staff-error" role="alert">{subjectError}</p>}
+            </div>
+            <button className="staff-primary" type="submit" disabled={subjectBusy || !newSubjectName.trim()}>{subjectBusy ? "Menyimpan..." : "Tambah mata pelajaran"}</button>
+          </form>
 
           <div className="academic-list">
             {subjects.map((sub) => (
@@ -575,7 +570,7 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
                     {sub.isArchived && <span className="status-badge archived">Arsip</span>}
                   </div>
                   <div className="academic-item-meta">
-                    <span>{sub._count?.questionBanks ?? 0} bank soal</span>
+                    <span>{sub._count?.banks ?? 0} bank soal</span>
                     <span>·</span>
                     <span>{sub._count?.exams ?? 0} ujian terkait</span>
                   </div>
@@ -611,33 +606,23 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
             {subjects.length === 0 && (
               <div className="academic-empty-state">
                 <p>Belum ada mata pelajaran pada tingkat ini.</p>
-                {selectedGrade && (
-                  <button
-                    type="button"
-                    className="staff-primary-outline"
-                    onClick={() => {
-                      setEditingSubject(null);
-                      setSubjectNameInput("");
-                      setSubjectModalOpen(true);
-                    }}
-                  >
-                    Tambah Mata Pelajaran Pertama
-                  </button>
-                )}
+                <p>Tambahkan mata pelajaran melalui formulir di atas.</p>
               </div>
             )}
           </div>
         </section>
-      )}
+      </>}
 
-      {/* Tab 3: Perlu Dipetakan */}
-      {activeTab === "legacy" && (
+      <button type="button" className="academic-legacy-toggle" aria-expanded={legacyOpen} onClick={() => setLegacyOpen(!legacyOpen)}>
+        {legacyOpen ? "Tutup" : "Buka"} data yang perlu dipetakan {legacyReport && legacyReport.summary.totalUnmapped > 0 ? `(${legacyReport.summary.totalUnmapped})` : ""}
+      </button>
+      {legacyOpen && (
         <section className="academic-tab-content" aria-label="Data Perlu Dipetakan">
           <div className="tab-content-head">
             <div>
               <h3>Data yang Perlu Dipetakan</h3>
               <p>
-                Data mata pelajaran atau ujian terdahulu yang belum terikat ke tingkat atau rombel tertentu.
+                Data mata pelajaran atau ujian terdahulu yang belum terikat ke tingkat atau kelas tertentu.
               </p>
             </div>
             {legacyReport && legacyReport.summary.totalUnmapped > 0 && (
@@ -658,7 +643,7 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
                 <strong>{legacyReport.summary.unmappedSubjectsCount}</strong>
               </div>
               <div className="legacy-summary-card">
-                <small>Ujian Tanpa Rombel/Mapel</small>
+                <small>Ujian Tanpa Kelas/Mapel</small>
                 <strong>{legacyReport.summary.unmappedExamsCount}</strong>
               </div>
             </div>
@@ -705,7 +690,7 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
 
           {/* Unmapped Exams */}
           <div className="legacy-section">
-            <h4>Ujian Tanpa Rombel atau Mata Pelajaran</h4>
+            <h4>Ujian Tanpa Kelas atau Mata Pelajaran</h4>
             <div className="academic-list">
               {legacyReport?.unmappedExams.map((exam) => (
                 <div key={exam.id} className="academic-item-card legacy-card">
@@ -729,7 +714,7 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
                 </div>
               ))}
               {legacyReport?.unmappedExams.length === 0 && (
-                <p className="legacy-clean-notice">Semua ujian sudah terhubung ke rombel dan mata pelajaran.</p>
+                <p className="legacy-clean-notice">Semua ujian sudah terhubung ke kelas dan mata pelajaran.</p>
               )}
             </div>
           </div>
@@ -769,10 +754,10 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
       <Dialog
         open={classroomModalOpen}
         onClose={() => setClassroomModalOpen(false)}
-        title={editingClassroom ? "Ubah Rombel" : `Tambah Rombel — ${selectedGrade?.name}`}
+        title={editingClassroom ? "Ubah Kelas" : `Tambah Kelas — ${selectedGrade?.name}`}
       >
         <form onSubmit={handleSaveClassroom} className="academic-modal-form">
-          <label htmlFor="classroom-name-field">Nama Rombel</label>
+          <label htmlFor="classroom-name-field">Nama Kelas</label>
           <input
             id="classroom-name-field"
             type="text"
@@ -812,6 +797,7 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
             required
             autoFocus
           />
+          <ErrorText error={error} />
           <div className="modal-actions">
             <button type="button" className="staff-secondary" onClick={() => setSubjectModalOpen(false)}>
               Batal
@@ -858,7 +844,7 @@ function LegacyExamMapper({
           setSelectedSubjectId("");
         }}
       >
-        <option value="">Pilih Rombel...</option>
+        <option value="">Pilih Kelas...</option>
         {classrooms.map((c) => (
           <option key={c.id} value={c.id}>
             {c.name}

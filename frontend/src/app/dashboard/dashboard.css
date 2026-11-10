@@ -2464,8 +2464,12 @@ math-field::part(menu-toggle) {
   background: #e0dfeb;
 }
 @media (max-width: 600px) {
+  .bank-stepper { width: 100%; gap: 6px; }
+  .bank-step-item { flex: 1; min-width: 0; gap: 4px; }
+  .bank-step-circle { flex: 0 0 24px; }
   .bank-step-line {
-    width: 24px;
+    flex: 0 0 8px;
+    width: 8px;
   }
 }
 
@@ -4244,6 +4248,23 @@ math-field::part(menu-toggle) {
   flex-direction: column;
   gap: 14px;
 }
+.academic-subject-create {
+  display: flex;
+  align-items: end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.academic-subject-field { flex: 1 1 240px; min-width: 0; }
+.academic-subject-field label,
+.bank-master-field label { display: block; margin-bottom: 5px; color: #45434c; font-size: 11px; font-weight: 650; }
+.academic-subject-field input,
+.bank-master-field select { width: 100%; min-height: 38px; padding: 8px 10px; border: 1px solid #c9c7cf; border-radius: 8px; background: #fff; color: #17171a; font: inherit; }
+.academic-subject-create .staff-error { margin: 6px 0 0; }
+.academic-legacy-toggle { align-self: flex-start; padding: 8px 0; border: 0; background: none; color: #514175; font-weight: 650; text-align: left; }
+.academic-legacy-toggle:hover { text-decoration: underline; }
+.bank-master-field { flex: 1 1 180px; min-width: 0; }
+.bank-master-note { flex-basis: 100%; margin: 2px 0 0; color: #514b5f; font-size: 11px; }
+.bank-master-note a { color: #514175; text-decoration: underline; }
 .tab-content-head {
   display: flex;
   justify-content: space-between;
@@ -4315,6 +4336,12 @@ math-field::part(menu-toggle) {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+@media (max-width: 600px) {
+  .academic-tab-content[aria-label="Daftar Mata Pelajaran"] .academic-item-card { flex-wrap: wrap; align-items: flex-start; }
+  .academic-tab-content[aria-label="Daftar Mata Pelajaran"] .academic-item-main { flex: 1 1 100%; }
+  .academic-tab-content[aria-label="Daftar Mata Pelajaran"] .academic-item-actions { flex-wrap: wrap; }
+  .academic-management .grade-actions { flex-basis: 100%; justify-content: flex-end; }
 }
 .action-link {
   background: none;

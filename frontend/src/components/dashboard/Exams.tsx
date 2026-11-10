@@ -575,7 +575,7 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
                   <p className="lead">
                     {editing
                       ? "Perbarui informasi dasar pelaksanaan ujian."
-                      : "Lengkapi nama ujian, rombel kelas, dan jadwal pelaksanaan."}
+                      : "Lengkapi nama ujian, kelas, dan jadwal pelaksanaan."}
                   </p>
 
                   <div className="exam-creator-field">
@@ -619,7 +619,7 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
                     </div>
 
                     <div className="exam-creator-field">
-                      <label htmlFor="exam-class">Rombel Kelas *</label>
+                      <label htmlFor="exam-class">Kelas *</label>
                       <select
                         id="exam-class"
                         required
@@ -632,7 +632,7 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
                           change("className", cls?.name || "");
                         }}
                       >
-                        <option value="">{form.gradeLevelId ? "-- Pilih Rombel --" : "-- Pilih Tingkat Terlebih Dahulu --"}</option>
+                        <option value="">{form.gradeLevelId ? "-- Pilih Kelas --" : "-- Pilih Tingkat Terlebih Dahulu --"}</option>
                         {classrooms
                           .filter(c => !form.gradeLevelId || c.gradeLevelId === form.gradeLevelId)
                           .map(c => (
@@ -1126,7 +1126,7 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
         <input
           className="staff-search"
           style={{ flex: 1, minWidth: "240px", margin: 0 }}
-          placeholder="Cari nama, rombel, mata pelajaran, atau periode"
+          placeholder="Cari nama, kelas, mata pelajaran, atau periode"
           aria-label="Cari ujian"
           value={filter}
           onChange={e => {
@@ -1140,7 +1140,7 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
             className={viewMode === "hierarchy" ? "active" : ""}
             onClick={() => setViewMode("hierarchy")}
           >
-            Hierarki Rombel
+            Hierarki Kelas
           </MotionButton>
           <MotionButton
             className={viewMode === "flat" ? "active" : ""}
@@ -1191,7 +1191,7 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
         </div>
       </details>
 
-      {/* Render Mode: Hierarki Rombel */}
+      {/* Render Mode: Hierarki Kelas */}
       {viewMode === "hierarchy" ? (
         groupsLoading && !groups.length ? (
           <ExamListSkeleton />
@@ -1327,7 +1327,7 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
       >
         <form onSubmit={handleConfirmDuplicate} className="academic-modal-form">
           <p>
-            Duplikasi ujian <strong>{duplicateModalExam?.title}</strong> ke rombel lain.
+            Duplikasi ujian <strong>{duplicateModalExam?.title}</strong> ke kelas lain.
           </p>
 
           <label htmlFor="dup-title">Judul Ujian Baru</label>
@@ -1339,7 +1339,7 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
             onChange={(e) => setDupTitle(e.target.value)}
           />
 
-          <label htmlFor="dup-classroom">Rombel Tujuan</label>
+          <label htmlFor="dup-classroom">Kelas Tujuan</label>
           <select
             id="dup-classroom"
             required
@@ -1356,7 +1356,7 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
               }
             }}
           >
-            <option value="">-- Pilih Rombel Tujuan --</option>
+            <option value="">-- Pilih Kelas Tujuan --</option>
             {classrooms.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name} {c.gradeLevel ? `· ${c.gradeLevel.name}` : ""}

@@ -25,7 +25,7 @@ export async function POST(
     }
 
     if (exam.status === "draft" && (!exam.classroomId || !exam.subjectId)) {
-      return errorResponse("VALIDATION_ERROR", "Ujian draf harus dilengkapi rombel dan mata pelajaran sebelum dimulai.", 400);
+      return errorResponse("VALIDATION_ERROR", "Ujian draf harus dilengkapi kelas dan mata pelajaran sebelum dimulai.", 400);
     }
 
     if (exam.status !== "draft" && exam.status !== "active") {

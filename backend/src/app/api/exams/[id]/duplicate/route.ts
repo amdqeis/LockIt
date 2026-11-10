@@ -34,7 +34,7 @@ export async function POST(
     let targetClassroom = null;
     if (targetClassroomId) {
       targetClassroom = await prisma.classroom.findUnique({ where: { id: targetClassroomId }, include: { gradeLevel: true } });
-      if (!targetClassroom) return errorResponse("NOT_FOUND", "Rombel tujuan tidak ditemukan", 404);
+      if (!targetClassroom) return errorResponse("NOT_FOUND", "Kelas tujuan tidak ditemukan", 404);
     }
 
     let targetSubject = null;
@@ -51,7 +51,7 @@ export async function POST(
         return errorResponse("VALIDATION_ERROR", "Duplikasi lintas tingkat mewajibkan pemilihan ulang mata pelajaran dan sumber soal dari tingkat yang dituju.", 400);
       }
     } else if (targetClassroom && targetSubject && targetClassroom.gradeLevelId !== targetSubject.gradeLevelId) {
-      return errorResponse("VALIDATION_ERROR", "Rombel dan mata pelajaran harus berada dalam tingkat yang sama.", 400);
+      return errorResponse("VALIDATION_ERROR", "Kelas dan mata pelajaran harus berada dalam tingkat yang sama.", 400);
     }
 
     const resolvedClassName = targetClassroom ? targetClassroom.name : sourceExam.className;

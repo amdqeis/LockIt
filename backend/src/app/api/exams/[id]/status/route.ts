@@ -46,7 +46,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     // Validate state machine transitions
     if (currentStatus === "draft" && nextStatus === "active") {
       if (!exam.classroomId || !exam.subjectId) {
-        return errorResponse("VALIDATION_ERROR", "Ujian draf harus dilengkapi rombel dan mata pelajaran sebelum diaktifkan.", 400);
+        return errorResponse("VALIDATION_ERROR", "Ujian draf harus dilengkapi kelas dan mata pelajaran sebelum diaktifkan.", 400);
       }
       let questionCount = exam._count.questions;
 
