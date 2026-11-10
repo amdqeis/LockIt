@@ -4,16 +4,18 @@ import { MotionButton } from "@/components/MotionButton";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { motion, useReducedMotion } from "framer-motion";
+import { motion, useReducedMotion, LayoutGroup } from "framer-motion";
 import { Dialog } from "@/components/Dialog";
 import { QuestionContent } from "@/components/QuestionContent";
 import { getCurrentAcademicPeriod } from "@/lib/academic-year";
 import { staffApi, staffSend } from "@/lib/staff-api";
 import { queryCache } from "@/lib/data-cache";
+import { motionTokens } from "@/lib/motion";
 import { ExamListSkeleton, ExamQuestionSkeleton } from "@/components/skeletons";
 import type { Question } from "@/lib/api";
 import { ErrorText, Icon, message } from "./Dashboard";
 import type { Bank, Classroom, Exam, GradeLevel, Subject } from "./types";
+import { HierarchyBreadcrumb, HierarchyCard, useHierarchyNavigation } from "./HierarchyNavigation";
 
 type Form = {
   title: string;
@@ -55,6 +57,7 @@ type HierarchicalSubject = {
 type HierarchicalClassroom = {
   classroomId: string | null;
   className: string;
+  classNameMissing?: boolean;
   gradeLevelId: string | null;
   gradeLevelName: string | null;
   totalExams: number;
@@ -124,6 +127,42 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
   const [viewMode, setViewMode] = useState<"hierarchy" | "flat">("hierarchy");
   const [groups, setGroups] = useState<HierarchicalClassroom[]>([]);
   const [groupsLoading, setGroupsLoading] = useState(false);
+  const { selectedGradeId, selectedClassroomId, setSelectedGradeId, setSelectedClassroomId } = useHierarchyNavigation();
+
+  const gradeLevelExamStats = useMemo(() => {
+    const levels = groups.some(g => !g.gradeLevelId) ? [...gradeLevels, { id: "__unmapped__", name: "Perlu dipetakan" }] : gradeLevels;
+    return levels.map((gl) => {
+      const matchingGroups = groups.filter(g => gl.id === "__unmapped__" ? !g.gradeLevelId : g.gradeLevelId === gl.id);
+      matchingGroups.push(...classrooms.filter(c => c.gradeLevelId === gl.id && !matchingGroups.some(g => g.classroomId === c.id))
+        .map(c => ({ classroomId: c.id, className: c.name, gradeLevelId: c.gradeLevelId, gradeLevelName: gl.name, totalExams: 0, activeExams: 0, subjects: [] })));
+      const totalClasses = matchingGroups.length;
+      const totalExams = matchingGroups.reduce((acc, g) => acc + g.totalExams, 0);
+      const activeExams = matchingGroups.reduce((acc, g) => acc + g.activeExams, 0);
+
+      return {
+        ...gl,
+        totalClasses,
+        totalExams,
+        activeExams,
+        classes: matchingGroups,
+      };
+    });
+  }, [gradeLevels, groups, classrooms]);
+
+  const currentGrade = useMemo(() => {
+    if (!selectedGradeId) return null;
+    return gradeLevelExamStats.find((gl) => gl.id === selectedGradeId) || null;
+  }, [gradeLevelExamStats, selectedGradeId]);
+
+  const classesInCurrentGrade = useMemo(() => {
+    if (!currentGrade) return [];
+    return currentGrade.classes;
+  }, [currentGrade]);
+
+  const selectedClassGroup = useMemo(() => {
+    if (!selectedClassroomId) return null;
+    return classesInCurrentGrade.find((g) => (g.classroomId || g.className) === selectedClassroomId) || null;
+  }, [classesInCurrentGrade, selectedClassroomId]);
 
   // Duplicate modal
   const [duplicateModalExam, setDuplicateModalExam] = useState<Exam | null>(null);
@@ -134,7 +173,7 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
 
   const [filters, setFilters] = useState(() => ({
     status: searchParams.get("status") || "",
-    gradeLevelId: searchParams.get("gradeLevelId") || "",
+    gradeLevelId: "",
     subject: searchParams.get("subject") || "",
     className: searchParams.get("className") || "",
     academicYear: searchParams.get("academicYear") || "",
@@ -182,14 +221,25 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
 
   const parameters = useMemo(() => {
     const params = new URLSearchParams({ limit: "25" });
+    if (viewMode === "flat" && selectedClassroomId) {
+      if (classrooms.some(c => c.id === selectedClassroomId)) params.set("classroomId", selectedClassroomId);
+      else {
+        const missingName = groups.some(g => !g.classroomId && g.className === selectedClassroomId && g.gradeLevelId === (selectedGradeId === "__unmapped__" ? null : selectedGradeId) && g.classNameMissing);
+        if (missingName) params.set("missingClassName", "true"); else params.set("className", selectedClassroomId);
+        params.set("unmappedClassroom", "true");
+        if (selectedGradeId === "__unmapped__") params.set("unmappedGrade", "true");
+        else if (selectedGradeId) params.set("gradeLevelId", selectedGradeId);
+      }
+    }
     if (filter.trim()) params.set("search", filter.trim());
     for (const [key, value] of Object.entries(filters)) {
+      if (key === "className" && selectedClassroomId) continue;
       if (value.trim()) params.set(key, value.trim());
     }
     const cursor = cursors[cursorIndex];
     if (cursor) params.set("cursor", cursor);
     return params.toString();
-  }, [filter, filters, cursors, cursorIndex]);
+  }, [filter, filters, cursors, cursorIndex, viewMode, selectedClassroomId, selectedGradeId, classrooms, groups]);
 
   const reload = useCallback(async (force = false) => {
     const request = ++requestNumber.current;
@@ -217,13 +267,14 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
           () => staffApi<{ items: Exam[]; nextCursor: string | null }>(currentKey),
           60000
         ),
-        staffApi<HierarchicalClassroom[]>(`/api/exams/groups?${groupParams}`).catch(() => []),
+        staffApi<HierarchicalClassroom[]>(`/api/exams/groups?${groupParams}`),
       ]);
 
       if (request === requestNumber.current) {
         setShown(data.items);
         setNextCursor(data.nextCursor);
-        setGroups(groupData);
+        const rawGroups = (groupData as { groups?: HierarchicalClassroom[] })?.groups ?? groupData;
+        setGroups(Array.isArray(rawGroups) ? rawGroups : []);
         setError("");
       }
     } catch (e) {
@@ -240,6 +291,13 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
     const url = new URLSearchParams(parameters);
     url.delete("limit");
     url.delete("cursor");
+    url.delete("classroomId");
+    url.delete("unmappedClassroom");
+    url.delete("unmappedGrade");
+    url.delete("missingClassName");
+    if (!filters.className) url.delete("className");
+    if (selectedGradeId) url.set("gradeLevelId", selectedGradeId);
+    if (selectedClassroomId) url.set("classroomId", selectedClassroomId);
     window.history.replaceState(window.history.state, "", `/dashboard/ujian${url.size ? `?${url}` : ""}`);
     const timer = window.setTimeout(() => void reload(), 180);
     const counter = requestNumber;
@@ -247,7 +305,7 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
       window.clearTimeout(timer);
       counter.current++;
     };
-  }, [parameters, reload]);
+  }, [parameters, reload, selectedGradeId, selectedClassroomId, filters.className]);
 
   function setExamFilter(key: keyof typeof filters, value: string) {
     setFilters(current => ({ ...current, [key]: value }));
@@ -1060,12 +1118,12 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
   // Tampilan Daftar Ujian (Normal)
   return (
     <>
-      <div className="staff-section-head">
+      <div className="staff-section-head" style={{ marginBottom: "12px" }}>
         <div>
           <h2>Daftar ujian</h2>
-          <p>Siapkan ujian dan temukan pelaksanaan yang sedang berjalan.</p>
+          <p>Pilih kelas untuk mengatur ujian, soal, dan kode akses pelaksanaan.</p>
         </div>
-        <div className="staff-action-wrap">
+        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
           <MotionButton
             className="staff-primary"
             onClick={() => {
@@ -1097,30 +1155,7 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
       {rolloverNotice && <p role="status" className="staff-note" style={{ background: "#edfdf5", borderColor: "#c6f6d5", color: "#22543d" }}>{rolloverNotice}</p>}
 
       <ErrorText error={error} />
-
-      {/* Grade Selector Filter */}
-      <div className="grade-selector-strip" style={{ marginBottom: "12px" }}>
-        <span className="grade-selector-label">Filter Tingkat:</span>
-        <div className="grade-pills">
-          <button
-            type="button"
-            className={`grade-pill ${!filters.gradeLevelId ? "active" : ""}`}
-            onClick={() => setExamFilter("gradeLevelId", "")}
-          >
-            Semua Tingkat
-          </button>
-          {gradeLevels.map((gl) => (
-            <button
-              key={gl.id}
-              type="button"
-              className={`grade-pill ${gl.id === filters.gradeLevelId ? "active" : ""}`}
-              onClick={() => setExamFilter("gradeLevelId", gl.id)}
-            >
-              {gl.name}
-            </button>
-          ))}
-        </div>
-      </div>
+      <HierarchyBreadcrumb grade={currentGrade?.name} classroom={selectedClassGroup?.className} onRoot={() => setSelectedGradeId(null)} onGrade={() => setSelectedClassroomId(null)} />
 
       <div style={{ display: "flex", gap: "10px", alignItems: "center", marginBottom: "10px", flexWrap: "wrap" }}>
         <input
@@ -1135,20 +1170,42 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
             setCursorIndex(0);
           }}
         />
-        <div className="staff-segment" style={{ margin: 0 }}>
-          <MotionButton
-            className={viewMode === "hierarchy" ? "active" : ""}
-            onClick={() => setViewMode("hierarchy")}
-          >
-            Hierarki Kelas
-          </MotionButton>
-          <MotionButton
-            className={viewMode === "flat" ? "active" : ""}
-            onClick={() => setViewMode("flat")}
-          >
-            Daftar Datar
-          </MotionButton>
-        </div>
+        {selectedClassroomId && <LayoutGroup id="exams-view-mode-tabs">
+          <div className="staff-segment" style={{ margin: 0 }} role="group" aria-label="Tampilan ujian">
+            <motion.button
+              type="button"
+              className={viewMode === "hierarchy" ? "active" : ""}
+              aria-pressed={viewMode === "hierarchy"}
+              whileTap={reduceMotion ? undefined : { scale: 0.96 }}
+              onClick={() => setViewMode("hierarchy")}
+            >
+              {viewMode === "hierarchy" && (
+                <motion.span
+                  layoutId="active-exams-view-mode"
+                  className="staff-segment-thumb"
+                  transition={reduceMotion ? { duration: 0 } : motionTokens.softSpring}
+                />
+              )}
+              <span className="staff-segment-label">Per Kelas</span>
+            </motion.button>
+            <motion.button
+              type="button"
+              className={viewMode === "flat" ? "active" : ""}
+              aria-pressed={viewMode === "flat"}
+              whileTap={reduceMotion ? undefined : { scale: 0.96 }}
+              onClick={() => setViewMode("flat")}
+            >
+              {viewMode === "flat" && (
+                <motion.span
+                  layoutId="active-exams-view-mode"
+                  className="staff-segment-thumb"
+                  transition={reduceMotion ? { duration: 0 } : motionTokens.softSpring}
+                />
+              )}
+              <span className="staff-segment-label">Semua Ujian</span>
+            </motion.button>
+          </div>
+        </LayoutGroup>}
       </div>
 
       <details className="staff-filter-panel">
@@ -1191,72 +1248,204 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
         </div>
       </details>
 
-      {/* Render Mode: Hierarki Kelas */}
-      {viewMode === "hierarchy" ? (
+      {/* Render Mode: Tampilan per Kelas */}
+      <motion.div
+        key={`${viewMode}-${selectedGradeId || "root"}-${selectedClassroomId || "all"}`}
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+        style={{ display: "flex", flexDirection: "column", gap: "10px" }}
+      >
+        {viewMode === "hierarchy" || !selectedClassroomId ? (
         groupsLoading && !groups.length ? (
-          <ExamListSkeleton />
-        ) : groups.length ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: "14px", marginTop: "10px" }}>
-            {groups.map((group) => (
-              <div key={group.classroomId || group.className} className="classroom-group-card">
-                <div className="classroom-group-header">
-                  <div className="classroom-group-title">
-                    <h3>{group.className}</h3>
-                    {group.gradeLevelName && (
-                      <span className="classroom-grade-badge">{group.gradeLevelName}</span>
-                    )}
-                  </div>
-                  <span className="classroom-group-stats">
-                    {group.totalExams} ujian · {group.activeExams} berlangsung
-                  </span>
-                </div>
-
-                <div className="subject-group-list">
-                  {group.subjects.map((sub: HierarchicalSubject) => (
-                    <div key={sub.subjectId || sub.subjectName} className="subject-group-card">
-                      <div className="subject-group-head">
-                        <h4>{sub.subjectName}</h4>
-                        <span className="subject-group-meta">{sub.exams.length} ujian</span>
-                      </div>
-
-                      <div className="hierarchical-exams-list">
-                        {sub.exams.map((exam: Exam) => (
-                          <div key={exam.id} className="hierarchical-exam-item">
-                            <div className="hierarchical-exam-info">
-                              <strong>{exam.title}</strong>
-                              <div className="hierarchical-exam-meta">
-                                <span className="staff-status">
-                                  {{ draft: "Persiapan", active: "Berlangsung", ended: "Selesai", archived: "Diarsipkan" }[exam.status]}
-                                </span>
-                                <span>·</span>
-                                <span>Kode: {exam.accessCode}</span>
-                                <span>·</span>
-                                <span>{exam._count.questions} soal</span>
-                                <span>·</span>
-                                <span>{exam.durationMinutes} menit</span>
-                              </div>
-                            </div>
-                            <div className="staff-row-actions">
-                              <MotionButton onClick={() => void openPreview(exam)}>Preview</MotionButton>
-                              {exam.status === "draft" && <MotionButton onClick={() => editExam(exam)}>Edit</MotionButton>}
-                              <MotionButton onClick={() => openDuplicateModal(exam)}>Duplikasi</MotionButton>
-                              <Link href={`/dashboard/monitoring?exam=${encodeURIComponent(exam.id)}`} className="action-link highlight">
-                                Monitoring
-                              </Link>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
+          <div className="drilldown-grid">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="drilldown-card drilldown-theme-white" style={{ minHeight: "160px", opacity: 0.7 }}>
+                <ExamListSkeleton />
               </div>
             ))}
           </div>
+        ) : !selectedGradeId ? (
+          /* TAHAP 1: PILIHAN TINGKATAN (STYLE OVERVIEW CARDS) */
+          <div>
+            <div className="drilldown-grid">
+              {gradeLevelExamStats.map((gl, index) => <HierarchyCard key={gl.id} index={index} name={gl.id === "__unmapped__" ? gl.name : `Tingkat ${gl.name}`} count={`${gl.totalExams} ujian`} detail={`${gl.totalClasses} kelas · ${gl.activeExams} berlangsung`} onClick={() => setSelectedGradeId(gl.id)} />)}
+            </div>
+            {gradeLevelExamStats.length === 0 && (
+              <div className="staff-empty">
+                <h3>Belum ada tingkatan</h3>
+                <p>Tambahkan tingkatan terlebih dahulu di menu Kelas &amp; Mapel.</p>
+              </div>
+            )}
+          </div>
+        ) : !selectedClassGroup ? (
+          /* TAHAP 2: PILIHAN KELAS DI TINGKAT TERPILIH */
+          <div style={{ display: "flex", flexDirection: "column", gap: "14px", marginTop: "10px" }}>
+            <div className="class-detail-banner">
+              <div className="class-detail-info">
+                <h3>Pilihan Kelas · Tingkat {currentGrade?.name}</h3>
+                <p>
+                  {classesInCurrentGrade.length} Kelas terdaftar · {currentGrade?.totalExams || 0} Ujian · {currentGrade?.activeExams || 0} Sedang aktif
+                </p>
+              </div>
+              <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                <MotionButton
+                  className="staff-secondary"
+                  onClick={() => setSelectedGradeId(null)}
+                >
+                  ← Kembali ke Pilihan Tingkat
+                </MotionButton>
+              </div>
+            </div>
+
+            <div className="class-box-grid">
+              {classesInCurrentGrade.map((group) => {
+                const boxKey = group.classroomId || group.className;
+                const subjectNames = group.subjects.map((s) => s.subjectName).filter(Boolean);
+                return (
+                  <motion.div
+                    key={boxKey}
+                    className="class-box-card"
+                    role="button"
+                    tabIndex={0}
+                    whileHover={reduceMotion ? undefined : { y: -2 }}
+                    whileTap={reduceMotion ? undefined : { scale: 0.985 }}
+                    transition={motionTokens.softSpring}
+                    onClick={() => setSelectedClassroomId(boxKey)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setSelectedClassroomId(boxKey);
+                      }
+                    }}
+                  >
+                    <div className="class-box-top">
+                      <div>
+                        <h3 className="class-box-name">{group.className}</h3>
+                        <p style={{ fontSize: "11px", color: "var(--staff-muted)", margin: "2px 0 0" }}>
+                          {subjectNames.length > 0 ? subjectNames.slice(0, 3).join(", ") : "Mata pelajaran"}
+                          {subjectNames.length > 3 ? ` +${subjectNames.length - 3}` : ""}
+                        </p>
+                      </div>
+                      <span className="class-box-badge">Tingkat {currentGrade?.name}</span>
+                    </div>
+
+                    <div className="class-box-stats">
+                      <div className="class-box-stat-item">
+                        <span className="class-box-stat-label">Total Ujian</span>
+                        <span className="class-box-stat-val">{group.totalExams} Ujian</span>
+                      </div>
+                      <div className="class-box-stat-item">
+                        <span className="class-box-stat-label">Sedang Aktif</span>
+                        <span className="class-box-stat-val">{group.activeExams} Berlangsung</span>
+                      </div>
+                      <div className="class-box-stat-item">
+                        <span className="class-box-stat-label">Mata Pelajaran</span>
+                        <span className="class-box-stat-val">{group.subjects.length} Mapel</span>
+                      </div>
+                      <div className="class-box-stat-item">
+                        <span className="class-box-stat-label">Status</span>
+                        <span className="class-box-stat-val">{group.activeExams > 0 ? "Aktif" : "Tersedia"}</span>
+                      </div>
+                    </div>
+
+                    <div className="class-box-footer">
+                      <span>Buka Ujian Kelas</span>
+                      <span>→</span>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </div>
+            {classesInCurrentGrade.length === 0 && (
+              <div className="staff-empty">
+                <h3>Belum ada kelas atau ujian di Tingkat {currentGrade?.name}</h3>
+                <p>Tambahkan kelas atau buat ujian pertama untuk tingkat ini.</p>
+              </div>
+            )}
+          </div>
         ) : (
-          <div className="staff-empty">
-            <h3>{filter ? "Ujian tidak ditemukan" : "Belum ada ujian"}</h3>
-            <p>{filter ? "Coba kata pencarian lain." : "Buat ujian untuk mulai mengatur peserta dan soal."}</p>
+          /* TAHAP 3: DETAIL UJIAN DI KELAS TERPILIH */
+          <div style={{ display: "flex", flexDirection: "column", gap: "14px", marginTop: "10px" }}>
+            <div className="class-detail-banner">
+              <div className="class-detail-info">
+                <h3>Ujian Kelas {selectedClassGroup.className}</h3>
+                <p>
+                  Tingkat {currentGrade?.name || selectedClassGroup.gradeLevelName || "—"} ·{" "}
+                  {selectedClassGroup.totalExams} Ujian · {selectedClassGroup.activeExams} Berlangsung
+                </p>
+              </div>
+              <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                <MotionButton
+                  className="staff-primary"
+                  onClick={() => {
+                    setError("");
+                    setEditing(null);
+                    setReplaceQuestions(false);
+                    const targetClass = classrooms.find(
+                      (c) => c.name === selectedClassGroup.className || c.id === selectedClassGroup.classroomId
+                    );
+                    setForm({
+                      ...initial,
+                      classroomId: targetClass?.id || "",
+                      className: selectedClassGroup.className,
+                      gradeLevelId: targetClass?.gradeLevelId || selectedClassGroup.gradeLevelId || "",
+                    });
+                    setActiveStep(0);
+                    setIsCreating(true);
+                  }}
+                >
+                  <Icon name="plus" size={14} /> Buat Ujian di Kelas Ini
+                </MotionButton>
+                <MotionButton
+                  className="staff-secondary"
+                  onClick={() => setSelectedClassroomId(null)}
+                >
+                  ← Kembali ke Daftar Kelas
+                </MotionButton>
+              </div>
+            </div>
+
+            <div className="subject-group-list">
+              {!selectedClassGroup.subjects.length && <div className="staff-empty"><h3>Belum ada ujian di kelas ini</h3><p>Buat ujian untuk mulai mengatur soal dan jadwal.</p></div>}
+              {selectedClassGroup.subjects.map((sub: HierarchicalSubject) => (
+                <div key={sub.subjectId || sub.subjectName} className="subject-group-card">
+                  <div className="subject-group-head">
+                    <h4>{sub.subjectName}</h4>
+                    <span className="subject-group-meta">{sub.exams.length} ujian</span>
+                  </div>
+
+                  <div className="hierarchical-exams-list">
+                    {sub.exams.map((exam: Exam) => (
+                      <div key={exam.id} className="hierarchical-exam-item">
+                        <div className="hierarchical-exam-info">
+                          <strong>{exam.title}</strong>
+                          <div className="hierarchical-exam-meta">
+                            <span className="staff-status">
+                              {{ draft: "Persiapan", active: "Berlangsung", ended: "Selesai", archived: "Diarsipkan" }[exam.status]}
+                            </span>
+                            <span>·</span>
+                            <span>Kode: {exam.accessCode}</span>
+                            <span>·</span>
+                            <span>{exam._count.questions} soal</span>
+                            <span>·</span>
+                            <span>{exam.durationMinutes} menit</span>
+                          </div>
+                        </div>
+                        <div className="staff-row-actions">
+                          <MotionButton onClick={() => void openPreview(exam)}>Preview</MotionButton>
+                          {exam.status === "draft" && <MotionButton onClick={() => editExam(exam)}>Edit</MotionButton>}
+                          <MotionButton onClick={() => openDuplicateModal(exam)}>Duplikasi</MotionButton>
+                          <Link href={`/dashboard/monitoring?exam=${encodeURIComponent(exam.id)}&gradeLevelId=${encodeURIComponent(selectedGradeId)}&classroomId=${encodeURIComponent(selectedClassroomId)}`} className="action-link highlight">
+                            Monitoring
+                          </Link>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )
       ) : (
@@ -1318,6 +1507,7 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
           </div>
         )
       )}
+      </motion.div>
 
       {/* Modal: Duplikasi Ujian */}
       <Dialog

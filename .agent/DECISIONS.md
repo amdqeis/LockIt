@@ -170,3 +170,28 @@
 - Keputusan: Status kunci sesi mengendalikan dialog modal browser yang tidak dapat ditutup siswa; antrean jawaban dicoba kembali setelah sinkronisasi menyatakan sesi terbuka.
 - Alasan: Fokus keyboard dan dialog pengumpulan harus mengikuti status kunci, sedangkan jawaban yang belum terkirim harus bertahan saat koneksi atau status berubah.
 - Ditolak: Lapisan visual tanpa pengendalian fokus dan pengiriman ulang jawaban sebelum status sesi diperbarui.
+
+### 2026-11-10 — Segmented capsule tingkat, layout cards overview, dan modal mata pelajaran
+- Keputusan: Mengganti filter teks tingkat dengan segmented capsule switcher (wadah kapsul putih rounded-full dengan tombol aktif hitam pekat sesuai referensi visual); menyusun layout Kelas & Mata Pelajaran dengan 4 kartu metrik statistik (Total Kelas, Mata Pelajaran, Bank Soal, Ujian Terkait) dan grid 2 kolom berdampingan ala Overview; mengganti form inline mata pelajaran dengan tombol aksi primer "+ Tambah Mata Pelajaran" yang membuka dialog pop-up modal; serta mengganti frasa teknis "Hierarki Kelas" di seluruh dashboard dengan istilah umum sekolah ("Per Kelas", "Semua Ujian").
+- Alasan: Menghilangkan kebingungan pengguna terhadap form inline yang tampak terkunci, pemilihan tingkat langsung memfilter seluruh konten secara instan, kartu informatif memberikan gambaran lengkap kapasitas tingkat, dan bahasa antarmuka ramah pengguna sekolah.
+- Ditolak: Mempertahankan form input inline di dalam kartu mata pelajaran dan menggunakan dropdown filter tingkat bertingkat.
+
+### 2026-11-10 — Standarisasi segmented capsule lintas modul, peletakan tombol kanan, dan larangan teks visual "MEMUAT DATA"
+- Keputusan: Menerapkan segmented capsule switcher pemilihan tingkat (X, XI, XII) secara seragam ke modul Bank Soal, Ujian, dan Monitoring serta menghapus filter teks kaku; meletakkan seluruh tombol aksi utama di sisi kanan baris segmented capsule (.grade-capsule-right); menambahkan animasi transisi Framer Motion saat perpindahan tingkat dan tab; serta menetapkan aturan wajib: dilarang menampilkan teks visual statis "MEMUAT DATA" atau "Memuat..." di layar pengguna. Setiap pemuatan data harus menggunakan animated loading screen (shimmer skeleton atau pulsing spinner ring) dengan teks penjelas terisolasi khusus pembaca layar (sr-only).
+- Alasan: Menyelaraskan hierarki dan estetika dashboard sesuai gambar referensi pengguna, menata tombol aksi agar mudah diakses di sisi kanan, serta memberikan umpan balik pemuatan data yang modern, halus, dan bebas kedipan teks kaku.
+- Ditolak: Menampilkan teks statis "Memuat data...", membiarkan tombol aksi utama terpisah dari baris tingkat, dan menggunakan filter bertingkat konvensional.
+
+### 2026-11-10 — Penyelarasan motion spring Framer Motion dan shared-layout segmented capsule
+- Keputusan: Mengadopsi motion tokens resmi dari DESIGN/MOTION_GUIDE.md (softSpring: stiffness 270, damping 31, mass 0.95; spring: stiffness 420, damping 34; press: stiffness 580, damping 30); mengganti mekanisme switch tingkat (X, XI, XII) dan tab status/mode di seluruh dashboard (AcademicManagement, Banks, Exams, Monitoring, Results) menggunakan LayoutGroup dan shared layoutId (.grade-capsule-thumb, .staff-segment-thumb, .proctor-filter-thumb) dengan tactile press scale 0.96; mengupgrade MotionButton dengan token spring press dan scale hover/tap; serta menambahkan transisi AnimatePresence pada accordion data lama.
+- Alasan: Menghilangkan pergantian instan tanpa animasi pada switcher tingkat sehingga thumb hitam meluncur mulus (smooth spring glide) antar-kapsul pill sesuai rancangan gerak Aurora UI dan spesifikasi desain.
+- Ditolak: Menggunakan transisi CSS biasa tanpa perhitungan layoutId bounding box dinamis yang menyebabkan thumb tidak dapat meluncur antar-elemen button yang berbeda ukuran.
+
+### 2026-11-10 — Penghapusan filter tingkat, navigasi Box per Kelas, dan perbaikan visibilitas hasil ujian
+- Keputusan: Menghapus seluruh filter tingkat (grade selector strip dan switcher capsule tingkat) di seluruh modul dashboard dan menggantikannya dengan navigasi Box per Kelas (grid kartu informatif per kelas yang langsung dapat diklik untuk membuka detail); pada modul Hasil Ujian (`/dashboard/hasil`), query backend diperluas agar mencakup status ujian `active`, `ended`, dan `archived`, enum mode mendukung `hierarchy`, serta mapping respons groups dipadukan dengan tampilan detail hasil dan ekspor CSV kelas terpilih.
+- Alasan: Pengguna sekolah berpikir dalam entitas kelas nyata bukan filter tingkat berjenjang yang menyembunyikan data; ujian yang baru selesai dikerjakan siswa berstatus active harus langsung muncul di menu Hasil tanpa menunggu guru mengakhiri ujian manual; dan antarmuka per box per kelas memberikan ringkasan statistik yang informatif dan akses satu klik yang intuitif.
+- Ditolak: Mempertahankan filter tingkat kaku yang membatasi tampilan konten dan memblokir ujian aktif dari rekapan hasil.
+
+### 2026-11-10 — Navigasi bertingkat dan cakupan ekspor hasil
+- Keputusan: Mengganti pintu masuk per kelas dengan card tingkatan, lalu card kelas pada lima tab; mapel dan bank soal tetap menjadi katalog bersama per tingkat. Ekspor hasil dikelompokkan per tingkat/mapel dan memakai ID kelas atau ujian, dengan penanganan khusus data lama tanpa pemetaan.
+- Alasan: Mengikuti alur dan referensi visual yang dipilih pengguna, tetap menyediakan kelas kosong dan mencegah hasil kelas bernama sama tercampur.
+- Ditolak: Menyimpan kepemilikan bank soal per kelas atau memakai nama kelas sebagai identitas untuk kelas yang sudah terpetakan.

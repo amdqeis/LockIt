@@ -319,13 +319,13 @@ export function BackupRestore() {
             className="staff-file-input"
             onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
           />
-          <button
+          <MotionButton
             type="submit"
             className="staff-secondary"
             disabled={!uploadFile || uploadBusy || currentJob?.status === "in_progress"}
           >
             {uploadBusy ? "Mengunggah & Memvalidasi..." : "Unggah Berkas"}
-          </button>
+          </MotionButton>
         </form>
 
         {uploadedBackup && (
@@ -336,7 +336,7 @@ export function BackupRestore() {
               <span>Dibuat: {new Date(uploadedBackup.manifest.createdAt).toLocaleString("id-ID")}</span>
             </div>
             <div className="uploaded-preview-actions">
-              <button
+              <MotionButton
                 type="button"
                 className="staff-primary-outline"
                 onClick={() =>
@@ -349,7 +349,7 @@ export function BackupRestore() {
                 }
               >
                 Pulihkan dari Berkas Ini
-              </button>
+              </MotionButton>
             </div>
           </div>
         )}
@@ -388,14 +388,14 @@ export function BackupRestore() {
                 >
                   Unduh
                 </a>
-                <button
+                <MotionButton
                   type="button"
                   className="action-link danger"
                   disabled={currentJob?.status === "in_progress"}
                   onClick={() => openRestoreModal("saved", b.filename, b.filename, b.manifest)}
                 >
                   Restore
-                </button>
+                </MotionButton>
               </div>
             </div>
           ))}
@@ -468,21 +468,21 @@ export function BackupRestore() {
           </div>
 
           <div className="modal-actions">
-            <button
+            <MotionButton
               type="button"
               className="staff-secondary"
               disabled={restoreBusy}
               onClick={() => setRestoreModalOpen(false)}
             >
               Batal
-            </button>
-            <button
+            </MotionButton>
+            <MotionButton
               type="submit"
               className="staff-danger-btn"
               disabled={!acknowledged || !adminPassword || restoreBusy}
             >
               {restoreBusy ? "Memulai Pemulihan..." : "Konfirmasi & Mulai Restore"}
-            </button>
+            </MotionButton>
           </div>
         </form>
       </Dialog>

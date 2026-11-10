@@ -1,6 +1,6 @@
 "use client";
 import { MotionButton } from "@/components/MotionButton";
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { JSONContent } from "@tiptap/core";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -12,8 +12,9 @@ import { queryCache } from "@/lib/data-cache";
 import { BankListSkeleton } from "@/components/skeletons";
 import EquationEditor, { docToText } from "./EquationEditor";
 import { ErrorText, Icon, message } from "./Dashboard";
-import type { Bank, BankQuestion, GradeLevel, Subject } from "./types";
+import type { Bank, BankQuestion, Classroom, GradeLevel, Subject } from "./types";
 import { exportBankXml, importBankXml, readBankXml, type Backup } from "./bankXml";
+import { HierarchyBreadcrumb, HierarchyCard, useHierarchyNavigation } from "./HierarchyNavigation";
 
 const blankDoc = (text = ""): JSONContent => ({
   type: "doc",
@@ -46,7 +47,8 @@ export function Banks({ teacherId }: { teacherId: string }) {
   const reduceMotion = useReducedMotion();
 
   const [gradeLevels, setGradeLevels] = useState<GradeLevel[]>([]);
-  const [selectedGradeId, setSelectedGradeId] = useState<string>(() => searchParams.get("gradeLevelId") || "");
+  const [classrooms, setClassrooms] = useState<Classroom[]>([]);
+  const { selectedGradeId, selectedClassroomId, setSelectedGradeId, setSelectedClassroomId } = useHierarchyNavigation();
 
   const [subjects, setSubjects] = useState<Subject[]>(() => {
     const initial = queryCache.get<Subject[]>("/api/subjects");
@@ -57,6 +59,31 @@ export function Banks({ teacherId }: { teacherId: string }) {
     return initial ? initial.data.items : [];
   });
   const [folder, setFolder] = useState<string | null>(() => searchParams.get("subjectId") || searchParams.get("folder") || null);
+
+  const gradeLevelBankStats = useMemo(() => {
+    return gradeLevels.map((gl) => {
+      const matchingSubjects = subjects.filter((s) => s.gradeLevelId === gl.id);
+      const totalSubjects = matchingSubjects.length;
+      const totalBanks = matchingSubjects.reduce((acc, s) => acc + (s._count?.banks || 0), 0);
+
+      return {
+        ...gl,
+        totalSubjects,
+        totalBanks,
+        subjects: matchingSubjects,
+      };
+    });
+  }, [gradeLevels, subjects]);
+
+  const currentGrade = useMemo(() => {
+    if (!selectedGradeId) return null;
+    return gradeLevelBankStats.find((gl) => gl.id === selectedGradeId) || null;
+  }, [gradeLevelBankStats, selectedGradeId]);
+
+  const subjectsInCurrentGrade = useMemo(() => {
+    if (!currentGrade) return [];
+    return currentGrade.subjects;
+  }, [currentGrade]);
   const [bankOpen, setBankOpen] = useState(false);
   const [bankName, setBankName] = useState("");
   const [error, setError] = useState("");
@@ -106,12 +133,14 @@ export function Banks({ teacherId }: { teacherId: string }) {
   const refreshMaster = useCallback(async () => {
     const request = ++masterRequest.current;
     try {
-      const [levels, items] = await Promise.all([
+      const [levels, items, classes] = await Promise.all([
         staffApi<GradeLevel[]>("/api/academic/grade-levels"),
         staffApi<Subject[]>("/api/subjects"),
+        staffApi<Classroom[]>("/api/academic/classrooms"),
       ]);
       if (request !== masterRequest.current) return;
       setGradeLevels(levels);
+      setClassrooms(classes);
       setSubjects(items);
       queryCache.set("/api/subjects", items, 300000);
       setMasterError("");
@@ -168,6 +197,7 @@ export function Banks({ teacherId }: { teacherId: string }) {
     const params = new URLSearchParams();
     if (folder) params.set("subjectId", folder);
     if (selectedGradeId) params.set("gradeLevelId", selectedGradeId);
+    if (selectedClassroomId) params.set("classroomId", selectedClassroomId);
     window.history.replaceState(
       window.history.state,
       "",
@@ -179,7 +209,7 @@ export function Banks({ teacherId }: { teacherId: string }) {
       window.clearTimeout(timer);
       counter.current++;
     };
-  }, [folder, selectedGradeId, load]);
+  }, [folder, selectedGradeId, selectedClassroomId, load]);
 
   useEffect(() => {
     if (masterLoading || !selectedGradeId || !folder || folder === "unassigned") return;
@@ -288,7 +318,7 @@ export function Banks({ teacherId }: { teacherId: string }) {
     setNewBankTitle("");
     setNewBankSubject(initialSubject?.name || "");
     setNewBankSubjectId(initialSubject?.id || "");
-    setNewBankGradeId(initialSubject?.gradeLevelId || selectedGradeId);
+    setNewBankGradeId(initialSubject?.gradeLevelId || selectedGradeId || "");
     setDraftId(null);
     setDraftRevision(0);
     setActiveStep(0);
@@ -679,7 +709,7 @@ export function Banks({ teacherId }: { teacherId: string }) {
                   {subjects.filter((subject) => subject.gradeLevelId === newBankGradeId && !subject.isArchived && !subject.gradeLevel?.isArchived).map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}
                 </select>
               </div>
-              {masterLoading && <p className="bank-master-note" role="status">Memuat tingkat dan mata pelajaran...</p>}
+              {masterLoading && <div className="loading-spinner-ring" style={{ width: 18, height: 18, margin: "6px 0" }} role="status" aria-busy="true" />}
               {masterError && <p className="bank-master-note" role="alert">{masterError} <button type="button" className="action-link" onClick={() => void refreshMaster()}>Coba lagi</button></p>}
               {!masterLoading && !masterError && (!gradeLevels.length || (newBankGradeId && !subjects.some((subject) => subject.gradeLevelId === newBankGradeId && !subject.isArchived))) && <p className="bank-master-note">Belum ada {gradeLevels.length ? "mata pelajaran pada tingkat ini" : "tingkat"}. <Link href={`/dashboard/kelas-mapel${newBankGradeId ? `?gradeLevelId=${encodeURIComponent(newBankGradeId)}` : ""}`} target="_blank" rel="noopener noreferrer">Kelola Kelas &amp; Mapel (tab baru)</Link></p>}
             </div>
@@ -1400,9 +1430,7 @@ export function Banks({ teacherId }: { teacherId: string }) {
   const visible = banks;
   const selectedGrade = gradeLevels.find((gl) => gl.id === selectedGradeId);
   const currentSubject = subjects.find((s) => s.id === folder);
-  const displayedSubjects = selectedGradeId
-    ? subjects.filter((s) => s.gradeLevelId === selectedGradeId)
-    : subjects;
+  const selectedClassroom = classrooms.find((c) => c.id === selectedClassroomId && c.gradeLevelId === selectedGradeId);
 
   const targetGradeId = moveBank?.subjectFolder?.gradeLevelId;
   const allowedMoveSubjects = targetGradeId
@@ -1411,20 +1439,16 @@ export function Banks({ teacherId }: { teacherId: string }) {
 
   return (
     <>
-      <nav className="bank-breadcrumb" aria-label="Navigasi hierarki bank soal" style={{ display: "flex", gap: "6px", alignItems: "center", fontSize: "11px", color: "#64636c", marginBottom: "8px" }}>
-        <span>Bank Soal</span>
-        {selectedGrade && <><span>/</span><span>{selectedGrade.name}</span></>}
-        {currentSubject && <><span>/</span><strong>{currentSubject.name}</strong></>}
-      </nav>
+      <HierarchyBreadcrumb grade={selectedGrade?.name} classroom={selectedClassroom?.name} onRoot={() => { switchFolder(null); setSelectedGradeId(null); }} onGrade={() => { switchFolder(null); setSelectedClassroomId(null); }} />
 
-      <div className="staff-section-head">
+      <div className="staff-section-head" style={{ marginBottom: "12px" }}>
         <div>
           <h2>Bank soal</h2>
           <p>Susun dan kelola butir soal ujian bersama berdasarkan mata pelajaran.</p>
         </div>
-        <div className="staff-action-wrap">
-          <Link className="staff-secondary" href={`/dashboard/kelas-mapel${selectedGradeId ? `?gradeLevelId=${encodeURIComponent(selectedGradeId)}` : ""}`}>
-            <Icon name="plus" size={16} /> Kelola mata pelajaran
+        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+          <Link className="staff-secondary" href="/dashboard/kelas-mapel">
+            <Icon name="plus" size={14} /> Kelola mata pelajaran
           </Link>
           <label className="staff-secondary staff-file">
             Impor XML
@@ -1438,161 +1462,195 @@ export function Banks({ teacherId }: { teacherId: string }) {
             />
           </label>
           <MotionButton className="staff-primary" disabled={masterLoading} onClick={() => startNewQuestionBank()}>
-            <Icon name="plus" size={16} /> Buat Soal
+            <Icon name="plus" size={14} /> Buat Soal
           </MotionButton>
-        </div>
-      </div>
-
-      {/* Grade Selector Filter */}
-      <div className="grade-selector-strip" style={{ marginBottom: "12px" }}>
-        <span className="grade-selector-label">Filter Tingkat:</span>
-        <div className="grade-pills">
-          <button
-            type="button"
-            className={`grade-pill ${!selectedGradeId ? "active" : ""}`}
-            onClick={() => { setSelectedGradeId(""); switchFolder(null); }}
-          >
-            Semua Tingkat
-          </button>
-          {gradeLevels.map((gl) => (
-            <button
-              key={gl.id}
-              type="button"
-              className={`grade-pill ${gl.id === selectedGradeId ? "active" : ""}`}
-              onClick={() => { setSelectedGradeId(gl.id); switchFolder(null); }}
-            >
-              {gl.name}
-            </button>
-          ))}
         </div>
       </div>
 
       {notice && <p role="status" className="staff-note" style={{ background: "#edfdf5", borderColor: "#c6f6d5", color: "#22543d" }}>{notice}</p>}
       <ErrorText error={!selected && !bankOpen && !backup && !moveBank && !deleteFolder && !viewingBank ? error : ""} />
 
-      <div className="staff-folder-tabs">
-        <MotionButton className={!folder ? "active" : ""} onClick={() => switchFolder(null)}>
-          Semua bank
-        </MotionButton>
-        {displayedSubjects.map((s) => (
-          <MotionButton
-            className={folder === s.id ? "active" : ""}
-            key={s.id}
-            onClick={() => switchFolder(s.id)}
-          >
-            {s.name}{s.gradeLevel ? ` · ${s.gradeLevel.name}` : ""} <span>{s._count.banks}</span>
-          </MotionButton>
-        ))}
-        <MotionButton className={folder === "unassigned" ? "active" : ""} onClick={() => switchFolder("unassigned")}>
-          Belum dikelompokkan
-        </MotionButton>
-      </div>
-
-      {/* Action bar sub-folder (hanya tampil jika memilih folder spesifik) */}
-      {folder && folder !== "unassigned" && (
-        <div className="staff-section-head" style={{ marginTop: 10, marginBottom: 14 }}>
+      <motion.div
+        key={`${selectedGradeId || "root"}-${folder || "all"}`}
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+        style={{ display: "flex", flexDirection: "column", gap: "10px" }}
+      >
+        {!selectedGradeId ? (
+          /* TAHAP 1: PILIHAN TINGKATAN (STYLE OVERVIEW CARDS) */
           <div>
-            <h3>{currentSubject ? `${currentSubject.name}${currentSubject.gradeLevel ? ` · ${currentSubject.gradeLevel.name}` : ""}` : "Folder"}</h3>
-            <p>{visible.length} bank soal pada mata pelajaran ini</p>
-          </div>
-          <div className="staff-action-wrap">
-            <MotionButton
-              className="staff-secondary"
-              disabled={!!subjects.find((s) => s.id === folder)?._count.banks}
-              title="Folder harus kosong sebelum dihapus"
-              onClick={() => {
-                setError("");
-                setDeleteFolder(true);
-              }}
-            >
-              Hapus folder
-            </MotionButton>
-            <label className="staff-secondary staff-file">
-              Impor XML
-              <input
-                type="file"
-                accept=".xml,application/xml,text/xml"
-                onChange={(e) => {
-                  if (e.target.files?.[0]) void prepareXml(e.target.files[0]);
-                  e.target.value = "";
-                }}
-              />
-            </label>
-            <MotionButton className="staff-primary" onClick={() => setBankOpen(true)}>
-              <Icon name="plus" size={16} /> Buat bank
-            </MotionButton>
-          </div>
-        </div>
-      )}
-
-      {listLoading && !visible.length ? (
-        <BankListSkeleton />
-      ) : visible.length > 0 ? (
-        <>
-          <div className="staff-list">
-            {visible.map((b) => (
-              <div className="staff-row staff-exam-row" key={b.id}>
-                <span>
-                  <strong>{b.title} — {b.subjectFolder?.name || b.subject}{b.subjectFolder?.gradeLevel ? ` · ${b.subjectFolder.gradeLevel.name}` : (b.targetGrade ? ` · Tingkat ${b.targetGrade}` : "")}</strong>
-                  <small>
-                    {b._count.questions} soal · {b.subjectFolder?.name || b.subject}
-                    {b.subjectFolder?.gradeLevel ? ` · Tingkat ${b.subjectFolder.gradeLevel.name}` : (b.targetGrade ? ` · Tingkat ${b.targetGrade}` : "")}
-                  </small>
-                </span>
-                <div className="staff-row-actions">
-                  <MotionButton onClick={() => void previewBank(b)}>Preview</MotionButton>
-                  <MotionButton onClick={() => void openBank(b.id, true)}>Edit</MotionButton>
-                  <MotionButton onClick={() => void openBank(b.id, true, true)}>Tambah soal</MotionButton>
-                  <MotionButton
-                    onClick={() => {
-                      setError("");
-                      setMoveBank(b);
-                      setDestination(b.subjectId || "");
-                    }}
-                  >
-                    Pindahkan
-                  </MotionButton>
-                  <MotionButton onClick={() => void exportXml(b)}>Ekspor XML</MotionButton>
-                </div>
+            <div className="drilldown-grid">
+              {gradeLevelBankStats.map((gl, index) => <HierarchyCard key={gl.id} index={index} name={`Tingkat ${gl.name}`} count={`${gl.totalBanks} bank soal`} detail={`${gl.totalSubjects} mata pelajaran`} onClick={() => { setSelectedGradeId(gl.id); switchFolder(null); }} />)}
+            </div>
+            {gradeLevelBankStats.length === 0 && (
+              <div className="staff-empty">
+                <h3>Belum ada tingkatan</h3>
+                <p>Tambahkan tingkatan terlebih dahulu di menu Kelas &amp; Mapel.</p>
               </div>
-            ))}
+            )}
+            <MotionButton className="staff-secondary" onClick={() => switchFolder("unassigned")}>Bank soal yang perlu dipetakan</MotionButton>
           </div>
+        ) : !selectedClassroomId && !folder ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: "14px", marginTop: "10px" }}>
+            <div className="class-detail-banner">
+              <div className="class-detail-info">
+                <h3>Pilihan Kelas · Tingkat {currentGrade?.name}</h3>
+                <p>
+                  {subjectsInCurrentGrade.length} Mata pelajaran terdaftar · {currentGrade?.totalBanks || 0} Bank soal
+                </p>
+              </div>
+              <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                <MotionButton
+                  className="staff-secondary"
+                  onClick={() => setSelectedGradeId(null)}
+                >
+                  ← Kembali ke Pilihan Tingkat
+                </MotionButton>
+              </div>
+            </div>
 
-          <nav className="staff-pagination" aria-label="Halaman bank soal">
-            <span>{visible.length} bank pada halaman ini</span>
-            <div>
+            <div className="class-box-grid">
+              {classrooms.filter(c => c.gradeLevelId === selectedGradeId).map((c, index) => (
+                <HierarchyCard key={c.id} index={index} name={c.name} detail="Buka bank soal" count={`${currentGrade?.totalBanks || 0} bank bersama`} onClick={() => setSelectedClassroomId(c.id)} />
+              ))}
+            </div>
+            {!classrooms.some(c => c.gradeLevelId === selectedGradeId) && (
+              <div className="staff-empty">
+                <h3>Belum ada kelas di Tingkat {currentGrade?.name}</h3>
+                <p>Tambahkan kelas di menu Kelas &amp; Mapel.</p>
+              </div>
+            )}
+          </div>
+        ) : (
+          /* TAHAP 3: LIST SOAL & BANK SOAL DI MAPEL TERPILIH */
+          <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+            <div className="class-detail-banner">
+              <div className="class-detail-info">
+                <h3>Bank Soal {selectedClassroom?.name || currentSubject?.name || ""}</h3>
+                <p>Bank soal digunakan bersama oleh kelas pada tingkat ini.</p>
+              </div>
+              <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                <MotionButton
+                  className="staff-primary"
+                  onClick={() => startNewQuestionBank()}
+                >
+                  <Icon name="plus" size={14} /> {folder ? "Buat Soal di Mapel Ini" : "Buat Soal"}
+                </MotionButton>
+                <MotionButton
+                  className="staff-secondary"
+                  onClick={() => { switchFolder(null); setSelectedClassroomId(null); }}
+                >
+                  ← Kembali ke Daftar Kelas
+                </MotionButton>
+              </div>
+            </div>
+            <label className="hierarchy-subject-filter">Mata pelajaran
+              <select value={folder || ""} onChange={e => switchFolder(e.target.value || null)}>
+                <option value="">Semua mata pelajaran</option>
+                {folder === "unassigned" && <option value="unassigned">Perlu dipetakan</option>}
+                {subjectsInCurrentGrade.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </label>
+            {folder && <div className="staff-action-wrap">
               <MotionButton
                 className="staff-secondary"
-                disabled={cursorIndex === 0}
-                onClick={() => setCursorIndex((value) => value - 1)}
-              >
-                Sebelumnya
-              </MotionButton>
-              <MotionButton
-                className="staff-secondary"
-                disabled={!nextCursor}
+                disabled={!!subjects.find((s) => s.id === folder)?._count.banks}
+                title="Folder harus kosong sebelum dihapus"
                 onClick={() => {
-                  if (!nextCursor) return;
-                  setCursors((current) => [...current.slice(0, cursorIndex + 1), nextCursor]);
-                  setCursorIndex((value) => value + 1);
+                  setError("");
+                  setDeleteFolder(true);
                 }}
               >
-                Berikutnya
+                Hapus folder
+              </MotionButton>
+              <label className="staff-secondary staff-file">
+                Impor XML
+                <input
+                  type="file"
+                  accept=".xml,application/xml,text/xml"
+                  onChange={(e) => {
+                    if (e.target.files?.[0]) void prepareXml(e.target.files[0]);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
+              <MotionButton className="staff-primary" onClick={() => setBankOpen(true)}>
+                <Icon name="plus" size={16} /> Buat bank
+              </MotionButton>
+            </div>}
+          </div>
+        )}
+
+        {(selectedClassroomId || folder) && (listLoading && !visible.length ? (
+          <BankListSkeleton />
+        ) : visible.length > 0 ? (
+          <>
+            <div className="staff-list">
+              {visible.map((b) => (
+                <div className="staff-row staff-exam-row" key={b.id}>
+                  <span>
+                    <strong>{b.title} — {b.subjectFolder?.name || b.subject}{b.subjectFolder?.gradeLevel ? ` · ${b.subjectFolder.gradeLevel.name}` : (b.targetGrade ? ` · Tingkat ${b.targetGrade}` : "")}</strong>
+                    <small>
+                      {b._count.questions} soal · {b.subjectFolder?.name || b.subject}
+                      {b.subjectFolder?.gradeLevel ? ` · Tingkat ${b.subjectFolder.gradeLevel.name}` : (b.targetGrade ? ` · Tingkat ${b.targetGrade}` : "")}
+                    </small>
+                  </span>
+                  <div className="staff-row-actions">
+                    <MotionButton onClick={() => void previewBank(b)}>Preview</MotionButton>
+                    <MotionButton onClick={() => void openBank(b.id, true)}>Edit</MotionButton>
+                    <MotionButton onClick={() => void openBank(b.id, true, true)}>Tambah soal</MotionButton>
+                    <MotionButton
+                      onClick={() => {
+                        setError("");
+                        setMoveBank(b);
+                        setDestination(b.subjectId || "");
+                      }}
+                    >
+                      Pindahkan
+                    </MotionButton>
+                    <MotionButton onClick={() => void exportXml(b)}>Ekspor XML</MotionButton>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <nav className="staff-pagination" aria-label="Halaman bank soal">
+              <span>{visible.length} bank pada halaman ini</span>
+              <div>
+                <MotionButton
+                  className="staff-secondary"
+                  disabled={cursorIndex === 0}
+                  onClick={() => setCursorIndex((value) => value - 1)}
+                >
+                  Sebelumnya
+                </MotionButton>
+                <MotionButton
+                  className="staff-secondary"
+                  disabled={!nextCursor}
+                  onClick={() => {
+                    if (!nextCursor) return;
+                    setCursors((current) => [...current.slice(0, cursorIndex + 1), nextCursor]);
+                    setCursorIndex((value) => value + 1);
+                  }}
+                >
+                  Berikutnya
+                </MotionButton>
+              </div>
+            </nav>
+          </>
+        ) : (
+          <div className="staff-empty" style={{ padding: "48px 24px" }}>
+            <h3>Belum ada bank soal</h3>
+            <p>Mulai susun butir soal pertama Anda untuk pelaksanaan ujian.</p>
+            <div style={{ marginTop: 16 }}>
+              <MotionButton className="staff-primary" disabled={masterLoading} onClick={() => startNewQuestionBank()}>
+                <Icon name="plus" size={16} /> Buat Soal Sekarang
               </MotionButton>
             </div>
-          </nav>
-        </>
-      ) : (
-        <div className="staff-empty" style={{ padding: "48px 24px" }}>
-          <h3>Belum ada bank soal</h3>
-          <p>Mulai susun butir soal pertama Anda untuk pelaksanaan ujian.</p>
-          <div style={{ marginTop: 16 }}>
-            <MotionButton className="staff-primary" disabled={masterLoading} onClick={() => startNewQuestionBank()}>
-              <Icon name="plus" size={16} /> Buat Soal Sekarang
-            </MotionButton>
           </div>
-        </div>
-      )}
+        ))}
+      </motion.div>
 
       {/* Pop-up Preview Dialog for Entire Bank */}
       <Dialog

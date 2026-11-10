@@ -2,14 +2,16 @@
 import { MotionButton } from "@/components/MotionButton";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
+import { motion, useReducedMotion, LayoutGroup } from "framer-motion";
 import { io } from "socket.io-client";
 import { Dialog } from "@/components/Dialog";
 import { socketOrigin } from "@/lib/api";
 import { staffApi, staffSend } from "@/lib/staff-api";
-import { queryCache } from "@/lib/data-cache";
+import { motionTokens } from "@/lib/motion";
 import { ExamListSkeleton, ProctoringSkeleton, SkeletonCircle, SkeletonText } from "@/components/skeletons";
 import { ErrorText, Icon, message } from "./Dashboard";
-import type { Exam, Student } from "./types";
+import type { Classroom, Exam, GradeLevel, Student } from "./types";
+import { HierarchyBreadcrumb, HierarchyCard, useHierarchyNavigation } from "./HierarchyNavigation";
 
 type Snapshot = {
   exam: {
@@ -66,7 +68,27 @@ function getGrade(score: number): string {
   return "D";
 }
 
+type HierarchicalMonitoringSubject = {
+  subjectId: string | null;
+  subjectName: string;
+  gradeLevelName: string | null;
+  totalExams: number;
+  activeExams: number;
+  exams: Exam[];
+};
+
+type HierarchicalMonitoringClassroom = {
+  classroomId: string | null;
+  className: string;
+  gradeLevelId: string | null;
+  gradeLevelName: string | null;
+  totalExams: number;
+  activeExams: number;
+  subjects: HierarchicalMonitoringSubject[];
+};
+
 export function Monitoring() {
+  const reduceMotion = useReducedMotion();
   const search = useSearchParams();
   const router = useRouter();
   const id = search.get("exam") || "";
@@ -75,12 +97,12 @@ export function Monitoring() {
   const [tab, setTab] = useState<"active" | "draft">(() =>
     search.get("status") === "draft" ? "draft" : "active"
   );
+  const [gradeLevels, setGradeLevels] = useState<GradeLevel[]>([]);
+  const [classrooms, setClassrooms] = useState<Classroom[]>([]);
+  const { selectedGradeId, selectedClassroomId, setSelectedGradeId, setSelectedClassroomId } = useHierarchyNavigation();
+  const [groups, setGroups] = useState<HierarchicalMonitoringClassroom[]>([]);
+  const [groupsLoading, setGroupsLoading] = useState(true);
   const [listQuery, setListQuery] = useState(() => search.get("search") || "");
-  const [list, setList] = useState<Exam[]>([]);
-  const [listLoading, setListLoading] = useState(true);
-  const [listNext, setListNext] = useState<string | null>(null);
-  const [listCursors, setListCursors] = useState<(string | null)[]>([null]);
-  const [listPage, setListPage] = useState(0);
   const listRequest = useRef(0);
 
   // Proctoring active exam states
@@ -108,55 +130,85 @@ export function Monitoring() {
   const [studentTotal, setStudentTotal] = useState(0);
   const studentRequest = useRef(0);
 
-  const listParameters = useMemo(() => {
-    const params = new URLSearchParams({ status: tab, limit: "25" });
-    if (listQuery.trim()) params.set("search", listQuery.trim());
-    const cursor = listCursors[listPage];
-    if (cursor) params.set("cursor", cursor);
-    return params.toString();
-  }, [tab, listQuery, listCursors, listPage]);
-
-  const loadList = useCallback(async (force = false) => {
+  const loadList = useCallback(async () => {
     const request = ++listRequest.current;
-    const currentKey = `/api/exams?${listParameters}`;
-    const cached = queryCache.get<{ items: Exam[]; nextCursor: string | null }>(currentKey);
-    if (!cached || force) {
-      if (!list.length) setListLoading(true);
-    }
+    const groupParams = new URLSearchParams();
+    if (listQuery.trim()) groupParams.set("search", listQuery.trim());
+
     try {
-      const data = await queryCache.fetch<{ items: Exam[]; nextCursor: string | null }>(
-        currentKey,
-        () =>
-          staffApi<{ items: Exam[]; nextCursor: string | null }>(
-            `/api/exams?${listParameters}`
-          ),
-        30000
-      );
+      setGroupsLoading(true);
+      const [gradesData, classData, groupData] = await Promise.all([
+        staffApi<GradeLevel[]>("/api/academic/grade-levels?includeArchived=true"),
+        staffApi<Classroom[]>("/api/academic/classrooms?includeArchived=true"),
+        staffApi<{ groups: HierarchicalMonitoringClassroom[] } | HierarchicalMonitoringClassroom[]>(
+          `/api/exams/groups?${groupParams.toString()}`
+        ),
+      ]);
+
       if (request === listRequest.current) {
-        setList(data.items);
-        setListNext(data.nextCursor);
+        setGradeLevels(gradesData);
+        setClassrooms(classData);
+        const rawGroups = (groupData as { groups?: HierarchicalMonitoringClassroom[] })?.groups ?? groupData;
+        setGroups(Array.isArray(rawGroups) ? rawGroups : []);
         setError("");
       }
     } catch (e) {
       if (request === listRequest.current) setError(message(e));
     } finally {
-      if (request === listRequest.current) setListLoading(false);
+      if (request === listRequest.current) {
+        setGroupsLoading(false);
+      }
     }
-  }, [listParameters, list.length]);
+  }, [listQuery]);
 
   useEffect(() => {
     if (id) return;
-    const params = new URLSearchParams(listParameters);
-    params.delete("limit");
-    params.delete("cursor");
-    window.history.replaceState(window.history.state, "", `/dashboard/monitoring?${params}`);
     const timer = window.setTimeout(() => void loadList(), 180);
-    const counter = listRequest;
-    return () => {
-      window.clearTimeout(timer);
-      counter.current++;
-    };
-  }, [id, listParameters, loadList]);
+    return () => window.clearTimeout(timer);
+  }, [id, loadList]);
+
+  const gradeLevelStats = useMemo(() => {
+    const levels = groups.some(g => !g.gradeLevelId) ? [...gradeLevels, { id: "__unmapped__", name: "Perlu dipetakan" }] : gradeLevels;
+    return levels.map((gl) => {
+      const matchingGroups = groups.filter(g => gl.id === "__unmapped__" ? !g.gradeLevelId : g.gradeLevelId === gl.id);
+      matchingGroups.push(...classrooms.filter(c => c.gradeLevelId === gl.id && !matchingGroups.some(g => g.classroomId === c.id))
+        .map(c => ({ classroomId: c.id, className: c.name, gradeLevelId: c.gradeLevelId, gradeLevelName: gl.name, totalExams: 0, activeExams: 0, subjects: [] })));
+      const totalClasses = matchingGroups.length;
+      const totalExams = matchingGroups.reduce((acc, g) => acc + g.totalExams, 0);
+      const activeExams = matchingGroups.reduce((acc, g) => acc + g.activeExams, 0);
+      const draftExams = matchingGroups.reduce((acc, g) => acc + g.subjects.flatMap(s => s.exams).filter(e => e.status === "draft").length, 0);
+
+      return {
+        ...gl,
+        totalClasses,
+        totalExams,
+        activeExams,
+        draftExams,
+        groups: matchingGroups,
+      };
+    });
+  }, [gradeLevels, groups, classrooms]);
+
+  const currentGrade = useMemo(() => {
+    if (!selectedGradeId) return null;
+    return gradeLevelStats.find((gl) => gl.id === selectedGradeId) || null;
+  }, [gradeLevelStats, selectedGradeId]);
+
+  const classesInCurrentGrade = useMemo(() => {
+    if (!currentGrade) return [];
+    return currentGrade.groups;
+  }, [currentGrade]);
+
+  const selectedClassGroup = useMemo(() => {
+    if (!selectedClassroomId) return null;
+    return classesInCurrentGrade.find((g) => (g.classroomId || g.className) === selectedClassroomId) || null;
+  }, [classesInCurrentGrade, selectedClassroomId]);
+
+  const examsInCurrentClass = useMemo(() => {
+    if (!selectedClassGroup) return [];
+    const all = selectedClassGroup.subjects.flatMap((s) => s.exams);
+    return all.filter((e) => (tab === "active" ? e.status === "active" : e.status === "draft"));
+  }, [selectedClassGroup, tab]);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -444,7 +496,7 @@ export function Monitoring() {
     return `${Math.max(60, Math.min(98, Math.round(pct * 10) / 10))}%`;
   }, [students]);
 
-  // ─── LIST VIEW JIKA BELUM MEMILIH UJIAN ──────────────────────────────────────
+  // ─── LIST VIEW JIKA BELUM MEMILIH UJIAN (3 TAHAP DRILLDOWN) ────────────────
   if (!id) {
     return (
       <div className="proctor-page">
@@ -459,99 +511,223 @@ export function Monitoring() {
 
         <ErrorText error={error} />
 
-        <div className="staff-results-controls">
-          <input
-            className="staff-search"
-            aria-label="Cari ujian monitoring"
-            placeholder="Cari ujian, kelas, atau mata pelajaran"
-            value={listQuery}
-            onChange={(e) => {
-              setListQuery(e.target.value);
-              setListCursors([null]);
-              setListPage(0);
-            }}
-          />
-          <div className="staff-segment">
-            <MotionButton
-              className={tab === "active" ? "active" : ""}
-              onClick={() => {
-                setTab("active");
-                setListCursors([null]);
-                setListPage(0);
-              }}
-            >
-              Berlangsung
-            </MotionButton>
-            <MotionButton
-              className={tab === "draft" ? "active" : ""}
-              onClick={() => {
-                setTab("draft");
-                setListCursors([null]);
-                setListPage(0);
-              }}
-            >
-              Persiapan
-            </MotionButton>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px", flexWrap: "wrap", gap: "10px" }}>
+          <div>
+            <LayoutGroup id="monitoring-status-tabs">
+              <div className="staff-segment" style={{ margin: 0 }} role="group" aria-label="Status ujian monitoring">
+                <motion.button
+                  type="button"
+                  className={tab === "active" ? "active" : ""}
+                  aria-pressed={tab === "active"}
+                  whileTap={reduceMotion ? undefined : { scale: 0.96 }}
+                  onClick={() => setTab("active")}
+                >
+                  {tab === "active" && (
+                    <motion.span
+                      layoutId="active-monitoring-tab"
+                      className="staff-segment-thumb"
+                      transition={reduceMotion ? { duration: 0 } : motionTokens.softSpring}
+                    />
+                  )}
+                  <span className="staff-segment-label">Berlangsung</span>
+                </motion.button>
+                <motion.button
+                  type="button"
+                  className={tab === "draft" ? "active" : ""}
+                  aria-pressed={tab === "draft"}
+                  whileTap={reduceMotion ? undefined : { scale: 0.96 }}
+                  onClick={() => setTab("draft")}
+                >
+                  {tab === "draft" && (
+                    <motion.span
+                      layoutId="active-monitoring-tab"
+                      className="staff-segment-thumb"
+                      transition={reduceMotion ? { duration: 0 } : motionTokens.softSpring}
+                    />
+                  )}
+                  <span className="staff-segment-label">Persiapan</span>
+                </motion.button>
+              </div>
+            </LayoutGroup>
           </div>
         </div>
 
-        {listLoading && !list.length ? (
-          <ExamListSkeleton rows={4} />
-        ) : list.length ? (
-          <>
-            <div className="staff-list">
-              {list.map((e) => (
-                <MotionButton
-                  className="staff-row staff-row-button"
-                  key={e.id}
-                  onClick={() => {
-                    const params = new URLSearchParams({ status: tab });
-                    if (listQuery.trim()) params.set("search", listQuery.trim());
-                    params.set("exam", e.id);
-                    router.push(`/dashboard/monitoring?${params}`);
-                  }}
-                >
-                  <span>
-                    <strong>{e.title}</strong>
-                    <small>
-                      {e.className || "Kelas belum ditentukan"} · {e._count.students} peserta
-                    </small>
-                  </span>
-                  <span className="staff-status">{e.status === "active" ? "Berlangsung" : "Persiapan"}</span>
-                  <Icon name="arrow" size={16} />
-                </MotionButton>
+        <div style={{ marginBottom: "14px" }}>
+          <input
+            className="staff-search"
+            style={{ width: "100%", margin: 0 }}
+            aria-label="Cari ujian monitoring"
+            placeholder="Cari ujian, kelas, atau mata pelajaran"
+            value={listQuery}
+            onChange={(e) => setListQuery(e.target.value)}
+          />
+        </div>
+
+        <HierarchyBreadcrumb grade={currentGrade?.name} classroom={selectedClassGroup?.className} onRoot={() => setSelectedGradeId(null)} onGrade={() => setSelectedClassroomId(null)} />
+        <motion.div
+          key={`${selectedGradeId || "root"}-${selectedClassroomId || "all"}-${tab}`}
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+          style={{ display: "flex", flexDirection: "column", gap: "10px" }}
+        >
+          {groupsLoading && !groups.length ? (
+            <div className="drilldown-grid">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="drilldown-card drilldown-theme-white" style={{ minHeight: "160px", opacity: 0.7 }}>
+                  <ExamListSkeleton />
+                </div>
               ))}
             </div>
-            <nav className="staff-pagination" aria-label="Halaman monitoring">
-              <span>{list.length} ujian pada halaman ini</span>
-              <div>
-                <MotionButton
-                  className="staff-secondary"
-                  disabled={listPage === 0}
-                  onClick={() => setListPage((value) => value - 1)}
-                >
-                  Sebelumnya
-                </MotionButton>
-                <MotionButton
-                  className="staff-secondary"
-                  disabled={!listNext}
-                  onClick={() => {
-                    if (!listNext) return;
-                    setListCursors((current) => [...current.slice(0, listPage + 1), listNext]);
-                    setListPage((value) => value + 1);
-                  }}
-                >
-                  Berikutnya
-                </MotionButton>
+          ) : !selectedGradeId ? (
+            /* TAHAP 1: PILIHAN TINGKATAN (STYLE OVERVIEW CARDS) */
+            <div>
+              <div className="drilldown-grid">
+                {gradeLevelStats.map((gl, index) => <HierarchyCard key={gl.id} index={index} name={gl.id === "__unmapped__" ? gl.name : `Tingkat ${gl.name}`} count={`${tab === "active" ? gl.activeExams : gl.draftExams} ujian`} detail={`${gl.totalClasses} kelas · ${tab === "active" ? "berlangsung" : "persiapan"}`} onClick={() => setSelectedGradeId(gl.id)} />)}
               </div>
-            </nav>
-          </>
-        ) : (
-          <div className="staff-empty">
-            <h3>Tidak ada ujian {tab === "active" ? "berlangsung" : "dalam persiapan"}</h3>
-            <p>Periksa pencarian atau pilih tab lainnya.</p>
-          </div>
-        )}
+              {gradeLevelStats.length === 0 && (
+                <div className="staff-empty">
+                  <h3>Belum ada tingkatan</h3>
+                  <p>Tambahkan tingkatan terlebih dahulu di menu Kelas &amp; Mapel.</p>
+                </div>
+              )}
+            </div>
+          ) : !selectedClassGroup ? (
+            /* TAHAP 2: PILIHAN KELAS DI TINGKAT TERPILIH */
+            <div style={{ display: "flex", flexDirection: "column", gap: "14px", marginTop: "10px" }}>
+              <div className="class-detail-banner">
+                <div className="class-detail-info">
+                  <h3>Pilihan Kelas · Tingkat {currentGrade?.name}</h3>
+                  <p>
+                    {classesInCurrentGrade.length} Kelas terdaftar · {tab === "active" ? currentGrade?.activeExams || 0 : currentGrade?.draftExams || 0} Ujian {tab === "active" ? "berlangsung" : "dalam persiapan"}
+                  </p>
+                </div>
+                <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                  <MotionButton
+                    className="staff-secondary"
+                    onClick={() => setSelectedGradeId(null)}
+                  >
+                    ← Kembali ke Pilihan Tingkat
+                  </MotionButton>
+                </div>
+              </div>
+
+              <div className="class-box-grid">
+                {classesInCurrentGrade.map((group) => {
+                  const boxKey = group.classroomId || group.className;
+                  const subjectNames = group.subjects.map((s) => s.subjectName).filter(Boolean);
+                  const count = tab === "active" ? group.activeExams : group.subjects.flatMap(s => s.exams).filter(e => e.status === "draft").length;
+                  return (
+                    <motion.div
+                      key={boxKey}
+                      className="class-box-card"
+                      role="button"
+                      tabIndex={0}
+                      whileHover={reduceMotion ? undefined : { y: -2 }}
+                      whileTap={reduceMotion ? undefined : { scale: 0.985 }}
+                      transition={motionTokens.softSpring}
+                      onClick={() => setSelectedClassroomId(boxKey)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          setSelectedClassroomId(boxKey);
+                        }
+                      }}
+                    >
+                      <div className="class-box-top">
+                        <div>
+                          <h3 className="class-box-name">{group.className}</h3>
+                          <p style={{ fontSize: "11px", color: "var(--staff-muted)", margin: "2px 0 0" }}>
+                            {subjectNames.length > 0 ? subjectNames.slice(0, 3).join(", ") : "Mata pelajaran"}
+                          </p>
+                        </div>
+                        <span className="class-box-badge">Tingkat {currentGrade?.name}</span>
+                      </div>
+
+                      <div className="class-box-stats">
+                        <div className="class-box-stat-item">
+                          <span className="class-box-stat-label">Ujian {tab === "active" ? "Berlangsung" : "Persiapan"}</span>
+                          <span className="class-box-stat-val">{count} Ujian</span>
+                        </div>
+                        <div className="class-box-stat-item">
+                          <span className="class-box-stat-label">Total Ujian</span>
+                          <span className="class-box-stat-val">{group.totalExams} Ujian</span>
+                        </div>
+                      </div>
+
+                      <div className="class-box-footer">
+                        <span>Buka Monitoring Kelas</span>
+                        <span>→</span>
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </div>
+              {classesInCurrentGrade.length === 0 && (
+                <div className="staff-empty">
+                  <h3>Belum ada kelas di Tingkat {currentGrade?.name}</h3>
+                  <p>Tambahkan kelas untuk tingkat ini di menu Kelas &amp; Mapel.</p>
+                </div>
+              )}
+            </div>
+          ) : (
+            /* TAHAP 3: DAFTAR UJIAN DI KELAS TERPILIH */
+            <div style={{ display: "flex", flexDirection: "column", gap: "14px", marginTop: "10px" }}>
+              <div className="class-detail-banner">
+                <div className="class-detail-info">
+                  <h3>Ujian Monitoring · {selectedClassGroup.className}</h3>
+                  <p>
+                    Tingkat {currentGrade?.name || selectedClassGroup.gradeLevelName || ""} · Pilih sesi ujian untuk membuka Live Proctoring.
+                  </p>
+                </div>
+                <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                  <MotionButton
+                    className="staff-secondary"
+                    onClick={() => setSelectedClassroomId(null)}
+                  >
+                    ← Kembali ke Pilihan Kelas
+                  </MotionButton>
+                </div>
+              </div>
+
+              {examsInCurrentClass.length > 0 ? (
+                <div className="staff-list">
+                  {examsInCurrentClass.map((e) => (
+                    <div className="staff-row staff-exam-row" key={e.id}>
+                      <span>
+                        <strong>{e.title}</strong>
+                        <small>
+                          {e.subjectName || "Mata pelajaran"} · {e._count?.students ?? 0} peserta · Kode: <code>{e.accessCode}</code>
+                        </small>
+                      </span>
+                      <div className="staff-row-actions">
+                        <span className="staff-status" style={{ marginRight: "4px" }}>
+                          {e.status === "active" ? "Berlangsung" : "Persiapan"}
+                        </span>
+                        <MotionButton
+                          className="staff-primary"
+                          onClick={() => {
+                            const params = new URLSearchParams({ exam: e.id });
+                            if (selectedGradeId) params.set("gradeLevelId", selectedGradeId);
+                            if (selectedClassroomId) params.set("classroomId", selectedClassroomId);
+                            router.push(`/dashboard/monitoring?${params}`);
+                          }}
+                        >
+                          Buka Monitoring →
+                        </MotionButton>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="staff-empty">
+                  <h3>Tidak ada ujian {tab === "active" ? "berlangsung" : "dalam persiapan"} di {selectedClassGroup.className}</h3>
+                  <p>Pilih tab lainnya di atas atau kembali ke pilihan kelas.</p>
+                </div>
+              )}
+            </div>
+          )}
+        </motion.div>
       </div>
     );
   }

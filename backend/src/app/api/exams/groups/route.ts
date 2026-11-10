@@ -14,6 +14,8 @@ export async function GET(req: NextRequest) {
     const semester = (searchParams.get("semester") as "ganjil" | "genap") || undefined;
     const status = searchParams.get("status") || undefined;
     const category = searchParams.get("category") || undefined;
+    const subject = searchParams.get("subject")?.trim() || undefined;
+    const className = searchParams.get("className")?.trim() || undefined;
     const search = searchParams.get("search")?.trim() || undefined;
 
     const where: Prisma.ExamWhereInput = {
@@ -21,11 +23,13 @@ export async function GET(req: NextRequest) {
       ...(semester ? { semester } : {}),
       ...(status ? { status: status as any } : {}),
       ...(category ? { category } : {}),
+      ...(subject ? { subjectName: { contains: subject, mode: "insensitive" } } : {}),
+      ...(className ? { className: { contains: className, mode: "insensitive" } } : {}),
       ...(gradeLevelId ? {
-        OR: [
+        AND: [{ OR: [
           { classroom: { gradeLevelId } },
           { subjectFolder: { gradeLevelId } },
-        ],
+        ] }],
       } : {}),
       ...(search ? {
         OR: [
@@ -93,6 +97,7 @@ export async function GET(req: NextRequest) {
     type ClassroomGroup = {
       classroomId: string | null;
       className: string;
+      classNameMissing: boolean;
       gradeLevelId: string | null;
       gradeLevelName: string | null;
       totalExams: number;
@@ -104,14 +109,15 @@ export async function GET(req: NextRequest) {
     const unmappedClassroomKey = "__unmapped__";
 
     for (const exam of exams) {
-      const cId = exam.classroomId || unmappedClassroomKey;
+      const cId = exam.classroomId || `${unmappedClassroomKey}:${exam.subjectFolder?.gradeLevelId || ""}:${exam.className || ""}`;
       let cGroup = classroomMap.get(cId);
       if (!cGroup) {
         cGroup = {
           classroomId: exam.classroomId,
           className: exam.classroom?.name || exam.className || "Perlu Dipetakan",
-          gradeLevelId: exam.classroom?.gradeLevelId || null,
-          gradeLevelName: exam.classroom?.gradeLevel?.name || null,
+          classNameMissing: !exam.classroomId && !exam.className,
+          gradeLevelId: exam.classroom?.gradeLevelId || exam.subjectFolder?.gradeLevelId || null,
+          gradeLevelName: exam.classroom?.gradeLevel?.name || exam.subjectFolder?.gradeLevel?.name || null,
           totalExams: 0,
           activeExams: 0,
           subjects: [],

@@ -6,12 +6,17 @@ import { AppError } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
 import { errorResponse, safeErrorMessage, successResponse } from "@/lib/response";
 import { calculateScore } from "@/services/score-calculation";
+import { groupedResultRows, resultsHeader, serializeCsv } from "./csv";
 
 const querySchema = z.object({
-  mode: z.enum(["list", "matrix"]).default("list"),
+  mode: z.enum(["hierarchy", "list", "matrix"]).default("list"),
   page: z.coerce.number().int().min(1).max(100000).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(25),
+  examId: z.string().trim().max(100).optional(),
   classroomId: z.string().trim().max(100).optional(),
+  unmappedClassroom: z.enum(["true"]).optional(),
+  unmappedGrade: z.enum(["true"]).optional(),
+  missingClassName: z.enum(["true"]).optional(),
   subjectId: z.string().trim().max(100).optional(),
   gradeLevelId: z.string().trim().max(100).optional(),
   subject: z.string().trim().max(100).optional(),
@@ -21,35 +26,31 @@ const querySchema = z.object({
   category: z.string().trim().max(100).optional(),
   search: z.string().trim().max(100).optional(),
   format: z.enum(["json", "csv"]).default("json"),
+  csvLayout: z.enum(["flat", "grouped"]).default("flat"),
 });
-function csvCell(value: unknown) {
-  const text = String(value ?? "");
-  return `"${(/^[\t\r\n ]*[=+\-@]/.test(text) ? `'${text}` : text).replaceAll('"', '""')}"`;
-}
-
 export async function GET(req: NextRequest) {
   try {
     await authenticateTeacher(req);
     const parsed = querySchema.safeParse(Object.fromEntries(req.nextUrl.searchParams));
     if (!parsed.success) return errorResponse("VALIDATION_ERROR", "Filter hasil tidak valid", 400, parsed.error.flatten());
-    const { mode, page, limit, classroomId, subjectId, gradeLevelId, subject, className, academicYear, semester, category, search, format } = parsed.data;
+    const { mode, page, limit, examId, classroomId, unmappedClassroom, unmappedGrade, missingClassName, subjectId, gradeLevelId, subject, className, academicYear, semester, category, search, format, csvLayout } = parsed.data;
+    const conditions: Prisma.ExamWhereInput[] = [];
+    if (unmappedGrade) conditions.push({ classroomId: null, OR: [{ subjectId: null }, { subjectFolder: { gradeLevelId: null } }] });
+    else if (gradeLevelId) conditions.push({ OR: [{ classroom: { gradeLevelId } }, { subjectFolder: { gradeLevelId } }] });
+    if (missingClassName) conditions.push({ OR: [{ className: null }, { className: "" }] });
     const where: Prisma.ExamWhereInput = {
-      status: { in: ["ended", "archived"] },
-      ...(classroomId ? { classroomId } : {}),
+      status: { in: ["active", "ended", "archived"] },
+      ...(examId ? { id: examId } : {}),
+      ...(unmappedClassroom ? { classroomId: null } : classroomId ? { classroomId } : {}),
       ...(subjectId ? { subjectId } : {}),
-      ...(gradeLevelId ? {
-        OR: [
-          { classroom: { gradeLevelId } },
-          { subjectFolder: { gradeLevelId } },
-        ],
-      } : {}),
-      ...(subject ? { subjectName: subject } : {}), ...(className ? { className } : {}),
+      ...(conditions.length ? { AND: conditions } : {}),
+      ...(subject ? { subjectName: subject } : {}), ...(className && !missingClassName ? { className } : {}),
       ...(academicYear ? { academicYear } : {}), ...(semester ? { semester } : {}), ...(category ? { category } : {}),
       ...(search ? { OR: ["title", "subjectName", "className", "category", "academicYear"].map(field => ({ [field]: { contains: search, mode: "insensitive" } })) } : {}),
     };
     const exams = await prisma.exam.findMany({
       where, orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      select: { id: true, title: true, subjectName: true, className: true, academicYear: true, semester: true, category: true, categoryNumber: true, passingScore: true },
+      select: { id: true, title: true, subjectId: true, subjectName: true, className: true, academicYear: true, semester: true, category: true, categoryNumber: true, passingScore: true, classroom: { select: { gradeLevel: { select: { id: true, name: true } } } }, subjectFolder: { select: { gradeLevel: { select: { id: true, name: true } } } } },
     });
     const examIds = exams.map(exam => exam.id);
     const studentWhere: Prisma.StudentWhereInput = { examId: { in: examIds }, status: "submitted" };
@@ -77,12 +78,15 @@ export async function GET(req: NextRequest) {
       return { nisn, name: entries[0]?.student.name || "", scores: Object.fromEntries(entries.map(entry => [entry.exam.id, { finalScore: entry.student.finalScore, pendingManualCount: entry.student.pendingManualCount }])) };
     }) || [];
     if (format === "csv") {
-      const rows: unknown[][] = mode === "list"
-        ? [["Nama", "NISN", "Ujian", "Kelas", "Mata pelajaran", "Tahun ajaran", "Semester", "Nilai", "Status penilaian", "Pelanggaran", "Waktu selesai"], ...attempts.map(({ exam, student }) => [student.name, student.nisn, exam.title, exam.className, exam.subjectName, exam.academicYear, exam.semester, student.pendingManualCount ? "" : student.finalScore, student.pendingManualCount ? "Menunggu penilaian" : "Final", student.violationCount, student.submittedAt?.toISOString()])]
+      let rows: unknown[][] = mode !== "matrix" || csvLayout === "grouped"
+        ? [resultsHeader, ...attempts.map(({ exam, student }) => [student.name, student.nisn, exam.title, exam.className, exam.subjectName, exam.academicYear, exam.semester, student.pendingManualCount ? "" : student.finalScore, student.pendingManualCount ? "Menunggu penilaian" : "Final", student.violationCount, student.submittedAt?.toISOString()])]
         : [["Nama", "NISN", ...exams.map(exam => `${exam.title} (${exam.id.slice(0, 8)})`)], ...matrixStudents.map(student => [student.name, student.nisn, ...exams.map(exam => { const score = student.scores[exam.id]; return !score ? "" : score.pendingManualCount ? "Menunggu penilaian" : score.finalScore; })])];
-      return new NextResponse(`\uFEFF${rows.map(row => row.map(csvCell).join(",")).join("\r\n")}`, { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="hasil-${mode}.csv"`, "Cache-Control": "private, no-store" } });
+      if (csvLayout === "grouped") {
+        rows = groupedResultRows(attempts);
+      }
+      return new NextResponse(serializeCsv(rows), { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="hasil-${mode}.csv"`, "Cache-Control": "private, no-store" } });
     }
-    return successResponse({ exams, attempts: mode === "list" ? attempts : [], students: matrixStudents, page, total, totalPages: Math.ceil(total / limit) }, 200, { "Cache-Control": "private, no-store" });
+    return successResponse({ exams, attempts: mode === "matrix" ? [] : attempts, students: matrixStudents, page, total, totalPages: Math.ceil(total / limit) }, 200, { "Cache-Control": "private, no-store" });
   } catch (err) {
     if (err instanceof AppError) return errorResponse(err.code, err.message, err.statusCode, err.details);
     return errorResponse("INTERNAL_SERVER_ERROR", safeErrorMessage(err, "Gagal mengambil rekap hasil"), 500);

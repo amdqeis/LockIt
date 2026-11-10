@@ -1,16 +1,27 @@
 export const motionTokens = {
   duration: {
     instant: 0.1,
-    fast: 0.15,
+    fast: 0.14,
     normal: 0.22,
-    slow: 0.35,
+    slow: 0.32,
   },
   ease: [0.22, 1, 0.36, 1] as const,
   spring: {
     type: "spring" as const,
-    stiffness: 320,
-    damping: 30,
+    stiffness: 420,
+    damping: 34,
     mass: 0.8,
+  },
+  softSpring: {
+    type: "spring" as const,
+    stiffness: 270,
+    damping: 31,
+    mass: 0.95,
+  },
+  press: {
+    type: "spring" as const,
+    stiffness: 580,
+    damping: 30,
   },
   navSpring: {
     type: "spring" as const,
@@ -18,6 +29,10 @@ export const motionTokens = {
     damping: 34,
     mass: 0.8,
   },
+  fast: 0.14,
+  ui: 0.22,
+  panel: 0.32,
+  chart: 0.55,
 };
 
 export const pageVariants = {
@@ -82,4 +97,3 @@ export const staggerContainer = (staggerTime = 0.04) => ({
     },
   },
 });
-

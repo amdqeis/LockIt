@@ -1,6 +1,6 @@
 # EduQuas
 
-- Status: Terminologi "Kelas" dipertahankan; pengelolaan tingkat dan mapel, dropdown bank soal, serta layar terkunci siswa telah diperbarui.
-- Frontend & Backend: Tingkat bank tetap mengikuti mata pelajaran; filter dan cursor bank telah divalidasi, dan jawaban tertunda dikirim kembali setelah status kunci tersinkron.
-- Verifikasi: type-check dan lint frontend/backend serta build frontend lulus; 25 pengujian backend dan tiga skenario browser dengan API simulasi lulus. Detektor Impeccable menandai satu font Inter yang sudah ada.
-- Next steps: Verifikasi operasional terpadu pada staging dengan backend dan data yang sebenarnya.
+- Status: Navigasi lima tab memakai tingkatan, kelas, lalu konten; mapel dan bank soal tetap dipakai bersama pada tingkat.
+- Hasil: CSV global, kelas, dan ujian dikelompokkan per tingkat/mapel; data lama yang belum dipetakan tetap dapat diakses.
+- Verifikasi: Lint, type-check, dan build kedua workspace lulus; tes browser memakai API simulasi pada 320, 390, 768, dan 1440 px.
+- Batasan: Ekspor belum diuji terhadap database sungguhan; temuan audit layar pengawasan dicatat di `anti-slop/audit-002-2026-11-10.md`.

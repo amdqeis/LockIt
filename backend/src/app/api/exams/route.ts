@@ -85,20 +85,27 @@ export async function GET(req: NextRequest) {
     if (teacherIdFilter) {
       where.teacherId = teacherIdFilter;
     }
-    if (classroomIdFilter) {
+    if (searchParams.get("unmappedClassroom") === "true") {
+      where.classroomId = null;
+    } else if (classroomIdFilter) {
       where.classroomId = classroomIdFilter;
     }
     if (subjectIdFilter) {
       where.subjectId = subjectIdFilter;
     }
-    if (gradeLevelIdFilter) {
-      where.OR = [
+    if (searchParams.get("unmappedGrade") === "true") {
+      where.AND = [{ OR: [{ subjectId: null }, { subjectFolder: { gradeLevelId: null } }] }];
+    } else if (gradeLevelIdFilter) {
+      where.AND = [{ OR: [
         { classroom: { gradeLevelId: gradeLevelIdFilter } },
         { subjectFolder: { gradeLevelId: gradeLevelIdFilter } },
-      ];
+      ] }];
     }
     if (status) {
       where.status = status;
+    }
+    if (searchParams.get("missingClassName") === "true") {
+      where.AND = [...(where.AND || []), { OR: [{ className: null }, { className: "" }] }];
     }
 
     // Opt-in pagination for dashboard clients; requests without limit keep the existing response.

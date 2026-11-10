@@ -46,7 +46,8 @@ function contrast(foreground, background) {
     else if (url.pathname === '/api/academic/classrooms') {
       if (slowGrade && url.searchParams.get('gradeLevelId') === 'grade-xi') await new Promise((resolve) => setTimeout(resolve, 400));
       if (failGrade && url.searchParams.get('gradeLevelId') === 'grade-xi') return route.fulfill({ status: 500, json: { success: false, error: { message: 'Kelas gagal dimuat.' } } });
-      data = url.searchParams.get('gradeLevelId') === 'grade-xii' ? [] : [{ id: `class-${url.searchParams.get('gradeLevelId')}`, name: 'Kelas 1', gradeLevelId: url.searchParams.get('gradeLevelId'), _count: { exams: 0 } }];
+      const gradeId = url.searchParams.get('gradeLevelId');
+      data = gradeId === 'grade-xii' ? [] : (gradeId ? [gradeId] : ['grade-x', 'grade-xi']).map(id => ({ id: `class-${id}`, name: 'Kelas 1', gradeLevelId: id, _count: { exams: 0 } }));
     } else if (url.pathname === '/api/academic/legacy-mapping') data = { summary: { totalUnmapped: 0, unmappedSubjectsCount: 0, unmappedExamsCount: 0 }, unmappedSubjects: [], unmappedExams: [], availableGradeLevels: [], availableClassrooms: [], availableSubjects: [] };
     else if (url.pathname === '/api/subjects' && req.method() === 'POST') {
       subjectPosts++;
@@ -80,9 +81,20 @@ function contrast(foreground, background) {
     await page.getByRole('button', { name: 'Lanjutkan ke Pratinjau Siswa →' }).click();
     await page.getByRole('button', { name: 'Lanjutkan ke Konfirmasi Unggah →' }).click();
   }
+  async function chooseGrade(name) {
+    await page.locator('.drilldown-card').filter({ hasText: name }).first().click();
+  }
+  async function chooseClass() {
+    await page.getByRole('button', { name: /Kelas 1/ }).first().click();
+  }
+  async function goToGrades() {
+    await page.getByRole('navigation', { name: 'Lokasi navigasi' }).getByRole('button', { name: 'Tingkatan' }).click();
+  }
 
   try {
     await page.goto(`${origin}/dashboard/kelas-mapel`);
+    await chooseGrade('Tingkat X');
+    await chooseClass();
     await page.getByRole('heading', { name: /Daftar Kelas/ }).waitFor();
     await page.getByRole('heading', { name: /Mata Pelajaran/ }).last().waitFor();
     assert.equal(await page.getByRole('tab').count(), 0);
@@ -93,8 +105,9 @@ function contrast(foreground, background) {
       await page.screenshot({ path: `/tmp/eduquas-academic-${width}.png`, fullPage: true });
     }
     await page.setViewportSize({ width: 390, height: 900 });
+    await page.getByRole('button', { name: 'Tambah Mata Pelajaran' }).first().click();
     const input = page.getByLabel('Nama mata pelajaran untuk Tingkat X');
-    const academicColors = await input.evaluate((el) => ({ foreground: getComputedStyle(el.labels[0]).color, background: getComputedStyle(document.querySelector('.staff-app')).backgroundColor }));
+    const academicColors = await input.evaluate((el) => ({ foreground: getComputedStyle(el.labels[0]).color, background: getComputedStyle(el.closest('.academic-modal-form') || document.querySelector('.staff-app')).backgroundColor }));
     assert.ok(contrast(academicColors.foreground, academicColors.background) >= 4.5, 'academic label contrast');
     await input.fill('Matematika');
     await page.getByRole('button', { name: 'Tambah mata pelajaran', exact: true }).click();
@@ -104,27 +117,37 @@ function contrast(foreground, background) {
     await page.getByRole('status').getByText('Mata pelajaran "Biologi" tersimpan di Tingkat X.').waitFor();
     await page.getByText('Biologi · Tingkat X').waitFor();
     assert.equal(subjects.find((item) => item.name === 'Biologi').gradeLevelId, 'grade-x');
-    await input.fill('Teks yang belum disimpan');
-    slowGrade = true;
-    await page.getByRole('button', { name: 'Tingkat XI', exact: true }).click();
-    await page.getByRole('button', { name: 'Tingkat X', exact: true }).click();
-    await page.getByLabel('Nama mata pelajaran untuk Tingkat X').waitFor();
-    await page.waitForTimeout(500);
-    assert.equal(await page.getByLabel('Nama mata pelajaran untuk Tingkat X').inputValue(), '');
-    assert.equal(await page.getByText('Biologi · Tingkat X').count(), 1);
-    await page.getByRole('button', { name: 'Buka data yang perlu dipetakan' }).click();
-    await page.getByRole('heading', { name: 'Data yang Perlu Dipetakan' }).waitFor();
-    await page.getByRole('button', { name: 'Tutup data yang perlu dipetakan' }).click();
 
-    await page.getByRole('button', { name: 'Tingkat XII', exact: true }).click();
-    await page.getByText('Belum ada kelas pada tingkat ini.').waitFor();
-    await page.getByText('Belum ada mata pelajaran pada tingkat ini.').waitFor();
+    await page.getByRole('button', { name: 'Tambah Mata Pelajaran' }).first().click();
+    const draftInput = page.getByLabel('Nama mata pelajaran untuk Tingkat X');
+    await draftInput.fill('Teks yang belum disimpan');
+    await page.getByRole('button', { name: 'Batal', exact: true }).click();
+    slowGrade = true;
+    await goToGrades();
+    await chooseGrade('Tingkat XI');
+    await goToGrades();
+    await chooseGrade('Tingkat X');
+    await chooseClass();
+    await page.waitForTimeout(500);
+    await page.getByRole('button', { name: 'Tambah Mata Pelajaran' }).first().click();
+    assert.equal(await page.getByLabel('Nama mata pelajaran untuk Tingkat X').inputValue(), '');
+    await page.getByRole('button', { name: 'Batal', exact: true }).click();
+    assert.equal(await page.getByText('Biologi · Tingkat X').count(), 1);
+    await page.getByRole('button', { name: /Buka data yang perlu dipetakan/ }).click();
+    await page.getByRole('heading', { name: 'Data yang Perlu Dipetakan' }).waitFor();
+    await page.getByRole('button', { name: /Tutup/ }).click();
+
+    await goToGrades();
+    await chooseGrade('Tingkat XII');
+    await page.getByText('Belum ada kelas pada tingkat ini. Tambahkan kelas untuk melanjutkan.').waitFor();
     failGrade = true;
-    await page.getByRole('button', { name: 'Tingkat XI', exact: true }).click();
+    await goToGrades();
+    await chooseGrade('Tingkat XI');
     await page.getByRole('alert').getByText('Kelas gagal dimuat.').waitFor();
     assert.equal(await page.getByText('Biologi · Tingkat X').count(), 0);
     failGrade = false;
     await page.getByRole('button', { name: 'Coba lagi' }).click();
+    await chooseClass();
     await page.getByText('Matematika · Tingkat XI').waitFor();
     await page.getByRole('link', { name: 'Buka Bank Soal' }).click();
     await page.waitForURL('**/dashboard/bank-soal?**');
@@ -152,9 +175,10 @@ function contrast(foreground, background) {
     const opened = context.waitForEvent('page');
     await manageLink.click();
     const popup = await opened;
+    await popup.getByRole('button', { name: /Tambah Mata Pelajaran/ }).first().click();
     await popup.getByLabel('Nama mata pelajaran untuk Tingkat XII').fill('Sejarah XII');
     await popup.getByRole('button', { name: 'Tambah mata pelajaran', exact: true }).click();
-    await popup.getByText('Sejarah XII · Tingkat XII').waitFor();
+    await popup.getByRole('status').getByText('Mata pelajaran "Sejarah XII" tersimpan di Tingkat XII.').waitFor();
     await popup.close();
     await page.bringToFront();
     await page.evaluate(() => dispatchEvent(new Event('focus')));
@@ -183,6 +207,8 @@ function contrast(foreground, background) {
     assert.equal(subjectPosts, 3, 'the editor did not create a subject');
 
     await page.goto(`${origin}/dashboard/bank-soal`);
+    await chooseGrade('Tingkat X');
+    await chooseClass();
     await page.getByRole('button', { name: 'Edit', exact: true }).first().click();
     await page.getByRole('button', { name: 'Ubah judul bank soal' }).click();
     await page.locator('#new-bank-title').fill('Aljabar baru');
@@ -196,7 +222,8 @@ function contrast(foreground, background) {
     assert.equal(draftBody.bankRevision, 2);
     await page.goto(`${origin}/dashboard/bank-soal?gradeLevelId=grade-xi&folder=math-xi`);
     await page.waitForFunction(() => new URL(location.href).searchParams.get('subjectId') === 'math-xi');
-    await page.getByRole('button', { name: /Matematika · Tingkat XI/ }).waitFor();
+    await page.locator('.hierarchy-subject-filter select').waitFor();
+    assert.equal(await page.locator('.hierarchy-subject-filter select').inputValue(), 'math-xi');
     await page.goto(`${origin}/dashboard/bank-soal?gradeLevelId=grade-x&subjectId=math-xi`);
     await page.waitForFunction(() => !new URL(location.href).searchParams.has('subjectId'));
     assert.equal(new URL(page.url()).searchParams.get('gradeLevelId'), 'grade-x');

@@ -14,18 +14,22 @@ export async function GET(req: NextRequest) {
     const academicYear = searchParams.get("academicYear") || undefined;
     const semester = (searchParams.get("semester") as "ganjil" | "genap") || undefined;
     const category = searchParams.get("category") || undefined;
+    const subject = searchParams.get("subject") || undefined;
+    const className = searchParams.get("className") || undefined;
     const search = searchParams.get("search")?.trim() || undefined;
 
     const where: Prisma.ExamWhereInput = {
-      status: { in: ["ended", "archived"] },
+      status: { in: ["active", "ended", "archived"] },
       ...(academicYear ? { academicYear } : {}),
       ...(semester ? { semester } : {}),
       ...(category ? { category } : {}),
+      ...(subject ? { subjectName: subject } : {}),
+      ...(className ? { className } : {}),
       ...(gradeLevelId ? {
-        OR: [
+        AND: [{ OR: [
           { classroom: { gradeLevelId } },
           { subjectFolder: { gradeLevelId } },
-        ],
+        ] }],
       } : {}),
       ...(search ? {
         OR: [
@@ -136,6 +140,7 @@ export async function GET(req: NextRequest) {
     type ResultClassroomGroup = {
       classroomId: string | null;
       className: string;
+      classNameMissing: boolean;
       gradeLevelId: string | null;
       gradeLevelName: string | null;
       totalExams: number;
@@ -160,14 +165,15 @@ export async function GET(req: NextRequest) {
         pendingGradingCount,
       };
 
-      const cId = exam.classroomId || unmappedClassroomKey;
+      const cId = exam.classroomId || `${unmappedClassroomKey}:${exam.subjectFolder?.gradeLevelId || ""}:${exam.className || ""}`;
       let cGroup = classroomMap.get(cId);
       if (!cGroup) {
         cGroup = {
           classroomId: exam.classroomId,
           className: exam.classroom?.name || exam.className || "Perlu Dipetakan",
-          gradeLevelId: exam.classroom?.gradeLevelId || null,
-          gradeLevelName: exam.classroom?.gradeLevel?.name || null,
+          classNameMissing: !exam.classroomId && !exam.className,
+          gradeLevelId: exam.classroom?.gradeLevelId || exam.subjectFolder?.gradeLevelId || null,
+          gradeLevelName: exam.classroom?.gradeLevel?.name || exam.subjectFolder?.gradeLevel?.name || null,
           totalExams: 0,
           totalCompletedStudents: 0,
           averageScore: null,

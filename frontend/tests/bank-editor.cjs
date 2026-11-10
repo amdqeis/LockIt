@@ -34,6 +34,8 @@ const executablePath = process.env.CHROMIUM_PATH || '/usr/bin/chromium';
       data = { id: 'teacher-1', fullName: 'Guru Uji', email: 'guru@example.invalid', role: 'ADMIN', isActive: true };
     } else if (url.pathname === '/api/academic/grade-levels') {
       data = [{ id: 'grade-1', name: 'Tingkat X' }];
+    } else if (url.pathname === '/api/academic/classrooms') {
+      data = [{ id: 'class-1', name: 'Kelas A', gradeLevelId: 'grade-1' }];
     } else if (url.pathname === '/api/subjects') {
       data = [{ id: 'subject-1', name: 'Matematika', gradeLevelId: 'grade-1', gradeLevel: { id: 'grade-1', name: 'Tingkat X' }, _count: { banks: 1 } }];
     } else if (url.pathname === '/api/question-banks' && req.method() === 'POST') {
@@ -84,6 +86,8 @@ const executablePath = process.env.CHROMIUM_PATH || '/usr/bin/chromium';
 
     // Batalkan dan kembali ke daftar bank
     await page.getByRole('button', { name: '← Kembali ke daftar bank soal' }).click();
+    await page.locator('.drilldown-card').filter({ hasText: 'Tingkat X' }).first().click();
+    await page.getByRole('button', { name: /Kelas A/ }).click();
 
     // 2. Uji tombol "Preview" di tabel membuka Dialog Modal Pop-up
     await page.getByRole('button', { name: 'Preview', exact: true }).first().click();

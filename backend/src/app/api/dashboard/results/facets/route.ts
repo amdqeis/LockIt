@@ -8,7 +8,7 @@ import { errorResponse, safeErrorMessage, successResponse } from "@/lib/response
 export async function GET(req: NextRequest) {
   try {
     const teacher = await authenticateTeacher(req);
-    const where: Prisma.ExamWhereInput = { status: { in: ["ended", "archived"] }, ...(teacher.role === "ADMIN" ? {} : { teacherId: teacher.teacherId }) };
+    const where: Prisma.ExamWhereInput = { status: { in: ["active", "ended", "archived"] }, ...(teacher.role === "ADMIN" ? {} : { teacherId: teacher.teacherId }) };
     const [subjects, classes, periods, categories] = await Promise.all([
       prisma.exam.groupBy({ by: ["subjectName"], where, orderBy: { subjectName: "asc" } }),
       prisma.exam.groupBy({ by: ["className"], where, orderBy: { className: "asc" } }),

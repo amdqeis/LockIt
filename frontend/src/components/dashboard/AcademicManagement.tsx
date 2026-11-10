@@ -2,12 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { motion, useReducedMotion, AnimatePresence } from "framer-motion";
 import { staffApi, staffSend } from "@/lib/staff-api";
 import { queryCache } from "@/lib/data-cache";
 import { Dialog } from "@/components/Dialog";
 import { MotionButton } from "@/components/MotionButton";
 import { ErrorText, Icon, message } from "./Dashboard";
+import { HierarchyBreadcrumb, HierarchyCard, useHierarchyNavigation } from "./HierarchyNavigation";
 
 type GradeLevel = {
   id: string;
@@ -68,9 +69,9 @@ type Props = {
 
 export function AcademicManagement({ teacherRole }: Props = {}) {
   void teacherRole;
-  const searchParams = useSearchParams();
+  const reduceMotion = useReducedMotion();
   const [gradeLevels, setGradeLevels] = useState<GradeLevel[]>([]);
-  const [selectedGradeId, setSelectedGradeId] = useState<string>(() => searchParams.get("gradeLevelId") || "");
+  const { selectedGradeId, selectedClassroomId, setSelectedGradeId, setSelectedClassroomId } = useHierarchyNavigation();
   const selectedGradeRef = useRef(selectedGradeId);
   const [loadedGradeId, setLoadedGradeId] = useState("");
   const [gradeLoadError, setGradeLoadError] = useState("");
@@ -97,7 +98,6 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
   const [subjectModalOpen, setSubjectModalOpen] = useState(false);
   const [subjectNameInput, setSubjectNameInput] = useState("");
   const [editingSubject, setEditingSubject] = useState<Subject | null>(null);
-  const [newSubjectName, setNewSubjectName] = useState("");
   const [subjectError, setSubjectError] = useState("");
   const [subjectBusy, setSubjectBusy] = useState(false);
 
@@ -107,13 +107,10 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
     try {
       const data = await staffApi<GradeLevel[]>("/api/academic/grade-levels");
       setGradeLevels(data);
-      if (data.length > 0 && !selectedGradeId) {
-        setSelectedGradeId(data[0].id);
-      }
     } catch (err) {
       setError(message(err));
     }
-  }, [selectedGradeId]);
+  }, []);
 
   const loadClassrooms = useCallback(async (gradeId: string) => {
     if (!gradeId) return;
@@ -150,9 +147,6 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
       .then((data) => {
         if (!active) return;
         setGradeLevels(data);
-        if (data.length > 0 && !data.some((grade) => grade.id === selectedGradeId)) {
-          setSelectedGradeId(data[0].id);
-        }
       })
       .catch((err) => {
         if (active) setError(message(err));
@@ -161,7 +155,7 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
         if (active) setLoading(false);
       });
     return () => { active = false; };
-  }, [selectedGradeId]);
+  }, []);
 
   useEffect(() => {
     if (!selectedGradeId) return;
@@ -198,6 +192,7 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
   }, [legacyOpen]);
 
   const selectedGrade = gradeLevels.find(g => g.id === selectedGradeId);
+  const selectedClassroom = classrooms.find(c => c.id === selectedClassroomId);
   const gradeContentLoading = !!selectedGradeId && loadedGradeId !== selectedGradeId;
 
   // Grade CRUD
@@ -214,23 +209,11 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
         setSuccessNotice(`Tingkat "${gradeNameInput.trim()}" berhasil dibuat.`);
         selectedGradeRef.current = created.id;
         setSelectedGradeId(created.id);
-        setNewSubjectName("");
         setSubjectError("");
       }
       setGradeModalOpen(false);
       setGradeNameInput("");
       setEditingGrade(null);
-      await loadGradeLevels();
-    } catch (err) {
-      setError(message(err));
-    }
-  }
-
-  async function handleArchiveGrade(grade: GradeLevel) {
-    setError("");
-    try {
-      await staffSend(`/api/academic/grade-levels/${grade.id}`, "PUT", { isArchived: !grade.isArchived });
-      setSuccessNotice(`Tingkat "${grade.name}" berhasil ${grade.isArchived ? "dipulihkan" : "diarsipkan"}.`);
       await loadGradeLevels();
     } catch (err) {
       setError(message(err));
@@ -273,15 +256,20 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
     }
   }
 
-  // Subject CRUD
+  // Subject CRUD (Create & Edit in Modal)
   async function handleSaveSubject(e: React.FormEvent) {
     e.preventDefault();
-    if (!subjectNameInput.trim() || !selectedGradeId) return;
-    setError("");
+    const name = subjectNameInput.trim();
+    if (!name || !selectedGradeId || subjectBusy) return;
+    setSubjectBusy(true);
+    setSubjectError("");
     try {
       if (editingSubject) {
-        await staffSend(`/api/subjects/${editingSubject.id}`, "PUT", { name: subjectNameInput.trim() });
-        setSuccessNotice(`Mata pelajaran "${subjectNameInput.trim()}" berhasil diperbarui.`);
+        await staffSend(`/api/subjects/${editingSubject.id}`, "PUT", { name });
+        setSuccessNotice(`Mata pelajaran "${name}" berhasil diperbarui.`);
+      } else {
+        await staffSend("/api/subjects", "POST", { name, gradeLevelId: selectedGradeId });
+        setSuccessNotice(`Mata pelajaran "${name}" tersimpan di ${selectedGrade?.name}.`);
       }
       queryCache.invalidate("/api/subjects");
       setSubjectModalOpen(false);
@@ -289,28 +277,36 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
       setEditingSubject(null);
       await loadSubjects(selectedGradeId);
     } catch (err) {
-      setError(message(err));
-    }
-  }
-
-  async function handleCreateSubject(e: React.FormEvent) {
-    e.preventDefault();
-    if (!newSubjectName.trim() || !selectedGradeId || subjectBusy || gradeContentLoading) return;
-    const gradeId = selectedGradeId;
-    const name = newSubjectName.trim();
-    setSubjectBusy(true);
-    setSubjectError("");
-    try {
-      await staffSend("/api/subjects", "POST", { name, gradeLevelId: gradeId });
-      queryCache.invalidate("/api/subjects");
-      setNewSubjectName("");
-      setSuccessNotice(`Mata pelajaran "${name}" tersimpan di ${selectedGrade?.name}.`);
-      await loadSubjects(gradeId);
-    } catch (err) {
       setSubjectError(message(err));
     } finally {
       setSubjectBusy(false);
     }
+  }
+
+  function handleOpenCreateSubject() {
+    setEditingSubject(null);
+    setSubjectNameInput("");
+    setSubjectError("");
+    setSubjectModalOpen(true);
+  }
+
+  function handleOpenEditSubject(sub: Subject) {
+    setEditingSubject(sub);
+    setSubjectNameInput(sub.name);
+    setSubjectError("");
+    setSubjectModalOpen(true);
+  }
+
+  function handleOpenCreateClassroom() {
+    setEditingClassroom(null);
+    setClassroomNameInput("");
+    setClassroomModalOpen(true);
+  }
+
+  function handleOpenEditClassroom(cls: Classroom) {
+    setEditingClassroom(cls);
+    setClassroomNameInput(cls.name);
+    setClassroomModalOpen(true);
   }
 
   async function handleArchiveSubject(subject: Subject) {
@@ -397,21 +393,10 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
             Kelola master tingkat, kelas, dan mata pelajaran sebagai acuan ujian dan bank soal.
           </p>
         </div>
-        <div className="academic-header-actions">
-          <MotionButton
-            className="staff-secondary"
-            onClick={() => {
-              setEditingGrade(null);
-              setGradeNameInput("");
-              setGradeModalOpen(true);
-            }}
-          >
-            <Icon name="plus" size={14} /> Tambah Tingkat
-          </MotionButton>
-        </div>
       </div>
 
       <ErrorText error={error} />
+      <HierarchyBreadcrumb grade={selectedGrade?.name} classroom={selectedClassroom?.name} onRoot={() => setSelectedGradeId(null)} onGrade={() => setSelectedClassroomId(null)} />
       {successNotice && (
         <div className="staff-success-notice" role="status">
           <span>{successNotice}</span>
@@ -421,305 +406,411 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
         </div>
       )}
 
-      {/* Grade Selector Strip */}
-      <div className="grade-selector-strip" role="region" aria-label="Pilihan Tingkat">
-        <span className="grade-selector-label">Pilih Tingkat:</span>
-        <div className="grade-pills">
-          {gradeLevels.map((gl) => (
-            <button
-              key={gl.id}
-              type="button"
-              className={`grade-pill ${gl.id === selectedGradeId ? "active" : ""} ${gl.isArchived ? "archived" : ""}`}
-              disabled={subjectBusy}
-              onClick={() => { if (gl.id === selectedGradeId) return; selectedGradeRef.current = gl.id; setSelectedGradeId(gl.id); setNewSubjectName(""); setSubjectError(""); setGradeLoadError(""); setSuccessNotice(""); }}
+      {!selectedGradeId ? (
+        /* TAHAP 1: PILIHAN TINGKATAN (STYLE OVERVIEW CARDS) */
+        <div style={{ marginTop: "10px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+            <div>
+              <h3 style={{ fontSize: "15px", fontWeight: 700, margin: 0 }}>Pilihan Tingkat</h3>
+              <p style={{ fontSize: "12px", color: "var(--staff-muted)", margin: "2px 0 0" }}>
+                Pilih tingkatan untuk mengelola daftar kelas dan mata pelajaran.
+              </p>
+            </div>
+            <MotionButton
+              className="staff-primary"
+              onClick={() => {
+                setEditingGrade(null);
+                setGradeNameInput("");
+                setGradeModalOpen(true);
+              }}
             >
-              <span>{gl.name}</span>
-              {gl.isArchived && <small>(Arsip)</small>}
-            </button>
-          ))}
+              <Icon name="plus" size={14} /> Tambah Tingkat
+            </MotionButton>
+          </div>
+
+          <div className="drilldown-grid">
+            {gradeLevels.map((gl, index) => <HierarchyCard key={gl.id} index={index} name={`Tingkat ${gl.name}`} count={`${gl._count?.classrooms ?? 0} kelas`} detail={`${gl._count?.subjects ?? 0} mata pelajaran`} onClick={() => { selectedGradeRef.current = gl.id; setSelectedGradeId(gl.id); setSubjectError(""); setGradeLoadError(""); setSuccessNotice(""); }} />)}
+          </div>
           {gradeLevels.length === 0 && !loading && (
-            <span className="grade-pill-empty">Belum ada tingkat. Tambahkan tingkat pertama Anda.</span>
+            <div className="staff-empty">
+              <h3>Belum ada tingkatan</h3>
+              <p>Tambahkan tingkat pertama Anda untuk mulai mengatur kelas dan mata pelajaran.</p>
+            </div>
           )}
         </div>
-        {selectedGrade && (
-          <div className="grade-actions">
-            <button
-              type="button"
-              className="grade-action-btn"
+      ) : (
+        /* TAHAP 2: HEADER BANNER KELAS & MAPEL DI TINGKAT TERPILIH */
+        <div className="class-detail-banner" style={{ marginTop: "10px" }}>
+          <div className="class-detail-info">
+            <h3>Tingkat {selectedGrade?.name}</h3>
+            <p>Kelola kelas dan mata pelajaran terdaftar pada tingkat ini.</p>
+          </div>
+          <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+            <MotionButton
+              className="staff-secondary"
               onClick={() => {
-                setEditingGrade(selectedGrade);
-                setGradeNameInput(selectedGrade.name);
+                setEditingGrade(selectedGrade || null);
+                setGradeNameInput(selectedGrade?.name || "");
                 setGradeModalOpen(true);
               }}
               title="Ubah nama tingkat"
             >
-              <Icon name="pencil" size={13} /> Ubah
-            </button>
-            <button
-              type="button"
-              className="grade-action-btn"
-              onClick={() => handleArchiveGrade(selectedGrade)}
-              title={selectedGrade.isArchived ? "Pulihkan tingkat" : "Arsipkan tingkat"}
+              <Icon name="pencil" size={13} /> Ubah Nama Tingkat
+            </MotionButton>
+            <MotionButton
+              className="staff-secondary"
+              onClick={() => setSelectedGradeId("")}
             >
-              <Icon name="archive" size={13} /> {selectedGrade.isArchived ? "Pulihkan" : "Arsipkan"}
-            </button>
+              ← Kembali ke Pilihan Tingkat
+            </MotionButton>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
-      {gradeContentLoading ? <p className="staff-note" role="status">Memuat kelas dan mata pelajaran untuk {selectedGrade?.name || "tingkat ini"}...</p> : gradeLoadError ? <p className="staff-error" role="alert">{gradeLoadError} <button className="action-link" type="button" onClick={() => { setLoadedGradeId(""); setGradeLoadError(""); setGradeLoadVersion((version) => version + 1); }}>Coba lagi</button></p> : selectedGrade && <>
-        <section className="academic-tab-content" aria-label="Daftar Kelas">
-          <div className="tab-content-head">
-            <div>
-              <h3>Daftar Kelas — {selectedGrade ? selectedGrade.name : "Pilih Tingkat"}</h3>
-              <p>Daftar kelas yang terikat pada tingkat ini. Setiap ujian ditugaskan ke satu kelas.</p>
+      {gradeContentLoading ? (
+        <div className="academic-loading-screen" role="status" aria-busy="true">
+          <div className="loading-spinner-ring" />
+          <div className="academic-skeleton-grid">
+            <div className="academic-skeleton-card" />
+            <div className="academic-skeleton-card" />
+          </div>
+        </div>
+      ) : gradeLoadError ? (
+        <p className="staff-error" role="alert">
+          {gradeLoadError}{" "}
+          <button
+            className="action-link"
+            type="button"
+            onClick={() => {
+              setLoadedGradeId("");
+              setGradeLoadError("");
+              setGradeLoadVersion((version) => version + 1);
+            }}
+          >
+            Coba lagi
+          </button>
+        </p>
+      ) : selectedGrade && !selectedClassroomId ? (
+        <section className="hierarchy-class-section">
+          <div className="staff-section-head"><div><h3>Pilih kelas</h3><p>Pilih kelas untuk mengelola mata pelajaran tingkat ini.</p></div>
+            <div className="hierarchy-actions"><MotionButton className="staff-secondary" onClick={handleOpenCreateSubject}><Icon name="plus" size={14} /> Tambah Mata Pelajaran</MotionButton>
+            <MotionButton className="staff-primary" onClick={handleOpenCreateClassroom}><Icon name="plus" size={14} /> Tambah Kelas</MotionButton></div>
+          </div>
+          <div className="drilldown-grid">
+            {classrooms.map((c, index) => <HierarchyCard key={c.id} index={index} name={c.name} count={`${c._count?.exams ?? 0} ujian`} detail={c.isArchived ? "Kelas diarsipkan" : "Kelola kelas dan mapel"} onClick={() => setSelectedClassroomId(c.id)} />)}
+          </div>
+          {!classrooms.length && <p className="staff-empty">Belum ada kelas pada tingkat ini. Tambahkan kelas untuk melanjutkan.</p>}
+        </section>
+      ) : selectedGrade ? (
+        <motion.div
+          key={selectedGradeId}
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+          style={{ display: "flex", flexDirection: "column", gap: "16px" }}
+        >
+          {/* Quick Stats Metric Cards (Overview style) */}
+          <div className="academic-overview-stats">
+            <div className="academic-stat-card">
+              <span className="academic-stat-label">Total Kelas</span>
+              <span className="academic-stat-value">{classrooms.filter((c) => !c.isArchived).length}</span>
+              <span className="academic-stat-sub">kelas aktif di {selectedGrade.name}</span>
             </div>
-            {selectedGrade && (
-              <MotionButton
-                className="staff-primary"
-                onClick={() => {
-                  setEditingClassroom(null);
-                  setClassroomNameInput("");
-                  setClassroomModalOpen(true);
-                }}
-              >
-                <Icon name="plus" size={14} /> Tambah Kelas
-              </MotionButton>
-            )}
+            <div className="academic-stat-card">
+              <span className="academic-stat-label">Mata Pelajaran</span>
+              <span className="academic-stat-value">{subjects.filter((s) => !s.isArchived).length}</span>
+              <span className="academic-stat-sub">mata pelajaran terdaftar</span>
+            </div>
+            <div className="academic-stat-card">
+              <span className="academic-stat-label">Bank Soal</span>
+              <span className="academic-stat-value">
+                {subjects.reduce((sum, s) => sum + (s._count?.banks ?? 0), 0)}
+              </span>
+              <span className="academic-stat-sub">bank soal siap pakai</span>
+            </div>
+            <div className="academic-stat-card">
+              <span className="academic-stat-label">Ujian Terkait</span>
+              <span className="academic-stat-value">
+                {classrooms.reduce((sum, c) => sum + (c._count?.exams ?? 0), 0)}
+              </span>
+              <span className="academic-stat-sub">ujian terhubung ke kelas</span>
+            </div>
           </div>
 
-          <div className="academic-list">
-            {classrooms.map((cls) => (
-              <div key={cls.id} className={`academic-item-card ${cls.isArchived ? "is-archived" : ""}`}>
-                <div className="academic-item-main">
-                  <div className="academic-item-title">
-                    <strong>{cls.name}</strong>
-                    {cls.isArchived && <span className="status-badge archived">Arsip</span>}
-                  </div>
-                  <div className="academic-item-meta">
-                    <span>Tingkat: {selectedGrade?.name}</span>
-                    <span>·</span>
-                    <span>{cls._count?.exams ?? 0} ujian terkait</span>
-                  </div>
+          {/* Side-by-side Cards: Kelas & Mata Pelajaran */}
+          <div className="academic-cards-grid">
+            {/* Kolom Kiri: Kelas */}
+            <section className="academic-panel-card" aria-label="Daftar Kelas">
+              <div className="academic-panel-header">
+                <div>
+                  <h3>Daftar Kelas — {selectedGrade.name}</h3>
+                  <p>Daftar kelas yang terikat pada tingkat ini. Setiap ujian ditugaskan ke satu kelas.</p>
                 </div>
-                <div className="academic-item-actions">
-                  <button
-                    type="button"
-                    className="action-link"
-                    onClick={() => {
-                      setEditingClassroom(cls);
-                      setClassroomNameInput(cls.name);
-                      setClassroomModalOpen(true);
-                    }}
-                  >
-                    Ubah
-                  </button>
-                  <button
-                    type="button"
-                    className="action-link"
-                    onClick={() => handleArchiveClassroom(cls)}
-                  >
-                    {cls.isArchived ? "Pulihkan" : "Arsipkan"}
-                  </button>
+                <MotionButton
+                  className="staff-primary"
+                  onClick={handleOpenCreateClassroom}
+                >
+                  <Icon name="plus" size={14} /> Tambah Kelas
+                </MotionButton>
+              </div>
+
+              <div className="academic-panel-body">
+                <div className="academic-list">
+                  {classrooms.filter((cls) => cls.id === selectedClassroomId).map((cls) => (
+                    <div key={cls.id} className={`academic-item-card ${cls.isArchived ? "is-archived" : ""}`}>
+                      <div className="academic-item-main">
+                        <div className="academic-item-title">
+                          <strong>{cls.name}</strong>
+                          {cls.isArchived && <span className="status-badge archived">Arsip</span>}
+                        </div>
+                        <div className="academic-item-meta">
+                          <span>Tingkat: {selectedGrade.name}</span>
+                          <span>·</span>
+                          <span>{cls._count?.exams ?? 0} ujian terkait</span>
+                        </div>
+                      </div>
+                      <div className="academic-item-actions">
+                        <MotionButton
+                          type="button"
+                          className="action-link"
+                          onClick={() => handleOpenEditClassroom(cls)}
+                        >
+                          Ubah
+                        </MotionButton>
+                        <MotionButton
+                          type="button"
+                          className="action-link"
+                          onClick={() => handleArchiveClassroom(cls)}
+                        >
+                          {cls.isArchived ? "Pulihkan" : "Arsipkan"}
+                        </MotionButton>
+                      </div>
+                    </div>
+                  ))}
+                  {classrooms.length === 0 && (
+                    <div className="academic-empty-state">
+                      <p>Belum ada kelas pada tingkat ini.</p>
+                      <MotionButton
+                        type="button"
+                        className="staff-primary-outline"
+                        onClick={handleOpenCreateClassroom}
+                      >
+                        Tambah Kelas Pertama
+                      </MotionButton>
+                    </div>
+                  )}
                 </div>
               </div>
-            ))}
-            {classrooms.length === 0 && (
-              <div className="academic-empty-state">
-                <p>Belum ada kelas pada tingkat ini.</p>
-                {selectedGrade && (
-                  <button
-                    type="button"
-                    className="staff-primary-outline"
-                    onClick={() => {
-                      setEditingClassroom(null);
-                      setClassroomNameInput("");
-                      setClassroomModalOpen(true);
-                    }}
+            </section>
+
+            {/* Kolom Kanan: Mata Pelajaran */}
+            <section className="academic-panel-card" aria-label="Daftar Mata Pelajaran">
+              <div className="academic-panel-header">
+                <div>
+                  <h3>Mata Pelajaran — {selectedGrade.name}</h3>
+                  <p>Mata pelajaran unik per tingkat. Bank soal dan ujian mengacu pada mata pelajaran ini.</p>
+                </div>
+                <MotionButton
+                  className="staff-primary"
+                  onClick={handleOpenCreateSubject}
+                >
+                  <Icon name="plus" size={14} /> Tambah Mata Pelajaran
+                </MotionButton>
+              </div>
+
+              <div className="academic-panel-body">
+                <div className="academic-list">
+                  {subjects.map((sub) => (
+                    <div key={sub.id} className={`academic-item-card ${sub.isArchived ? "is-archived" : ""}`}>
+                      <div className="academic-item-main">
+                        <div className="academic-item-title">
+                          <strong>{sub.name} · {selectedGrade.name}</strong>
+                          {sub.isArchived && <span className="status-badge archived">Arsip</span>}
+                        </div>
+                        <div className="academic-item-meta">
+                          <span>{sub._count?.banks ?? 0} bank soal</span>
+                          <span>·</span>
+                          <span>{sub._count?.exams ?? 0} ujian terkait</span>
+                        </div>
+                      </div>
+                      <div className="academic-item-actions">
+                        <Link
+                          href={`/dashboard/bank-soal?gradeLevelId=${selectedGradeId}&classroomId=${selectedClassroomId}&subjectId=${sub.id}`}
+                          className="action-link highlight"
+                        >
+                          Buka Bank Soal
+                        </Link>
+                        <MotionButton
+                          type="button"
+                          className="action-link"
+                          onClick={() => handleOpenEditSubject(sub)}
+                        >
+                          Ubah
+                        </MotionButton>
+                        <MotionButton
+                          type="button"
+                          className="action-link"
+                          onClick={() => handleArchiveSubject(sub)}
+                        >
+                          {sub.isArchived ? "Pulihkan" : "Arsipkan"}
+                        </MotionButton>
+                      </div>
+                    </div>
+                  ))}
+                  {subjects.length === 0 && (
+                    <div className="academic-empty-state">
+                      <p>Belum ada mata pelajaran pada tingkat ini.</p>
+                      <MotionButton
+                        type="button"
+                        className="staff-primary-outline"
+                        onClick={handleOpenCreateSubject}
+                      >
+                        Tambah Mata Pelajaran Pertama
+                      </MotionButton>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </section>
+          </div>
+        </motion.div>
+      ) : null}
+
+      {/* Legacy Mapping Section in Card */}
+      <div className="academic-legacy-card">
+        <motion.button
+          type="button"
+          className="academic-legacy-header-btn"
+          aria-expanded={legacyOpen}
+          whileTap={reduceMotion ? undefined : { scale: 0.99 }}
+          onClick={() => setLegacyOpen(!legacyOpen)}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <strong style={{ fontSize: "13px", color: "#17171a" }}>Data yang Perlu Dipetakan</strong>
+            {legacyReport && legacyReport.summary.totalUnmapped > 0 && (
+              <span className="academic-legacy-badge">{legacyReport.summary.totalUnmapped} data</span>
+            )}
+          </div>
+          <span className="action-link" style={{ fontSize: "11px" }}>
+            {legacyOpen ? "Tutup data yang perlu dipetakan" : "Buka data yang perlu dipetakan"}
+          </span>
+        </motion.button>
+
+        <AnimatePresence initial={false}>
+          {legacyOpen && (
+            <motion.section
+              key="legacy-panel"
+              aria-label="Data Perlu Dipetakan"
+              initial={reduceMotion ? false : { height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={reduceMotion ? undefined : { height: 0, opacity: 0 }}
+              transition={{ duration: reduceMotion ? 0 : 0.24, ease: [0.22, 1, 0.36, 1] }}
+              style={{ display: "flex", flexDirection: "column", gap: "14px", marginTop: "8px", overflow: "hidden" }}
+            >
+              <div className="tab-content-head">
+                <div>
+                  <h3>Data yang Perlu Dipetakan</h3>
+                  <p>
+                    Data mata pelajaran atau ujian terdahulu yang belum terikat ke tingkat atau kelas tertentu.
+                  </p>
+                </div>
+                {legacyReport && legacyReport.summary.totalUnmapped > 0 && (
+                  <MotionButton
+                    className="staff-primary"
+                    disabled={mappingBusy}
+                    onClick={handleAutoMap}
                   >
-                    Tambah Kelas Pertama
-                  </button>
+                    {mappingBusy ? "Memetakan..." : "Petakan Otomatis yang Jelas"}
+                  </MotionButton>
                 )}
               </div>
-            )}
-          </div>
-        </section>
-        <section className="academic-tab-content" aria-label="Daftar Mata Pelajaran">
-          <div className="tab-content-head">
-            <div>
-              <h3>Mata Pelajaran — {selectedGrade ? selectedGrade.name : "Pilih Tingkat"}</h3>
-              <p>Mata pelajaran unik per tingkat. Bank soal dan ujian mengacu pada mata pelajaran ini.</p>
-            </div>
-          </div>
 
-          <form className="academic-subject-create" onSubmit={handleCreateSubject}>
-            <div className="academic-subject-field">
-              <label htmlFor="new-subject-name">Nama mata pelajaran untuk {selectedGrade.name}</label>
-              <input id="new-subject-name" className="staff-input" value={newSubjectName} onChange={(e) => { setNewSubjectName(e.target.value); setSubjectError(""); }} placeholder="Contoh: Matematika" maxLength={100} required disabled={subjectBusy} aria-describedby={subjectError ? "new-subject-error" : undefined} />
-              {subjectError && <p id="new-subject-error" className="staff-error" role="alert">{subjectError}</p>}
-            </div>
-            <button className="staff-primary" type="submit" disabled={subjectBusy || !newSubjectName.trim()}>{subjectBusy ? "Menyimpan..." : "Tambah mata pelajaran"}</button>
-          </form>
-
-          <div className="academic-list">
-            {subjects.map((sub) => (
-              <div key={sub.id} className={`academic-item-card ${sub.isArchived ? "is-archived" : ""}`}>
-                <div className="academic-item-main">
-                  <div className="academic-item-title">
-                    <strong>{sub.name} · {selectedGrade?.name}</strong>
-                    {sub.isArchived && <span className="status-badge archived">Arsip</span>}
+              {legacyReport && (
+                <div className="legacy-summary-strip">
+                  <div className="legacy-summary-card">
+                    <small>Mata Pelajaran Tanpa Tingkat</small>
+                    <strong>{legacyReport.summary.unmappedSubjectsCount}</strong>
                   </div>
-                  <div className="academic-item-meta">
-                    <span>{sub._count?.banks ?? 0} bank soal</span>
-                    <span>·</span>
-                    <span>{sub._count?.exams ?? 0} ujian terkait</span>
+                  <div className="legacy-summary-card">
+                    <small>Ujian Tanpa Kelas/Mapel</small>
+                    <strong>{legacyReport.summary.unmappedExamsCount}</strong>
                   </div>
                 </div>
-                <div className="academic-item-actions">
-                  <Link
-                    href={`/dashboard/bank-soal?gradeLevelId=${selectedGradeId}&subjectId=${sub.id}`}
-                    className="action-link highlight"
-                  >
-                    Buka Bank Soal
-                  </Link>
-                  <button
-                    type="button"
-                    className="action-link"
-                    onClick={() => {
-                      setEditingSubject(sub);
-                      setSubjectNameInput(sub.name);
-                      setSubjectModalOpen(true);
-                    }}
-                  >
-                    Ubah
-                  </button>
-                  <button
-                    type="button"
-                    className="action-link"
-                    onClick={() => handleArchiveSubject(sub)}
-                  >
-                    {sub.isArchived ? "Pulihkan" : "Arsipkan"}
-                  </button>
+              )}
+
+              {/* Unmapped Subjects */}
+              <div className="legacy-section">
+                <h4>Mata Pelajaran Tanpa Tingkat</h4>
+                <div className="academic-list">
+                  {legacyReport?.unmappedSubjects.map((sub) => (
+                    <div key={sub.id} className="academic-item-card legacy-card">
+                      <div className="academic-item-main">
+                        <strong>{sub.name}</strong>
+                        <div className="academic-item-meta">
+                          <span>{sub._count.banks} bank soal</span>
+                          <span>·</span>
+                          <span>{sub._count.exams} ujian terkait</span>
+                        </div>
+                      </div>
+                      <div className="legacy-mapping-controls">
+                        <label htmlFor={`map-sub-${sub.id}`} className="sr-only">Pilih Tingkat</label>
+                        <select
+                          id={`map-sub-${sub.id}`}
+                          className="legacy-select"
+                          defaultValue=""
+                          disabled={mappingBusy}
+                          onChange={(e) => {
+                            if (e.target.value) handleMapSubject(sub.id, e.target.value);
+                          }}
+                        >
+                          <option value="" disabled>Petakan ke Tingkat...</option>
+                          {legacyReport.availableGradeLevels.map((gl) => (
+                            <option key={gl.id} value={gl.id}>{gl.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  ))}
+                  {legacyReport?.unmappedSubjects.length === 0 && (
+                    <p className="legacy-clean-notice">Semua mata pelajaran sudah memiliki tingkat.</p>
+                  )}
                 </div>
               </div>
-            ))}
-            {subjects.length === 0 && (
-              <div className="academic-empty-state">
-                <p>Belum ada mata pelajaran pada tingkat ini.</p>
-                <p>Tambahkan mata pelajaran melalui formulir di atas.</p>
-              </div>
-            )}
-          </div>
-        </section>
-      </>}
 
-      <button type="button" className="academic-legacy-toggle" aria-expanded={legacyOpen} onClick={() => setLegacyOpen(!legacyOpen)}>
-        {legacyOpen ? "Tutup" : "Buka"} data yang perlu dipetakan {legacyReport && legacyReport.summary.totalUnmapped > 0 ? `(${legacyReport.summary.totalUnmapped})` : ""}
-      </button>
-      {legacyOpen && (
-        <section className="academic-tab-content" aria-label="Data Perlu Dipetakan">
-          <div className="tab-content-head">
-            <div>
-              <h3>Data yang Perlu Dipetakan</h3>
-              <p>
-                Data mata pelajaran atau ujian terdahulu yang belum terikat ke tingkat atau kelas tertentu.
-              </p>
-            </div>
-            {legacyReport && legacyReport.summary.totalUnmapped > 0 && (
-              <MotionButton
-                className="staff-primary"
-                disabled={mappingBusy}
-                onClick={handleAutoMap}
-              >
-                {mappingBusy ? "Memetakan..." : "Petakan Otomatis yang Jelas"}
-              </MotionButton>
-            )}
-          </div>
-
-          {legacyReport && (
-            <div className="legacy-summary-strip">
-              <div className="legacy-summary-card">
-                <small>Mata Pelajaran Tanpa Tingkat</small>
-                <strong>{legacyReport.summary.unmappedSubjectsCount}</strong>
+              {/* Unmapped Exams */}
+              <div className="legacy-section">
+                <h4>Ujian Tanpa Kelas atau Mata Pelajaran</h4>
+                <div className="academic-list">
+                  {legacyReport?.unmappedExams.map((exam) => (
+                    <div key={exam.id} className="academic-item-card legacy-card">
+                      <div className="academic-item-main">
+                        <strong>{exam.title}</strong>
+                        <div className="academic-item-meta">
+                          <span>Kelas teks lama: {exam.className || "—"}</span>
+                          <span>·</span>
+                          <span>Mapel teks lama: {exam.subjectName || "—"}</span>
+                        </div>
+                      </div>
+                      <div className="legacy-exam-mapping-row">
+                        <LegacyExamMapper
+                          exam={exam}
+                          classrooms={legacyReport.availableClassrooms}
+                          subjects={legacyReport.availableSubjects}
+                          busy={mappingBusy}
+                          onMap={(classroomId, subjectId) => handleMapExam(exam.id, exam.revision, classroomId, subjectId)}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                  {legacyReport?.unmappedExams.length === 0 && (
+                    <p className="legacy-clean-notice">Semua ujian sudah terhubung ke kelas dan mata pelajaran.</p>
+                  )}
+                </div>
               </div>
-              <div className="legacy-summary-card">
-                <small>Ujian Tanpa Kelas/Mapel</small>
-                <strong>{legacyReport.summary.unmappedExamsCount}</strong>
-              </div>
-            </div>
+            </motion.section>
           )}
-
-          {/* Unmapped Subjects */}
-          <div className="legacy-section">
-            <h4>Mata Pelajaran Tanpa Tingkat</h4>
-            <div className="academic-list">
-              {legacyReport?.unmappedSubjects.map((sub) => (
-                <div key={sub.id} className="academic-item-card legacy-card">
-                  <div className="academic-item-main">
-                    <strong>{sub.name}</strong>
-                    <div className="academic-item-meta">
-                      <span>{sub._count.banks} bank soal</span>
-                      <span>·</span>
-                      <span>{sub._count.exams} ujian terkait</span>
-                    </div>
-                  </div>
-                  <div className="legacy-mapping-controls">
-                    <label htmlFor={`map-sub-${sub.id}`} className="sr-only">Pilih Tingkat</label>
-                    <select
-                      id={`map-sub-${sub.id}`}
-                      className="legacy-select"
-                      defaultValue=""
-                      disabled={mappingBusy}
-                      onChange={(e) => {
-                        if (e.target.value) handleMapSubject(sub.id, e.target.value);
-                      }}
-                    >
-                      <option value="" disabled>Petakan ke Tingkat...</option>
-                      {legacyReport.availableGradeLevels.map((gl) => (
-                        <option key={gl.id} value={gl.id}>{gl.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              ))}
-              {legacyReport?.unmappedSubjects.length === 0 && (
-                <p className="legacy-clean-notice">Semua mata pelajaran sudah memiliki tingkat.</p>
-              )}
-            </div>
-          </div>
-
-          {/* Unmapped Exams */}
-          <div className="legacy-section">
-            <h4>Ujian Tanpa Kelas atau Mata Pelajaran</h4>
-            <div className="academic-list">
-              {legacyReport?.unmappedExams.map((exam) => (
-                <div key={exam.id} className="academic-item-card legacy-card">
-                  <div className="academic-item-main">
-                    <strong>{exam.title}</strong>
-                    <div className="academic-item-meta">
-                      <span>Kelas teks lama: {exam.className || "—"}</span>
-                      <span>·</span>
-                      <span>Mapel teks lama: {exam.subjectName || "—"}</span>
-                    </div>
-                  </div>
-                  <div className="legacy-exam-mapping-row">
-                    <LegacyExamMapper
-                      exam={exam}
-                      classrooms={legacyReport.availableClassrooms}
-                      subjects={legacyReport.availableSubjects}
-                      busy={mappingBusy}
-                      onMap={(classroomId, subjectId) => handleMapExam(exam.id, exam.revision, classroomId, subjectId)}
-                    />
-                  </div>
-                </div>
-              ))}
-              {legacyReport?.unmappedExams.length === 0 && (
-                <p className="legacy-clean-notice">Semua ujian sudah terhubung ke kelas dan mata pelajaran.</p>
-              )}
-            </div>
-          </div>
-        </section>
-      )}
+        </AnimatePresence>
+      </div>
 
       {/* Grade Dialog */}
       <Dialog
@@ -754,7 +845,7 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
       <Dialog
         open={classroomModalOpen}
         onClose={() => setClassroomModalOpen(false)}
-        title={editingClassroom ? "Ubah Kelas" : `Tambah Kelas — ${selectedGrade?.name}`}
+        title={editingClassroom ? "Ubah Kelas" : `Tambah Kelas — ${selectedGrade?.name || ""}`}
       >
         <form onSubmit={handleSaveClassroom} className="academic-modal-form">
           <label htmlFor="classroom-name-field">Nama Kelas</label>
@@ -779,31 +870,64 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
         </form>
       </Dialog>
 
-      {/* Subject Dialog */}
+      {/* Subject Dialog (Popup modal for Create and Edit) */}
       <Dialog
         open={subjectModalOpen}
-        onClose={() => setSubjectModalOpen(false)}
-        title={editingSubject ? "Ubah Mata Pelajaran" : `Tambah Mata Pelajaran — ${selectedGrade?.name}`}
+        onClose={() => {
+          if (!subjectBusy) {
+            setSubjectModalOpen(false);
+            setSubjectNameInput("");
+            setEditingSubject(null);
+            setSubjectError("");
+          }
+        }}
+        title={editingSubject ? "Ubah Mata Pelajaran" : `Tambah Mata Pelajaran — ${selectedGrade?.name || ""}`}
       >
         <form onSubmit={handleSaveSubject} className="academic-modal-form">
-          <label htmlFor="subject-name-field">Nama Mata Pelajaran</label>
+          <label htmlFor="subject-name-field">
+            Nama mata pelajaran untuk {selectedGrade?.name || "tingkat ini"}
+          </label>
           <input
             id="subject-name-field"
             type="text"
             className="staff-input"
             placeholder="Contoh: Matematika, Fisika, Bahasa Indonesia"
             value={subjectNameInput}
-            onChange={(e) => setSubjectNameInput(e.target.value)}
+            onChange={(e) => {
+              setSubjectNameInput(e.target.value);
+              setSubjectError("");
+            }}
             required
             autoFocus
+            maxLength={100}
+            disabled={subjectBusy}
+            aria-describedby={subjectError ? "subject-modal-error" : undefined}
           />
-          <ErrorText error={error} />
+          {subjectError && (
+            <p id="subject-modal-error" className="staff-error" role="alert">
+              {subjectError}
+            </p>
+          )}
           <div className="modal-actions">
-            <button type="button" className="staff-secondary" onClick={() => setSubjectModalOpen(false)}>
+            <button
+              type="button"
+              className="staff-secondary"
+              disabled={subjectBusy}
+              onClick={() => {
+                setSubjectModalOpen(false);
+                setSubjectNameInput("");
+                setEditingSubject(null);
+                setSubjectError("");
+              }}
+            >
               Batal
             </button>
-            <button type="submit" className="staff-primary">
-              Simpan
+            <button
+              type="submit"
+              className="staff-primary"
+              disabled={subjectBusy || !subjectNameInput.trim()}
+            >
+              {subjectBusy ? "Menyimpan..." : editingSubject ? "Simpan Perubahan" : "Tambah mata pelajaran"}
             </button>
           </div>
         </form>

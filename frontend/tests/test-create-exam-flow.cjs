@@ -12,7 +12,7 @@ const executablePath = process.env.CHROMIUM_PATH || '/usr/bin/chromium';
   const errors = [];
   page.on('pageerror', err => errors.push(err.message));
 
-  const subject = { id: 'sub-1', name: 'Matematika' };
+  const subject = { id: 'sub-1', name: 'Matematika', gradeLevelId: 'grade-1' };
   const bank = {
     id: 'bank-1',
     title: 'Aljabar',
@@ -34,6 +34,12 @@ const executablePath = process.env.CHROMIUM_PATH || '/usr/bin/chromium';
 
     if (url.pathname === '/api/auth/me') {
       return route.fulfill({ json: { success: true, data: { id: 'teacher-1', fullName: 'Guru Penguji', role: 'TEACHER', isActive: true } } });
+    }
+    if (url.pathname === '/api/academic/grade-levels') {
+      return route.fulfill({ json: { success: true, data: [{ id: 'grade-1', name: 'X' }] } });
+    }
+    if (url.pathname === '/api/academic/classrooms') {
+      return route.fulfill({ json: { success: true, data: [{ id: 'class-1', name: '10-A', gradeLevelId: 'grade-1' }] } });
     }
     if (url.pathname === '/api/subjects') {
       return route.fulfill({ json: { success: true, data: [subject] } });
@@ -83,8 +89,9 @@ const executablePath = process.env.CHROMIUM_PATH || '/usr/bin/chromium';
 
     // 3. Isi Langkah 1: Informasi Dasar (biarkan deskripsi, nomor kategori, dan jadwal kosong)
     await page.locator('#exam-title').fill('Penilaian Harian Matematika');
+    await page.locator('#exam-grade-level').selectOption('grade-1');
+    await page.locator('#exam-class').selectOption('class-1');
     await page.locator('#exam-subject').selectOption('sub-1');
-    await page.locator('#exam-class').fill('10-A');
     await page.locator('#exam-duration').fill('60');
 
     // Pastikan deskripsi, categoryNumber, dan scheduledStartAt kosong
@@ -126,6 +133,8 @@ const executablePath = process.env.CHROMIUM_PATH || '/usr/bin/chromium';
     // Pastikan tidak ada pesan error di halaman
     assert.equal(await page.locator('.error[role="alert"]').count(), 0);
     assert.deepEqual(errors, []);
+    await page.goto(`${origin}/dashboard/ujian?create=true`);
+    await page.locator('#entry-title').waitFor();
 
     console.log('PASS: test-create-exam-flow completed successfully without validation error');
   } finally {
