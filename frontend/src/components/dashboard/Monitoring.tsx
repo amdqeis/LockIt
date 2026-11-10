@@ -2,7 +2,7 @@
 import { MotionButton } from "@/components/MotionButton";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { motion, useReducedMotion, LayoutGroup } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 import { io } from "socket.io-client";
 import { Dialog } from "@/components/Dialog";
 import { socketOrigin } from "@/lib/api";
@@ -94,9 +94,6 @@ export function Monitoring() {
   const id = search.get("exam") || "";
 
   // List view states
-  const [tab, setTab] = useState<"active" | "draft">(() =>
-    search.get("status") === "draft" ? "draft" : "active"
-  );
   const [gradeLevels, setGradeLevels] = useState<GradeLevel[]>([]);
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
   const { selectedGradeId, selectedClassroomId, setSelectedGradeId, setSelectedClassroomId } = useHierarchyNavigation();
@@ -104,6 +101,35 @@ export function Monitoring() {
   const [groupsLoading, setGroupsLoading] = useState(true);
   const [listQuery, setListQuery] = useState(() => search.get("search") || "");
   const listRequest = useRef(0);
+
+  const allMonitoringExams = useMemo(() => {
+    const map = new Map<string, Exam>();
+    for (const g of groups) {
+      for (const s of g.subjects) {
+        for (const e of s.exams) {
+          if (!map.has(e.id)) map.set(e.id, e);
+        }
+      }
+    }
+    const exams = Array.from(map.values());
+    if (!listQuery.trim()) return exams;
+    const q = listQuery.toLowerCase();
+    return exams.filter((e) =>
+      e.title.toLowerCase().includes(q) ||
+      (e.className && e.className.toLowerCase().includes(q)) ||
+      (e.subjectName && e.subjectName.toLowerCase().includes(q))
+    );
+  }, [groups, listQuery]);
+
+  const activeExamsList = useMemo(
+    () => allMonitoringExams.filter((e) => e.status === "active"),
+    [allMonitoringExams]
+  );
+
+  const upcomingExamsList = useMemo(
+    () => allMonitoringExams.filter((e) => e.status === "draft"),
+    [allMonitoringExams]
+  );
 
   // Proctoring active exam states
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
@@ -206,9 +232,30 @@ export function Monitoring() {
 
   const examsInCurrentClass = useMemo(() => {
     if (!selectedClassGroup) return [];
-    const all = selectedClassGroup.subjects.flatMap((s) => s.exams);
-    return all.filter((e) => (tab === "active" ? e.status === "active" : e.status === "draft"));
-  }, [selectedClassGroup, tab]);
+    const map = new Map<string, Exam>();
+    for (const s of selectedClassGroup.subjects) {
+      for (const e of s.exams) {
+        if (!map.has(e.id)) map.set(e.id, e);
+      }
+    }
+    const exams = Array.from(map.values());
+    if (!listQuery.trim()) return exams;
+    const q = listQuery.toLowerCase();
+    return exams.filter((e) =>
+      e.title.toLowerCase().includes(q) ||
+      (e.subjectName && e.subjectName.toLowerCase().includes(q))
+    );
+  }, [selectedClassGroup, listQuery]);
+
+  const activeExamsInClass = useMemo(
+    () => examsInCurrentClass.filter((e) => e.status === "active"),
+    [examsInCurrentClass]
+  );
+
+  const upcomingExamsInClass = useMemo(
+    () => examsInCurrentClass.filter((e) => e.status === "draft"),
+    [examsInCurrentClass]
+  );
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -506,50 +553,100 @@ export function Monitoring() {
             <div className="proctor-title-row">
               <h1>Monitoring Ujian</h1>
             </div>
-            <p className="proctor-subtitle">Pilih ujian berlangsung atau dalam persiapan untuk memulai pengawasan real-time.</p>
+            <p className="proctor-subtitle">Pantau aktivitas ujian berlangsung dan kelola persiapan sesi secara real-time.</p>
           </div>
         </div>
 
         <ErrorText error={error} />
 
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px", flexWrap: "wrap", gap: "10px" }}>
-          <div>
-            <LayoutGroup id="monitoring-status-tabs">
-              <div className="staff-segment" style={{ margin: 0 }} role="group" aria-label="Status ujian monitoring">
-                <motion.button
-                  type="button"
-                  className={tab === "active" ? "active" : ""}
-                  aria-pressed={tab === "active"}
-                  whileTap={reduceMotion ? undefined : { scale: 0.96 }}
-                  onClick={() => setTab("active")}
-                >
-                  {tab === "active" && (
-                    <motion.span
-                      layoutId="active-monitoring-tab"
-                      className="staff-segment-thumb"
-                      transition={reduceMotion ? { duration: 0 } : motionTokens.softSpring}
-                    />
-                  )}
-                  <span className="staff-segment-label">Berlangsung</span>
-                </motion.button>
-                <motion.button
-                  type="button"
-                  className={tab === "draft" ? "active" : ""}
-                  aria-pressed={tab === "draft"}
-                  whileTap={reduceMotion ? undefined : { scale: 0.96 }}
-                  onClick={() => setTab("draft")}
-                >
-                  {tab === "draft" && (
-                    <motion.span
-                      layoutId="active-monitoring-tab"
-                      className="staff-segment-thumb"
-                      transition={reduceMotion ? { duration: 0 } : motionTokens.softSpring}
-                    />
-                  )}
-                  <span className="staff-segment-label">Persiapan</span>
-                </motion.button>
+        {/* Unified Card: Ujian Berlangsung & Akan Datang */}
+        <div className="monitoring-unified-card">
+          <div className="monitoring-unified-head">
+            <div>
+              <h2>Aktivitas Monitoring Ujian</h2>
+              <p>Pantau ujian yang sedang berjalan dan kelola persiapan ujian berikutnya.</p>
+            </div>
+          </div>
+          <div className="monitoring-unified-grid">
+            <div className="monitoring-unified-col">
+              <div className="monitoring-unified-col-header">
+                <strong>Ujian Sedang Berlangsung</strong>
+                <span className="monitoring-unified-badge live">{activeExamsList.length} Berlangsung</span>
               </div>
-            </LayoutGroup>
+              {activeExamsList.length > 0 ? (
+                <div className="monitoring-unified-list">
+                  {activeExamsList.map((exam) => (
+                    <div key={exam.id} className="monitoring-unified-item">
+                      <div className="monitoring-unified-item-top">
+                        <span className="monitoring-unified-item-title">{exam.title}</span>
+                        <span className="monitoring-unified-badge live">Berlangsung</span>
+                      </div>
+                      <div className="monitoring-unified-item-meta">
+                        <span>{exam.className || "Semua Kelas"}</span>
+                        {exam.subjectName && <span>· {exam.subjectName}</span>}
+                        <span>· {exam._count?.students ?? 0} peserta</span>
+                        <span>· Kode: <code>{exam.accessCode}</code></span>
+                      </div>
+                      <div className="monitoring-unified-item-action">
+                        <MotionButton
+                          className="staff-primary"
+                          style={{ height: "30px", fontSize: "11px", padding: "0 12px" }}
+                          onClick={() => {
+                            const params = new URLSearchParams({ exam: exam.id });
+                            if (exam.classroomId) params.set("classroomId", exam.classroomId);
+                            router.push(`/dashboard/monitoring?${params}`);
+                          }}
+                        >
+                          Buka Monitoring →
+                        </MotionButton>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="monitoring-unified-empty">Tidak ada ujian yang sedang berlangsung saat ini.</p>
+              )}
+            </div>
+
+            <div className="monitoring-unified-col">
+              <div className="monitoring-unified-col-header">
+                <strong>Ujian yang Akan Datang</strong>
+                <span className="monitoring-unified-badge upcoming">{upcomingExamsList.length} Terjadwal</span>
+              </div>
+              {upcomingExamsList.length > 0 ? (
+                <div className="monitoring-unified-list">
+                  {upcomingExamsList.map((exam) => (
+                    <div key={exam.id} className="monitoring-unified-item">
+                      <div className="monitoring-unified-item-top">
+                        <span className="monitoring-unified-item-title">{exam.title}</span>
+                        <span className="monitoring-unified-badge upcoming">Persiapan</span>
+                      </div>
+                      <div className="monitoring-unified-item-meta">
+                        <span>{exam.className || "Semua Kelas"}</span>
+                        {exam.subjectName && <span>· {exam.subjectName}</span>}
+                        <span>· {exam.scheduledStartAt ? new Date(exam.scheduledStartAt).toLocaleDateString("id-ID", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "Jadwal fleksibel"}</span>
+                        <span>· Kode: <code>{exam.accessCode}</code></span>
+                      </div>
+                      <div className="monitoring-unified-item-action">
+                        <MotionButton
+                          className="staff-secondary"
+                          style={{ height: "30px", fontSize: "11px", padding: "0 12px" }}
+                          onClick={() => {
+                            const params = new URLSearchParams({ exam: exam.id });
+                            if (exam.classroomId) params.set("classroomId", exam.classroomId);
+                            router.push(`/dashboard/monitoring?${params}`);
+                          }}
+                        >
+                          Buka Sesi →
+                        </MotionButton>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="monitoring-unified-empty">Belum ada ujian terjadwal berikutnya.</p>
+              )}
+            </div>
           </div>
         </div>
 
@@ -566,7 +663,7 @@ export function Monitoring() {
 
         <HierarchyBreadcrumb grade={currentGrade?.name} classroom={selectedClassGroup?.className} onRoot={() => setSelectedGradeId(null)} onGrade={() => setSelectedClassroomId(null)} />
         <motion.div
-          key={`${selectedGradeId || "root"}-${selectedClassroomId || "all"}-${tab}`}
+          key={`${selectedGradeId || "root"}-${selectedClassroomId || "all"}`}
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
@@ -584,7 +681,16 @@ export function Monitoring() {
             /* TAHAP 1: PILIHAN TINGKATAN (STYLE OVERVIEW CARDS) */
             <div>
               <div className="drilldown-grid">
-                {gradeLevelStats.map((gl, index) => <HierarchyCard key={gl.id} index={index} name={gl.id === "__unmapped__" ? gl.name : `Tingkat ${gl.name}`} count={`${tab === "active" ? gl.activeExams : gl.draftExams} ujian`} detail={`${gl.totalClasses} kelas · ${tab === "active" ? "berlangsung" : "persiapan"}`} onClick={() => setSelectedGradeId(gl.id)} />)}
+                {gradeLevelStats.map((gl, index) => (
+                  <HierarchyCard
+                    key={gl.id}
+                    index={index}
+                    name={gl.id === "__unmapped__" ? gl.name : `Tingkat ${gl.name}`}
+                    count={`${gl.activeExams} berlangsung · ${gl.draftExams} akan datang`}
+                    detail={`${gl.totalClasses} kelas · ${gl.totalExams} total ujian`}
+                    onClick={() => setSelectedGradeId(gl.id)}
+                  />
+                ))}
               </div>
               {gradeLevelStats.length === 0 && (
                 <div className="staff-empty">
@@ -600,7 +706,7 @@ export function Monitoring() {
                 <div className="class-detail-info">
                   <h3>Pilihan Kelas · Tingkat {currentGrade?.name}</h3>
                   <p>
-                    {classesInCurrentGrade.length} Kelas terdaftar · {tab === "active" ? currentGrade?.activeExams || 0 : currentGrade?.draftExams || 0} Ujian {tab === "active" ? "berlangsung" : "dalam persiapan"}
+                    {classesInCurrentGrade.length} Kelas terdaftar · {currentGrade?.activeExams || 0} Ujian berlangsung · {currentGrade?.draftExams || 0} Ujian akan datang
                   </p>
                 </div>
                 <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
@@ -617,7 +723,7 @@ export function Monitoring() {
                 {classesInCurrentGrade.map((group) => {
                   const boxKey = group.classroomId || group.className;
                   const subjectNames = group.subjects.map((s) => s.subjectName).filter(Boolean);
-                  const count = tab === "active" ? group.activeExams : group.subjects.flatMap(s => s.exams).filter(e => e.status === "draft").length;
+                  const draftCount = group.subjects.flatMap((s) => s.exams).filter((e) => e.status === "draft").length;
                   return (
                     <motion.div
                       key={boxKey}
@@ -647,12 +753,12 @@ export function Monitoring() {
 
                       <div className="class-box-stats">
                         <div className="class-box-stat-item">
-                          <span className="class-box-stat-label">Ujian {tab === "active" ? "Berlangsung" : "Persiapan"}</span>
-                          <span className="class-box-stat-val">{count} Ujian</span>
+                          <span className="class-box-stat-label">Berlangsung</span>
+                          <span className="class-box-stat-val">{group.activeExams} Ujian</span>
                         </div>
                         <div className="class-box-stat-item">
-                          <span className="class-box-stat-label">Total Ujian</span>
-                          <span className="class-box-stat-val">{group.totalExams} Ujian</span>
+                          <span className="class-box-stat-label">Akan Datang</span>
+                          <span className="class-box-stat-val">{draftCount} Ujian</span>
                         </div>
                       </div>
 
@@ -691,39 +797,82 @@ export function Monitoring() {
                 </div>
               </div>
 
-              {examsInCurrentClass.length > 0 ? (
-                <div className="staff-list">
-                  {examsInCurrentClass.map((e) => (
-                    <div className="staff-row staff-exam-row" key={e.id}>
-                      <span>
-                        <strong>{e.title}</strong>
-                        <small>
-                          {e.subjectName || "Mata pelajaran"} · {e._count?.students ?? 0} peserta · Kode: <code>{e.accessCode}</code>
-                        </small>
-                      </span>
-                      <div className="staff-row-actions">
-                        <span className="staff-status" style={{ marginRight: "4px" }}>
-                          {e.status === "active" ? "Berlangsung" : "Persiapan"}
+              {activeExamsInClass.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                  <h4 style={{ fontSize: "13px", fontWeight: 700, margin: "0 0 4px", color: "var(--staff-ink)" }}>
+                    Ujian Sedang Berlangsung ({activeExamsInClass.length})
+                  </h4>
+                  <div className="staff-list">
+                    {activeExamsInClass.map((e) => (
+                      <div className="staff-row staff-exam-row" key={e.id}>
+                        <span>
+                          <strong>{e.title}</strong>
+                          <small>
+                            {e.subjectName || "Mata pelajaran"} · {e._count?.students ?? 0} peserta · Kode: <code>{e.accessCode}</code>
+                          </small>
                         </span>
-                        <MotionButton
-                          className="staff-primary"
-                          onClick={() => {
-                            const params = new URLSearchParams({ exam: e.id });
-                            if (selectedGradeId) params.set("gradeLevelId", selectedGradeId);
-                            if (selectedClassroomId) params.set("classroomId", selectedClassroomId);
-                            router.push(`/dashboard/monitoring?${params}`);
-                          }}
-                        >
-                          Buka Monitoring →
-                        </MotionButton>
+                        <div className="staff-row-actions">
+                          <span className="staff-status is-active" style={{ marginRight: "4px" }}>
+                            Berlangsung
+                          </span>
+                          <MotionButton
+                            className="staff-primary"
+                            onClick={() => {
+                              const params = new URLSearchParams({ exam: e.id });
+                              if (selectedGradeId) params.set("gradeLevelId", selectedGradeId);
+                              if (selectedClassroomId) params.set("classroomId", selectedClassroomId);
+                              router.push(`/dashboard/monitoring?${params}`);
+                            }}
+                          >
+                            Buka Monitoring →
+                          </MotionButton>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
-              ) : (
+              )}
+
+              {upcomingExamsInClass.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                  <h4 style={{ fontSize: "13px", fontWeight: 700, margin: "0 0 4px", color: "var(--staff-ink)" }}>
+                    Ujian yang Akan Datang ({upcomingExamsInClass.length})
+                  </h4>
+                  <div className="staff-list">
+                    {upcomingExamsInClass.map((e) => (
+                      <div className="staff-row staff-exam-row" key={e.id}>
+                        <span>
+                          <strong>{e.title}</strong>
+                          <small>
+                            {e.subjectName || "Mata pelajaran"} · {e.scheduledStartAt ? new Date(e.scheduledStartAt).toLocaleDateString("id-ID", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "Jadwal fleksibel"} · Kode: <code>{e.accessCode}</code>
+                          </small>
+                        </span>
+                        <div className="staff-row-actions">
+                          <span className="staff-status" style={{ marginRight: "4px" }}>
+                            Persiapan
+                          </span>
+                          <MotionButton
+                            className="staff-secondary"
+                            onClick={() => {
+                              const params = new URLSearchParams({ exam: e.id });
+                              if (selectedGradeId) params.set("gradeLevelId", selectedGradeId);
+                              if (selectedClassroomId) params.set("classroomId", selectedClassroomId);
+                              router.push(`/dashboard/monitoring?${params}`);
+                            }}
+                          >
+                            Buka Sesi →
+                          </MotionButton>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {activeExamsInClass.length === 0 && upcomingExamsInClass.length === 0 && (
                 <div className="staff-empty">
-                  <h3>Tidak ada ujian {tab === "active" ? "berlangsung" : "dalam persiapan"} di {selectedClassGroup.className}</h3>
-                  <p>Pilih tab lainnya di atas atau kembali ke pilihan kelas.</p>
+                  <h3>Belum ada ujian di {selectedClassGroup.className}</h3>
+                  <p>Belum ada ujian yang dijadwalkan atau sedang berlangsung untuk kelas ini.</p>
                 </div>
               )}
             </div>

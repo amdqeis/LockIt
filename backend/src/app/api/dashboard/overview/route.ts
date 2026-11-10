@@ -16,10 +16,48 @@ export async function GET(req: NextRequest) {
       prisma.student.count({ where: { status: "waiting", exam: { ...owner, status: { in: ["draft", "active"] } } } }),
       prisma.answer.count({ where: { isCorrect: null, selectedOption: { not: null }, NOT: { selectedOption: "" }, question: { type: "short_answer" }, student: { status: "submitted", exam: { ...owner } } } }),
       prisma.exam.count({ where: { ...owner, status: "active" } }),
-      prisma.exam.findMany({ where: { ...owner, status: "active" }, orderBy: [{ startTime: "desc" }, { id: "desc" }], take: 6, select: { id: true, title: true, status: true, className: true, scheduledStartAt: true, _count: { select: { questions: true } } } }),
-      prisma.exam.findMany({ where: { ...owner, status: "draft" }, orderBy: [{ scheduledStartAt: { sort: "asc", nulls: "last" } }, { id: "desc" }], take: 6, select: { id: true, title: true, status: true, className: true, scheduledStartAt: true, _count: { select: { questions: true } } } }),
+      prisma.exam.findMany({
+        where: { ...owner, status: "active" },
+        orderBy: [{ startTime: "desc" }, { id: "desc" }],
+        take: 6,
+        select: {
+          id: true,
+          title: true,
+          status: true,
+          className: true,
+          subjectName: true,
+          scheduledStartAt: true,
+          startTime: true,
+          accessCode: true,
+          _count: { select: { questions: true, students: true } },
+        },
+      }),
+      prisma.exam.findMany({
+        where: { ...owner, status: "draft" },
+        orderBy: [{ scheduledStartAt: { sort: "asc", nulls: "last" } }, { id: "desc" }],
+        take: 6,
+        select: {
+          id: true,
+          title: true,
+          status: true,
+          className: true,
+          subjectName: true,
+          scheduledStartAt: true,
+          startTime: true,
+          accessCode: true,
+          _count: { select: { questions: true, students: true } },
+        },
+      }),
     ]);
-    const data = { waiting, ungraded, activeCount, exams: [...activeExams, ...draftExams].slice(0, 6) };
+    const data = {
+      waiting,
+      ungraded,
+      activeCount,
+      upcomingCount: draftExams.length,
+      activeExams,
+      upcomingExams: draftExams,
+      exams: [...activeExams, ...draftExams].slice(0, 6),
+    };
     await writeDashboardCache(cacheKey, data);
     return successResponse(data, 200, { "Cache-Control": "private, no-store" });
   } catch (err) {

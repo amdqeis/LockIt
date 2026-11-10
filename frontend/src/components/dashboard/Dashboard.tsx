@@ -161,7 +161,27 @@ export function Dashboard() {
     </main>
   </div>;
 }
-type OverviewData = { waiting: number; ungraded: number; activeCount: number; exams: { id: string; title: string; status: string; className: string | null; _count: { questions: number } }[] };
+type OverviewExamItem = {
+  id: string;
+  title: string;
+  status: string;
+  className: string | null;
+  subjectName?: string | null;
+  scheduledStartAt?: string | null;
+  startTime?: string | null;
+  accessCode?: string;
+  _count: { questions: number; students?: number };
+};
+
+type OverviewData = {
+  waiting: number;
+  ungraded: number;
+  activeCount: number;
+  upcomingCount?: number;
+  activeExams?: OverviewExamItem[];
+  upcomingExams?: OverviewExamItem[];
+  exams: OverviewExamItem[];
+};
 function Overview() {
   const router = useRouter();
   const reduce = useReducedMotion();
@@ -172,7 +192,8 @@ function Overview() {
   );
 
   const appear = (delay: number) => ({ initial: reduce ? false as const : { opacity: 0, y: 12 }, animate: { opacity: 1, y: 0 }, transition: { duration: reduce ? 0 : .32, delay: reduce ? 0 : delay } });
-  const drafts = actions?.exams.filter(exam => exam.status === "draft") || [];
+  const drafts = actions?.upcomingExams?.length ? actions.upcomingExams : (actions?.exams.filter(exam => exam.status === "draft") || []);
+  const activeList = actions?.activeExams?.length ? actions.activeExams : (actions?.exams.filter(exam => exam.status === "active") || []);
 
   if (loading && !actions) return <DashboardSkeleton />;
 
@@ -181,7 +202,77 @@ function Overview() {
     <div className="overview-example-heading"><div><span className="overview-eyebrow">01 · OVERVIEW</span><h2 id="overview-title">Ringkasan ujian</h2></div><div style={{ display: "flex", gap: "10px", alignItems: "center" }}><MotionLink href="/dashboard/ujian" className="overview-heading-link" whileHover={reduce ? undefined : { x: 2 }} whileTap={reduce ? undefined : { scale: 0.98 }} {...getPrefetchProps("/dashboard/ujian", router)}>Semua ujian <Icon name="arrow" size={15}/></MotionLink><MotionLink href="/dashboard/ujian?create=true" className="staff-primary" style={{ height: "36px", padding: "0 16px", textDecoration: "none", fontSize: "11px" }} whileHover={reduce ? undefined : { y: -2, scale: 1.012 }} whileTap={reduce ? undefined : { scale: 0.965 }} transition={{ type: "spring", stiffness: 580, damping: 30 }}><Icon name="plus" size={15}/> Buat ujian</MotionLink></div></div>
     {summaryError && <p className="staff-error" role="alert">Ringkasan belum dapat dimuat: {summaryError}</p>}
     <div className="overview-example-grid">
-      <motion.div className="overview-card overview-hero" {...appear(.06)}><div className="overview-hero-top"><span>Ujian berlangsung</span><span className="overview-icon"><Icon name="monitor" size={16}/></span></div><div className="overview-hero-number">{actions?.activeCount ?? "—"}<small>ujian sedang berlangsung</small></div><div className="overview-hero-content"><p>Pantau peserta dan kelola jalannya ujian dari satu tempat.</p><Link href="/dashboard/monitoring" className="overview-light-link" {...getPrefetchProps("/dashboard/monitoring", router)}>Buka monitoring <Icon name="arrow" size={15}/></Link></div></motion.div>
+      <motion.div className="overview-card overview-hero" {...appear(.06)}>
+        <div className="overview-hero-top">
+          <span>Aktivitas Ujian</span>
+          <span className="overview-icon"><Icon name="monitor" size={16}/></span>
+        </div>
+        <div className="overview-hero-split">
+          <div className="overview-hero-col">
+            <div className="overview-hero-col-title">
+              <span>Sedang Berlangsung</span>
+              <span className="overview-hero-col-badge">{actions?.activeCount ?? activeList.length}</span>
+            </div>
+            {activeList.length > 0 ? (
+              <div className="overview-hero-col-list">
+                {activeList.map((exam) => (
+                  <Link
+                    key={exam.id}
+                    href={`/dashboard/monitoring?exam=${encodeURIComponent(exam.id)}`}
+                    className="overview-hero-item"
+                    title={exam.title}
+                    {...getPrefetchProps("/dashboard/monitoring", router)}
+                  >
+                    <div className="overview-hero-item-main">
+                      <span className="overview-hero-item-title">{exam.title}</span>
+                      <span className="overview-hero-item-sub">
+                        {exam.className || "Semua Kelas"} · {exam._count?.students ?? 0} peserta
+                      </span>
+                    </div>
+                    <Icon name="arrow" size={12} />
+                  </Link>
+                ))}
+              </div>
+            ) : (
+              <p className="overview-hero-empty">Tidak ada ujian yang sedang berlangsung.</p>
+            )}
+          </div>
+          <div className="overview-hero-col">
+            <div className="overview-hero-col-title">
+              <span>Akan Datang</span>
+              <span className="overview-hero-col-badge">{actions?.upcomingCount ?? drafts.length}</span>
+            </div>
+            {drafts.length > 0 ? (
+              <div className="overview-hero-col-list">
+                {drafts.map((exam) => (
+                  <Link
+                    key={exam.id}
+                    href={`/dashboard/monitoring?exam=${encodeURIComponent(exam.id)}`}
+                    className="overview-hero-item"
+                    title={exam.title}
+                    {...getPrefetchProps("/dashboard/monitoring", router)}
+                  >
+                    <div className="overview-hero-item-main">
+                      <span className="overview-hero-item-title">{exam.title}</span>
+                      <span className="overview-hero-item-sub">
+                        {exam.className || "Semua Kelas"} · {exam.scheduledStartAt ? new Date(exam.scheduledStartAt).toLocaleDateString("id-ID", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : `${exam._count.questions} soal`}
+                      </span>
+                    </div>
+                    <Icon name="arrow" size={12} />
+                  </Link>
+                ))}
+              </div>
+            ) : (
+              <p className="overview-hero-empty">Belum ada ujian terjadwal berikutnya.</p>
+            )}
+          </div>
+        </div>
+        <div className="overview-hero-content" style={{ marginTop: "auto", paddingTop: "4px" }}>
+          <Link href="/dashboard/monitoring" className="overview-light-link" {...getPrefetchProps("/dashboard/monitoring", router)}>
+            Buka panel monitoring <Icon name="arrow" size={15}/>
+          </Link>
+        </div>
+      </motion.div>
       <motion.div className="overview-card overview-status" {...appear(.1)}><div className="overview-card-head"><div><span className="overview-card-label">Perlu perhatian</span><h3>{actions ? actions.waiting + actions.ungraded : "—"}</h3></div><span className="overview-status-tag">Saat ini</span></div><div className="overview-status-items"><Link href="/dashboard/monitoring" {...getPrefetchProps("/dashboard/monitoring", router)}><span>Permintaan peserta</span><strong>{actions?.waiting ?? "—"}</strong></Link><Link href="/dashboard/hasil" {...getPrefetchProps("/dashboard/hasil", router)}><span>Menunggu penilaian</span><strong>{actions?.ungraded ?? "—"}</strong></Link></div><span className="overview-status-foot">Data terbaru dari dashboard</span></motion.div>
       <div className="overview-metric-pair"><motion.div className="overview-card overview-metric overview-blue" {...appear(.12)}><div className="overview-metric-head"><span><Icon name="users" size={15}/> Permintaan peserta</span><Link href="/dashboard/monitoring" aria-label="Lihat permintaan peserta" {...getPrefetchProps("/dashboard/monitoring", router)}><Icon name="arrow" size={16}/></Link></div><div><strong>{actions?.waiting ?? "—"}</strong><small>menunggu persetujuan</small></div></motion.div><motion.div className="overview-card overview-metric overview-coral" {...appear(.14)}><div className="overview-metric-head"><span><Icon name="results" size={15}/> Penilaian</span><Link href="/dashboard/hasil" aria-label="Lihat jawaban menunggu penilaian" {...getPrefetchProps("/dashboard/hasil", router)}><Icon name="arrow" size={16}/></Link></div><div><strong>{actions?.ungraded ?? "—"}</strong><small>jawaban menunggu penilaian</small></div></motion.div></div>
       <motion.div className="overview-card overview-action" {...appear(.16)}><span>Bank Soal</span><h3>Siapkan soal untuk ujian berikutnya.</h3><p>Kelola bank soal dan mata pelajaran.</p><Link href="/dashboard/bank-soal" className="overview-light-link" {...getPrefetchProps("/dashboard/bank-soal", router)}>Buka bank soal <Icon name="arrow" size={14}/></Link></motion.div>
