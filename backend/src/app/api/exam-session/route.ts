@@ -3,24 +3,7 @@ import { authenticateStudent } from "@/lib/middleware/auth";
 import { prisma } from "@/lib/prisma";
 import { successResponse, errorResponse, safeErrorMessage } from "@/lib/response";
 import { AppError } from "@/lib/errors";
-
-// MED-02: Seed dikombinasikan dari NIM + examId untuk mencegah prediksi urutan
-// berdasarkan NIM saja (NIM SMA seringkali berurutan dan mudah ditebak)
-function pseudoRandomShuffle<T>(array: T[], seedStr: string, salt: string): T[] {
-  const result = [...array];
-  const combined = seedStr + "|" + salt;
-  let seed = 0;
-  for (let i = 0; i < combined.length; i++) {
-    seed = (seed * 31 + combined.charCodeAt(i)) & 0xffffffff;
-  }
-
-  for (let i = result.length - 1; i > 0; i--) {
-    seed = (seed * 1664525 + 1013904223) & 0xffffffff;
-    const j = Math.abs(seed) % (i + 1);
-    [result[i], result[j]] = [result[j], result[i]];
-  }
-  return result;
-}
+import { ensureStudentAssignment, applyAssignmentToQuestions } from "@/lib/student-assignment";
 
 export async function GET(req: NextRequest) {
   try {
@@ -79,23 +62,8 @@ export async function GET(req: NextRequest) {
       }),
     ]);
 
-    let questions = fetchedQuestions;
-
-    const settings = (exam.settings as any) || {};
-    if (settings.randomize_questions) {
-      questions = pseudoRandomShuffle(questions, student.nisn, exam.id);
-    }
-    if (settings.randomize_choices) {
-      questions = questions.map((q) => {
-        if (Array.isArray(q.options) && q.options.length > 1) {
-          return {
-            ...q,
-            options: pseudoRandomShuffle(q.options as any[], student.nisn, `${exam.id}-${q.id}`),
-          };
-        }
-        return q;
-      });
-    }
+    const assignment = await ensureStudentAssignment(student);
+    const questions = applyAssignmentToQuestions(fetchedQuestions, assignment);
 
     const totalQuestions = questions.length;
     let selectedQuestions = questions;
@@ -135,6 +103,8 @@ export async function GET(req: NextRequest) {
         nisn: student.nisn,
         isLocked: student.isLocked,
         violationCount: student.violationCount,
+        violationCycleCount: student.violationCycleCount,
+        recoveryRequired: student.recoveryRequired,
       },
       exam: {
         id: exam.id,

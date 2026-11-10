@@ -365,6 +365,7 @@ export function Monitoring() {
       "student_joined_waiting",
       "student_answer_progress",
       "student_unlocked",
+      "student_recovered",
       "exam_started",
       "exam_ended",
     ];
@@ -1012,6 +1013,14 @@ export function Monitoring() {
                         ) : (
                           <span className="proctor-status-pill">
                             {s.status}
+                          </span>
+                        )}
+                        {s.recoveryRequired && (
+                          <span
+                            className="proctor-status-pill locked"
+                            style={{ background: "#fef3c7", color: "#92400e", borderColor: "#fde68a", marginLeft: 4 }}
+                          >
+                            Perlu Pemulihan
                           </span>
                         )}
                       </div>

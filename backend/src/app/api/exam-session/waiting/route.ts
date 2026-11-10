@@ -28,6 +28,7 @@ export async function GET(req: NextRequest) {
         isLocked: student.isLocked,
         violationCount: student.violationCount,
         violationCycleCount: student.violationCycleCount,
+        recoveryRequired: student.recoveryRequired,
         latestAdmissionAction,
       },
       exam: {

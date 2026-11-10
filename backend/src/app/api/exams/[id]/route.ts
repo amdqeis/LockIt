@@ -35,6 +35,8 @@ const updateExamSchema = z.object({
       detect_fullscreen_exit: z.boolean().optional(),
       detect_screenshot: z.boolean().optional(),
       detect_ip_change: z.boolean().optional(),
+      detect_focus_loss: z.boolean().optional(),
+      detect_split_screen: z.boolean().optional(),
     })
     .passthrough()
     .optional(),
@@ -48,6 +50,13 @@ const updateExamSchema = z.object({
       bank_title: z.string().optional(),
       show_score_to_student: z.boolean().optional(),
       allow_answer_review: z.boolean().optional(),
+      question_selection: z
+        .object({
+          mode: z.enum(["manual", "random_once", "random_per_student"]).optional(),
+          count: z.number().int().positive().max(200).nullable().optional(),
+        })
+        .nullable()
+        .optional(),
     })
     .passthrough()
     .optional(),
@@ -143,6 +152,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         };
       }
       if (parsed.data.settings) {
+        if (parsed.data.settings.question_selection !== undefined) {
+          return errorResponse("INVALID_STATE", "Pengaturan pemilihan soal tidak dapat diubah setelah ujian aktif.", 409);
+        }
         const currentSettings = typeof exam.settings === "object" && exam.settings !== null ? exam.settings as any : {};
         updateData.settings = {
           ...currentSettings,
@@ -217,6 +229,15 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         if (exam.subjectId && source.subjectId !== exam.subjectId) throw new AppError("VALIDATION_ERROR", "Bank soal tidak sesuai mata pelajaran ujian.", 400);
         const selected = source.questions.filter(q => parsed.data.questionIds?.includes(q.id));
         if (!selected.length || selected.length !== new Set(parsed.data.questionIds).size) throw new AppError("VALIDATION_ERROR", "Pilih soal yang tersedia dalam bank.", 400);
+        if (selected.length > 200) throw new AppError("VALIDATION_ERROR", "Kandidat soal tidak boleh melebihi batas 200 soal.", 400);
+
+        const qSel = (updateData.settings as any)?.question_selection;
+        if (qSel && (qSel.mode === "random_per_student" || qSel.mode === "random_once")) {
+          const count = typeof qSel.count === "number" ? qSel.count : selected.length;
+          if (count < 1 || count > selected.length) {
+            throw new AppError("VALIDATION_ERROR", "Jumlah soal harus antara 1 dan jumlah kandidat soal yang tersedia.", 400);
+          }
+        }
         await tx.question.deleteMany({ where: { examId: id } });
         await tx.question.createMany({ data: selected.map((q, index) => ({
           examId: id, orderIndex: index + 1, questionText: q.questionText,

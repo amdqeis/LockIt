@@ -3,7 +3,7 @@
 import { MotionButton } from "@/components/MotionButton";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { motion, useReducedMotion, LayoutGroup } from "framer-motion";
 import { Dialog } from "@/components/Dialog";
 import { QuestionContent } from "@/components/QuestionContent";
@@ -11,8 +11,7 @@ import { getCurrentAcademicPeriod } from "@/lib/academic-year";
 import { staffApi, staffSend } from "@/lib/staff-api";
 import { queryCache } from "@/lib/data-cache";
 import { motionTokens } from "@/lib/motion";
-import { ExamListSkeleton, ExamQuestionSkeleton } from "@/components/skeletons";
-import type { Question } from "@/lib/api";
+import { ExamListSkeleton } from "@/components/skeletons";
 import { ErrorText, Icon, message } from "./Dashboard";
 import type { Bank, Classroom, Exam, GradeLevel, Subject } from "./types";
 import { HierarchyBreadcrumb, HierarchyCard, useHierarchyNavigation } from "./HierarchyNavigation";
@@ -43,6 +42,10 @@ type Form = {
   focus: boolean;
   fullscreen: boolean;
   ip: boolean;
+  selectionMode: "manual" | "random_once" | "random_per_student";
+  selectionCount: string;
+  focusLoss: boolean;
+  splitScreen: boolean;
 };
 
 type HierarchicalSubject = {
@@ -93,11 +96,16 @@ const initial: Form = {
   focus: true,
   fullscreen: true,
   ip: true,
+  selectionMode: "manual",
+  selectionCount: "",
+  focusLoss: true,
+  splitScreen: true,
 };
 
 const stepNames = ["Informasi", "Pilih soal", "Aturan & Simpan"];
 
 export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {}) {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const reduceMotion = useReducedMotion();
 
@@ -109,8 +117,6 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
   const [rolloverNotice, setRolloverNotice] = useState("");
   const [editing, setEditing] = useState<Exam | null>(null);
   const [replaceQuestions, setReplaceQuestions] = useState(false);
-  const [view, setView] = useState<Exam | null>(null);
-  const [preview, setPreview] = useState<Question[] | null>(null);
   const [form, setForm] = useState<Form>(initial);
 
   const [gradeLevels, setGradeLevels] = useState<GradeLevel[]>([]);
@@ -119,6 +125,7 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
   const [banks, setBanks] = useState<Bank[]>([]);
   const [bank, setBank] = useState<Bank | null>(null);
   const [ids, setIds] = useState<string[]>([]);
+  const [randomOnceSubset, setRandomOnceSubset] = useState<string[]>([]);
   const [filter, setFilter] = useState(() => searchParams.get("search") || "");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -343,6 +350,15 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
     setForm(v => ({ ...v, [key]: value }));
   }
 
+  function shuffleSubset(items: string[], count: number): string[] {
+    const clone = [...items];
+    for (let i = clone.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [clone[i], clone[j]] = [clone[j], clone[i]];
+    }
+    return clone.slice(0, Math.max(1, Math.min(count, clone.length)));
+  }
+
   function validateStep(step: number): boolean {
     setError("");
     if (step === 0) {
@@ -369,6 +385,25 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
       if ((!editing || replaceQuestions) && (!bank || bank.id !== form.bankId || !ids.length)) {
         setError("Pilih bank soal dan setidaknya satu butir soal.");
         return false;
+      }
+      if (ids.length > 200) {
+        setError("Jumlah kandidat soal maksimal 200 butir.");
+        return false;
+      }
+      if (form.selectionMode !== "manual") {
+        const count = Number(form.selectionCount);
+        if (isNaN(count) || count < 1 || !Number.isInteger(count)) {
+          setError("Jumlah soal harus berupa angka bulat positif.");
+          return false;
+        }
+        if (count > ids.length) {
+          setError(`Jumlah soal (${count}) tidak boleh melebihi jumlah kandidat (${ids.length}).`);
+          return false;
+        }
+        if (count > 200) {
+          setError("Jumlah soal tidak boleh melebihi 200 butir.");
+          return false;
+        }
       }
       return true;
     }
@@ -439,6 +474,20 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
         }
       }
 
+      let resolvedQuestionIds = ids;
+      if (form.selectionMode === "random_once") {
+        resolvedQuestionIds = randomOnceSubset.length
+          ? randomOnceSubset
+          : shuffleSubset(ids, Number(form.selectionCount) || ids.length);
+      }
+
+      const questionSelectionPayload = {
+        mode: form.selectionMode,
+        ...(form.selectionMode !== "manual" && form.selectionCount
+          ? { count: Number(form.selectionCount) }
+          : {}),
+      };
+
       const payload = {
         title: form.title.trim(),
         description: form.description.trim() || null,
@@ -452,9 +501,10 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
         scheduledStartAt: scheduleIso,
         passingScore: passing,
         ...(editing ? { revision: editing.revision } : { subjectId: form.subjectId }),
-        ...(!editing || replaceQuestions ? { bankId: bank!.id, bankRevision: bank!.revision, questionIds: ids } : {}),
+        ...(!editing || replaceQuestions ? { bankId: bank!.id, bankRevision: bank!.revision, questionIds: resolvedQuestionIds } : {}),
         settings: {
           ...(!editing || replaceQuestions ? { bank_id: bank!.id, bank_title: bank!.title } : {}),
+          question_selection: questionSelectionPayload,
           randomize_questions: form.randomQuestions,
           randomize_choices: form.randomOptions,
           show_score_to_student: form.showScore,
@@ -467,8 +517,10 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
           detect_screenshot: form.screenshot,
           detect_devtools: form.devtools,
           detect_tab_switch: form.focus,
+          detect_focus_loss: form.focusLoss,
           detect_fullscreen_exit: form.fullscreen,
           detect_ip_change: form.ip,
+          detect_split_screen: form.splitScreen,
           detect_right_click: false,
           detect_copy_paste: false,
         },
@@ -493,8 +545,29 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
   }
 
   function editExam(exam: Exam) {
-    const settings = exam.settings || {};
-    const policy = exam.violationPolicy || {};
+    const settings = (exam.settings || {}) as {
+      display_mode?: string;
+      randomize_questions?: boolean;
+      randomize_choices?: boolean;
+      show_score_to_student?: boolean;
+      allow_answer_review?: boolean;
+      question_selection?: {
+        mode?: "manual" | "random_once" | "random_per_student";
+        count?: number;
+      };
+      [key: string]: unknown;
+    };
+    const policy = (exam.violationPolicy || {}) as {
+      max_violations?: number;
+      detect_screenshot?: boolean;
+      detect_devtools?: boolean;
+      detect_tab_switch?: boolean;
+      detect_focus_loss?: boolean;
+      detect_fullscreen_exit?: boolean;
+      detect_ip_change?: boolean;
+      detect_split_screen?: boolean;
+      [key: string]: unknown;
+    };
     const date = exam.scheduledStartAt ? new Date(exam.scheduledStartAt) : null;
     const local = date ? new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16) : "";
     const cls = classrooms.find(c => c.id === exam.classroomId);
@@ -529,20 +602,16 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
       focus: policy.detect_tab_switch !== false,
       fullscreen: policy.detect_fullscreen_exit !== false,
       ip: policy.detect_ip_change !== false,
+      selectionMode: settings.question_selection?.mode || "manual",
+      selectionCount: String(settings.question_selection?.count || ""),
+      focusLoss: policy.detect_focus_loss !== false && policy.detect_tab_switch !== false,
+      splitScreen: policy.detect_split_screen !== false,
     });
     setActiveStep(0);
   }
 
-  async function openPreview(exam: Exam) {
-    setView(exam);
-    setPreview(null);
-    setError("");
-    try {
-      const result = await staffApi<{ questions: Question[] }>(`/api/exams/${exam.id}/questions/preview`);
-      setPreview(result.questions);
-    } catch (e) {
-      setError(message(e));
-    }
+  function openPreview(exam: Exam) {
+    router.push(`/dashboard/preview/exam/${exam.id}`);
   }
 
   function openDuplicateModal(exam: Exam) {
@@ -882,8 +951,116 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
 
                       {bank && bank.id === form.bankId && (
                         <div style={{ marginTop: 16 }}>
+                          <h3 style={{ fontSize: 13, margin: "16px 0 8px", color: "var(--staff-ink)", fontWeight: 650 }}>
+                            Metode pemilihan butir soal
+                          </h3>
+                          <div style={{ display: "grid", gap: 8, marginBottom: 16 }}>
+                            <label className="exam-creator-check-card" style={{ cursor: "pointer" }}>
+                              <input
+                                type="radio"
+                                name="selectionMode"
+                                value="manual"
+                                checked={form.selectionMode === "manual"}
+                                onChange={() => {
+                                  change("selectionMode", "manual");
+                                  change("selectionCount", "");
+                                }}
+                              />
+                              <div>
+                                <strong>Manual</strong>
+                                <p style={{ margin: 0, fontSize: 11, color: "var(--staff-muted)" }}>
+                                  Guru memilih butir soal secara mandiri; jumlah terpakai mengikuti pilihan ({ids.length} soal).
+                                </p>
+                              </div>
+                            </label>
+
+                            <label className="exam-creator-check-card" style={{ cursor: "pointer" }}>
+                              <input
+                                type="radio"
+                                name="selectionMode"
+                                value="random_once"
+                                checked={form.selectionMode === "random_once"}
+                                onChange={() => {
+                                  change("selectionMode", "random_once");
+                                  if (!form.selectionCount) {
+                                    change("selectionCount", String(Math.min(ids.length || 10, 10)));
+                                  }
+                                }}
+                              />
+                              <div>
+                                <strong>Acak sekali per ujian</strong>
+                                <p style={{ margin: 0, fontSize: 11, color: "var(--staff-muted)" }}>
+                                  Kandidat diacak sekali; seluruh peserta menerima kumpulan subset soal acak yang sama.
+                                </p>
+                              </div>
+                            </label>
+
+                            <label className="exam-creator-check-card" style={{ cursor: "pointer" }}>
+                              <input
+                                type="radio"
+                                name="selectionMode"
+                                value="random_per_student"
+                                checked={form.selectionMode === "random_per_student"}
+                                onChange={() => {
+                                  change("selectionMode", "random_per_student");
+                                  if (!form.selectionCount) {
+                                    change("selectionCount", String(Math.min(ids.length || 10, 10)));
+                                  }
+                                }}
+                              />
+                              <div>
+                                <strong>Acak per peserta</strong>
+                                <p style={{ margin: 0, fontSize: 11, color: "var(--staff-muted)" }}>
+                                  Guru menentukan kandidat soal; setiap peserta menerima subset soal acak yang berbeda.
+                                </p>
+                              </div>
+                            </label>
+                          </div>
+
+                          {form.selectionMode !== "manual" && (
+                            <div className="exam-creator-field" style={{ marginBottom: 16 }}>
+                              <label htmlFor="exam-selection-count">
+                                Jumlah butir soal yang diujikan (N) *
+                              </label>
+                              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                                <input
+                                  id="exam-selection-count"
+                                  type="number"
+                                  min="1"
+                                  max={Math.min(200, ids.length || 1)}
+                                  required
+                                  value={form.selectionCount}
+                                  onChange={(e) => change("selectionCount", e.target.value)}
+                                  style={{ maxWidth: 160 }}
+                                />
+                                <span style={{ fontSize: 11, color: "var(--staff-muted)" }}>
+                                  dari {ids.length} kandidat soal terpilih (maksimal 200)
+                                </span>
+                                {form.selectionMode === "random_once" && (
+                                  <MotionButton
+                                    type="button"
+                                    className="staff-secondary"
+                                    style={{ fontSize: 11, padding: "0 10px", height: 32, marginLeft: "auto" }}
+                                    onClick={() => {
+                                      const count = Number(form.selectionCount) || ids.length;
+                                      const shuffled = shuffleSubset(ids, count);
+                                      setRandomOnceSubset(shuffled);
+                                    }}
+                                  >
+                                    Acak Ulang
+                                  </MotionButton>
+                                )}
+                              </div>
+                              {form.selectionMode === "random_once" && randomOnceSubset.length > 0 && (
+                                <p style={{ margin: "6px 0 0", fontSize: 11, color: "#17643d", fontWeight: 650 }}>
+                                  Hasil acak tersimpan: {randomOnceSubset.length} butir soal terpilih siap diujikan.
+                                </p>
+                              )}
+                            </div>
+                          )}
+
                           <div className="exam-select-toolbar">
-                            <span>Daftar butir soal ({ids.length} dari {bank.questions?.length || 0} dipilih)</span>
+                            <span>Kandidat butir soal ({ids.length} dari {bank.questions?.length || 0} dipilih)</span>
                             <div style={{ display: "flex", gap: 12 }}>
                               <button
                                 type="button"
@@ -1062,7 +1239,16 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
                         checked={form.focus}
                         onChange={e => change("focus", e.target.checked)}
                       />
-                      <span>Deteksi pindah tab atau kehilangan fokus</span>
+                      <span>Deteksi perpindahan tab browser</span>
+                    </label>
+
+                    <label className="exam-creator-check-card">
+                      <input
+                        type="checkbox"
+                        checked={form.focusLoss}
+                        onChange={e => change("focusLoss", e.target.checked)}
+                      />
+                      <span>Deteksi kehilangan fokus jendela (blur)</span>
                     </label>
 
                     <label className="exam-creator-check-card">
@@ -1072,6 +1258,15 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
                         onChange={e => change("fullscreen", e.target.checked)}
                       />
                       <span>Deteksi keluar dari mode layar penuh (Fullscreen)</span>
+                    </label>
+
+                    <label className="exam-creator-check-card">
+                      <input
+                        type="checkbox"
+                        checked={form.splitScreen}
+                        onChange={e => change("splitScreen", e.target.checked)}
+                      />
+                      <span>Deteksi indikasi split screen</span>
                     </label>
 
                     <label className="exam-creator-check-card">
@@ -1607,45 +1802,6 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
             </button>
           </div>
         </form>
-      </Dialog>
-
-      {/* Modal: Detail / Pratinjau Ujian */}
-      <Dialog open={!!view} title="Detail ujian" onClose={() => setView(null)}>
-        {view && (
-          <div className="staff-form">
-            <h3>{view.title}</h3>
-            <p>{view.description || "Tidak ada deskripsi."}</p>
-            <p>
-              Kode akses: <strong>{view.accessCode}</strong>
-            </p>
-            <p>
-              {view.durationMinutes} menit · {view._count.questions} soal · {view._count.students} peserta
-            </p>
-            <ErrorText error={error} />
-            {preview ? (
-              preview.map((q, i) => (
-                <section key={q.id} className="staff-question">
-                  <strong>Soal {i + 1}</strong>
-                  <QuestionContent text={q.questionText} content={q.content} imageUrl={q.imageUrl} imageAlt={q.imageAlt} />
-                  {q.options.map((o, j) => (
-                    <p key={j}>
-                      {typeof o === "string" ? (
-                        o
-                      ) : (
-                        <QuestionContent text={o.text} content={o.content} imageUrl={o.imageUrl} imageAlt={o.imageAlt} />
-                      )}
-                    </p>
-                  ))}
-                </section>
-              ))
-            ) : (
-              !error && <ExamQuestionSkeleton />
-            )}
-            <Link href={`/dashboard/monitoring?exam=${encodeURIComponent(view.id)}`} className="staff-primary staff-link-button">
-              Buka monitoring <Icon name="arrow" size={16} />
-            </Link>
-          </div>
-        )}
       </Dialog>
 
       <Dialog

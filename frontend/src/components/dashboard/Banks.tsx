@@ -2,7 +2,7 @@
 import { MotionButton } from "@/components/MotionButton";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { JSONContent } from "@tiptap/core";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion, useReducedMotion } from "framer-motion";
 import { Dialog } from "@/components/Dialog";
@@ -84,6 +84,7 @@ export function Banks({ teacherId }: { teacherId: string }) {
     if (!currentGrade) return [];
     return currentGrade.subjects;
   }, [currentGrade]);
+  const router = useRouter();
   const [bankOpen, setBankOpen] = useState(false);
   const [bankName, setBankName] = useState("");
   const [error, setError] = useState("");
@@ -289,14 +290,8 @@ export function Banks({ teacherId }: { teacherId: string }) {
     }
   }
 
-  async function previewBank(bank: Bank) {
-    setError("");
-    try {
-      const detail = await staffApi<Bank>(`/api/question-banks/${bank.id}`);
-      setViewingBank(detail);
-    } catch (e) {
-      setError(message(e));
-    }
+  function previewBank(bank: Bank) {
+    router.push(`/dashboard/preview/bank/${bank.id}`);
   }
 
   function startNewQuestionBank() {

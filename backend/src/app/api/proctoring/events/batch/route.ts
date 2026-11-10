@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { successResponse, errorResponse, safeErrorMessage } from "@/lib/response";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { AppError } from "@/lib/errors";
-import { isScreenshotDetectionEnabled, shouldIgnoreLegacyProctoringEvent } from "@/lib/proctoring-events";
+import { isScreenshotDetectionEnabled, shouldIgnoreLegacyProctoringEvent, isViolation } from "@/lib/proctoring-events";
 
 const eventTypeEnum = z.enum([
   "fullscreen_exit", "fullscreen_denied", "window_blur", "tab_switch", "copy_attempt", "paste_attempt",
@@ -19,20 +19,6 @@ const eventSchema = z.object({
   metadata: z.record(z.any()).optional(),
 });
 const batchEventSchema = z.object({ events: z.array(eventSchema).min(1).max(100) });
-
-function isViolation(eventType: string, policy: Record<string, unknown>) {
-  switch (eventType) {
-    case "right_click": return policy.detect_right_click !== false;
-    case "devtools": return policy.detect_devtools !== false;
-    case "tab_switch":
-    case "window_blur": return policy.detect_tab_switch !== false;
-    case "fullscreen_exit": return policy.detect_fullscreen_exit !== false;
-    case "fullscreen_denied": return false;
-    case "screenshot": return isScreenshotDetectionEnabled(policy);
-    case "ip_change": return policy.detect_ip_change !== false;
-    default: return false;
-  }
-}
 
 export async function POST(req: NextRequest) {
   try {
@@ -79,9 +65,13 @@ export async function POST(req: NextRequest) {
       const cycleCount = current.violationCycleCount + counts;
       const screenshotLock = !current.isLocked && freshEvents.some((event) => event.eventType === "screenshot") && isScreenshotDetectionEnabled(policy);
       const shouldLock = !current.isLocked && (screenshotLock || (counts > 0 && cycleCount >= maxViolations && policyAction === "lock"));
-      const updated = counts || shouldLock
+      const shouldRequireRecovery = !current.isLocked && !shouldLock && (current.recoveryRequired || cycleCount >= 2);
+      const updated = counts || shouldLock || (shouldRequireRecovery !== current.recoveryRequired)
         ? await tx.student.update({ where: { id: student.id }, data: {
-            violationCount: { increment: counts }, violationCycleCount: { increment: counts }, ...(shouldLock ? { isLocked: true } : {}),
+            violationCount: { increment: counts },
+            violationCycleCount: { increment: counts },
+            ...(shouldLock ? { isLocked: true } : {}),
+            ...(shouldRequireRecovery ? { recoveryRequired: true } : {}),
           } })
         : current;
       return { insertedCount: created.count, current: updated, freshEvents };
@@ -92,6 +82,7 @@ export async function POST(req: NextRequest) {
       io?.of("/teacher-dashboard").to(`exam:${exam.id}`).emit("student_violation_batch", {
         studentId: student.id, name: student.name, nisn: student.nisn,
         violationCount: result.current.violationCount, violationCycleCount: result.current.violationCycleCount,
+        recoveryRequired: result.current.recoveryRequired,
         isLocked: result.current.isLocked, eventsCount: result.insertedCount,
       });
       for (const event of result.freshEvents) {
@@ -108,6 +99,7 @@ export async function POST(req: NextRequest) {
       ignoredCount: parsed.data.events.length - accepted.length,
       violationCount: result.current.violationCount,
       violationCycleCount: result.current.violationCycleCount,
+      recoveryRequired: result.current.recoveryRequired,
       isLocked: result.current.isLocked,
     });
   } catch (err: any) {

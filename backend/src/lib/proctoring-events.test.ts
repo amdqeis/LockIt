@@ -24,3 +24,19 @@ test("respects the teacher screenshot detection policy", () => {
   assert.equal(isScreenshotDetectionEnabled({ detect_screenshot: true }), true);
   assert.equal(isScreenshotDetectionEnabled({}), true);
 });
+
+test("isViolation handles focus loss and split screen settings with backwards compatibility", () => {
+  const { isViolation } = require("./proctoring-events");
+  // Legacy policy with only detect_tab_switch
+  assert.equal(isViolation("window_blur", { detect_tab_switch: true }), true);
+  assert.equal(isViolation("window_blur", { detect_tab_switch: false }), false);
+
+  // Separate detect_focus_loss setting overrides
+  assert.equal(isViolation("window_blur", { detect_tab_switch: true, detect_focus_loss: false }), false);
+  assert.equal(isViolation("window_blur", { detect_tab_switch: false, detect_focus_loss: true }), true);
+
+  // Split screen detection
+  assert.equal(isViolation("split_screen", { detect_split_screen: true }), true);
+  assert.equal(isViolation("split_screen", { detect_split_screen: false }), false);
+  assert.equal(isViolation("split_screen", {}), true);
+});

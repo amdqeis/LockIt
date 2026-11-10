@@ -74,14 +74,26 @@ export function checkRateLimit(identifier: string, options: RateLimitOptions): R
   };
 }
 
+export function normalizeIp(ip: string): string {
+  let cleaned = ip.trim();
+  if (cleaned.startsWith("::ffff:")) {
+    cleaned = cleaned.substring(7);
+  }
+  if (cleaned === "::1") {
+    return "127.0.0.1";
+  }
+  return cleaned || "127.0.0.1";
+}
+
 export function getClientIp(headers: Headers): string {
   const forwarded = headers.get("x-forwarded-for");
   if (forwarded) {
-    return forwarded.split(",")[0].trim();
+    const first = forwarded.split(",")[0].trim();
+    return normalizeIp(first);
   }
   const realIp = headers.get("x-real-ip");
   if (realIp) {
-    return realIp.trim();
+    return normalizeIp(realIp);
   }
   return "127.0.0.1";
 }

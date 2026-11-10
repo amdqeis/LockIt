@@ -5,6 +5,7 @@ import { autoGradeStudent } from "@/services/grading";
 import { calculateQuestionScore } from "@/services/score-calculation";
 import { successResponse, errorResponse, safeErrorMessage } from "@/lib/response";
 import { AppError } from "@/lib/errors";
+import { parseStudentAssignment, applyAssignmentToQuestions } from "@/lib/student-assignment";
 import { z } from "zod";
 
 export async function GET(
@@ -38,14 +39,17 @@ export async function GET(
       orderBy: { orderIndex: "asc" },
     });
 
+    const assignment = parseStudentAssignment(student.assignedQuestions);
+    const assignedQuestions = applyAssignmentToQuestions(questions, assignment);
+
     const answerMap = new Map(student.answers.map((a) => [a.questionId, a]));
 
-    const detailedAnswers = questions.map((q) => {
+    const detailedAnswers = assignedQuestions.map((q, idx) => {
       const ans = answerMap.get(q.id);
       const qScore = calculateQuestionScore(q, ans);
       return {
         questionId: q.id,
-        orderIndex: q.orderIndex,
+        orderIndex: idx + 1,
         questionText: q.questionText,
         content: q.content,
         imageUrl: q.imageUrl,
@@ -82,8 +86,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (!exam) return errorResponse("NOT_FOUND", "Ujian tidak ditemukan", 404);
     const parsed = z.object({ questionId: z.string().uuid(), isCorrect: z.boolean().nullable() }).safeParse(await req.json().catch(() => null));
     if (!parsed.success) return errorResponse("VALIDATION_ERROR", "Penilaian tidak valid", 400);
-    const student = await prisma.student.findFirst({ where: { id: sid, examId: id, status: "submitted" }, select: { id: true } });
+    const student = await prisma.student.findFirst({ where: { id: sid, examId: id, status: "submitted" }, select: { id: true, assignedQuestions: true } });
     if (!student) return errorResponse("INVALID_STATE", "Penilaian tersedia setelah peserta mengumpulkan ujian", 409);
+    const assignment = parseStudentAssignment(student.assignedQuestions);
+    if (assignment && !assignment.questionIds.includes(parsed.data.questionId)) {
+      return errorResponse("NOT_FOUND", "Soal tidak termasuk dalam penugasan peserta", 404);
+    }
     const question = await prisma.question.findFirst({ where: { id: parsed.data.questionId, examId: id, type: "short_answer" }, select: { id: true } });
     if (!question) return errorResponse("NOT_FOUND", "Soal jawaban singkat tidak ditemukan", 404);
     const updated = await prisma.answer.updateMany({ where: { studentId: sid, questionId: question.id, selectedOption: { not: null }, NOT: { selectedOption: "" } }, data: { isCorrect: parsed.data.isCorrect } });

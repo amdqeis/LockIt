@@ -18,7 +18,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const unlocked = await prisma.$transaction(async (tx) => {
       const changed = await tx.student.updateMany({
         where: { id: sid, examId: id, isLocked: true },
-        data: { isLocked: false, violationCycleCount: 0 },
+        data: { isLocked: false, violationCycleCount: 0, recoveryRequired: false, recoveredCycleCount: 0 },
       });
       if (!changed.count) return null;
       await tx.proctoringEvent.create({
@@ -27,16 +27,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           metadata: { teacherId: teacher.teacherId, previousCycleCount: student.violationCycleCount },
         },
       });
-      return tx.student.findUniqueOrThrow({ where: { id: sid }, select: { id: true, isLocked: true, violationCount: true, violationCycleCount: true } });
+      return tx.student.findUniqueOrThrow({ where: { id: sid }, select: { id: true, isLocked: true, violationCount: true, violationCycleCount: true, recoveryRequired: true } });
     }, { isolationLevel: "Serializable" });
     if (!unlocked) return errorResponse("INVALID_STATE", "Peserta sudah dibuka oleh aksi lain", 409);
 
     const io = (globalThis as any).io;
     io?.of("/student-session").to(`student:${sid}`).emit("student_unlocked", {
-      message: "Sesi ujian Anda telah dibuka kembali oleh pengawas.", violationCycleCount: 0,
+      message: "Sesi ujian Anda telah dibuka kembali oleh pengawas.", violationCycleCount: 0, recoveryRequired: false,
     });
     io?.of("/teacher-dashboard").to(`exam:${id}`).emit("student_unlocked", {
-      studentId: sid, isLocked: false, violationCycleCount: 0, violationCount: unlocked.violationCount,
+      studentId: sid, isLocked: false, violationCycleCount: 0, violationCount: unlocked.violationCount, recoveryRequired: false,
     });
     return successResponse({ ...unlocked, message: "Kunci peserta dibuka. Hitungan siklus baru dimulai; total riwayat tetap tersimpan." });
   } catch (err: any) {

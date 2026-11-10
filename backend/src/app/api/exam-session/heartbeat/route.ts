@@ -11,21 +11,21 @@ export async function POST(req: NextRequest) {
     const { student } = await authenticateStudent(req);
     const exam = student.exam;
 
-    // HIGH-06: Rate limit heartbeat — normal setiap 10-30 detik (max 10/menit),
-    // saat status terkunci izinkan frekuensi lebih tinggi (max 45/menit) untuk deteksi unblock instan
+    // Heartbeat every 5 seconds (12/min) plus focus/online triggers
     const rateLimit = checkRateLimit(student.id, {
       windowMs: 60 * 1000,
-      max: student.isLocked ? 45 : 10,
+      max: 60,
       keyPrefix: "heartbeat",
     });
 
     if (!rateLimit.success) {
-      // Kembalikan data heartbeat standar tanpa error agar siswa tidak bingung,
-      // tapi abaikan proses DB untuk mencegah abuse
       return successResponse({
         studentId: student.id,
         status: student.status,
         isLocked: student.isLocked,
+        violationCount: student.violationCount,
+        violationCycleCount: student.violationCycleCount,
+        recoveryRequired: student.recoveryRequired,
         isExamActive: exam.status === "active",
         serverTime: new Date().toISOString(),
       });
@@ -33,12 +33,24 @@ export async function POST(req: NextRequest) {
 
     const now = new Date();
     const [currentStudent, currentExam] = await Promise.all([
-      prisma.student.findUniqueOrThrow({ where: { id: student.id }, select: { status: true, isLocked: true } }),
+      prisma.student.findUniqueOrThrow({
+        where: { id: student.id },
+        select: {
+          status: true,
+          isLocked: true,
+          violationCount: true,
+          violationCycleCount: true,
+          recoveryRequired: true,
+        },
+      }),
       prisma.exam.findUnique({ where: { id: exam.id }, select: { status: true, endTime: true } }),
     ]);
     const isExamActive = currentExam?.status === "active" && (!currentExam.endTime || now <= currentExam.endTime);
     let currentIsLocked = currentStudent.isLocked;
     let currentStatus = currentStudent.status;
+    let currentViolationCount = currentStudent.violationCount;
+    let currentViolationCycleCount = currentStudent.violationCycleCount;
+    let currentRecoveryRequired = currentStudent.recoveryRequired;
 
     // Catat perubahan IP sekali, dan gunakan siklus yang sama dengan event proctoring lain.
     const clientIp = getClientIp(req.headers);
@@ -52,12 +64,14 @@ export async function POST(req: NextRequest) {
         const counts = Boolean(current.ipAddress) && policy.detect_ip_change !== false && !current.isLocked;
         const nextCycle = current.violationCycleCount + (counts ? 1 : 0);
         const shouldLock = counts && nextCycle >= maxViolations && policyAction === "lock";
+        const shouldRequireRecovery = !current.isLocked && !shouldLock && (current.recoveryRequired || nextCycle >= 2);
         const changed = await tx.student.updateMany({
           where: { id: student.id, ipAddress: current.ipAddress },
           data: {
             ipAddress: clientIp,
             ...(counts ? { violationCount: { increment: 1 }, violationCycleCount: { increment: 1 } } : {}),
             ...(shouldLock ? { isLocked: true } : {}),
+            ...(shouldRequireRecovery ? { recoveryRequired: true } : {}),
           },
         });
         if (!changed.count) return null;
@@ -72,12 +86,16 @@ export async function POST(req: NextRequest) {
       }, { isolationLevel: "Serializable" });
       if (ipChange) {
         currentIsLocked = ipChange.student.isLocked;
+        currentViolationCount = ipChange.student.violationCount;
+        currentViolationCycleCount = ipChange.student.violationCycleCount;
+        currentRecoveryRequired = ipChange.student.recoveryRequired;
         if (ipChange.event) {
           const io = (globalThis as any).io;
           io?.of("/teacher-dashboard").to(`exam:${exam.id}`).emit("student_violation", {
             studentId: student.id, name: student.name, nisn: student.nisn,
             violationCount: ipChange.student.violationCount,
             violationCycleCount: ipChange.student.violationCycleCount,
+            recoveryRequired: ipChange.student.recoveryRequired,
             isLocked: ipChange.student.isLocked,
             event: { id: ipChange.event.id, eventType: "ip_change", timestamp: ipChange.event.timestamp.toISOString(), metadata: ipChange.event.metadata },
           });
@@ -126,6 +144,9 @@ export async function POST(req: NextRequest) {
       studentId: student.id,
       status: currentStatus,
       isLocked: currentIsLocked,
+      violationCount: currentViolationCount,
+      violationCycleCount: currentViolationCycleCount,
+      recoveryRequired: currentRecoveryRequired,
       isExamActive,
       serverTime: now.toISOString(),
       warning: latestWarning

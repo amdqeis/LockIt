@@ -185,3 +185,39 @@ test("POST /api/exams returns detailed validation errors on invalid input", asyn
   assert.ok(body.error.details.title);
   assert.ok(body.error.details.durationMinutes);
 });
+
+test("POST /api/exams accepts question_selection modes and rejects invalid count", async () => {
+  // Valid random_per_student creation
+  const validRes = await postRequest({
+    title: "Ujian Acak Peserta",
+    durationMinutes: 60,
+    bankId: "bank-1",
+    bankRevision: 1,
+    subjectId: "sub-1",
+    questionIds: ["q-1"],
+    settings: {
+      question_selection: {
+        mode: "random_per_student",
+        count: 1,
+      },
+    },
+  });
+  assert.equal(validRes.status, 201);
+
+  // Invalid count exceeding candidate count
+  const invalidRes = await postRequest({
+    title: "Ujian Acak Gagal",
+    durationMinutes: 60,
+    bankId: "bank-1",
+    bankRevision: 1,
+    subjectId: "sub-1",
+    questionIds: ["q-1"],
+    settings: {
+      question_selection: {
+        mode: "random_per_student",
+        count: 5,
+      },
+    },
+  });
+  assert.equal(invalidRes.status, 400);
+});

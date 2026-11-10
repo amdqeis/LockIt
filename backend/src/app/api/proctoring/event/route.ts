@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { successResponse, errorResponse, safeErrorMessage } from "@/lib/response";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { AppError } from "@/lib/errors";
-import { isScreenshotDetectionEnabled, shouldIgnoreLegacyProctoringEvent } from "@/lib/proctoring-events";
+import { isScreenshotDetectionEnabled, shouldIgnoreLegacyProctoringEvent, isViolation } from "@/lib/proctoring-events";
 
 const eventTypeEnum = z.enum([
   "fullscreen_exit", "fullscreen_denied", "window_blur", "tab_switch", "copy_attempt", "paste_attempt",
@@ -19,20 +19,6 @@ const proctoringEventSchema = z.object({
   durationMs: z.number().int().nonnegative().optional(),
   metadata: z.record(z.any()).optional(),
 });
-
-function isViolation(eventType: string, policy: Record<string, unknown>) {
-  switch (eventType) {
-    case "right_click": return policy.detect_right_click !== false;
-    case "devtools": return policy.detect_devtools !== false;
-    case "tab_switch":
-    case "window_blur": return policy.detect_tab_switch !== false;
-    case "fullscreen_exit": return policy.detect_fullscreen_exit !== false;
-    case "fullscreen_denied": return false;
-    case "screenshot": return isScreenshotDetectionEnabled(policy);
-    case "ip_change": return policy.detect_ip_change !== false;
-    default: return false;
-  }
-}
 
 export async function POST(req: NextRequest) {
   try {
@@ -68,9 +54,13 @@ export async function POST(req: NextRequest) {
         const cycleCount = current.violationCycleCount + counts;
         const screenshotLock = !current.isLocked && eventType === "screenshot" && isScreenshotDetectionEnabled(policy);
         const shouldLock = !current.isLocked && (screenshotLock || (counts > 0 && cycleCount >= maxViolations && policyAction === "lock"));
-        const updated = counts || shouldLock
+        const shouldRequireRecovery = !current.isLocked && !shouldLock && (current.recoveryRequired || cycleCount >= 2);
+        const updated = counts || shouldLock || (shouldRequireRecovery !== current.recoveryRequired)
           ? await tx.student.update({ where: { id: student.id }, data: {
-              violationCount: { increment: counts }, violationCycleCount: { increment: counts }, ...(shouldLock ? { isLocked: true } : {}),
+              violationCount: { increment: counts },
+              violationCycleCount: { increment: counts },
+              ...(shouldLock ? { isLocked: true } : {}),
+              ...(shouldRequireRecovery ? { recoveryRequired: true } : {}),
             } })
           : current;
         return { event, updated, screenshotLock };
@@ -81,7 +71,32 @@ export async function POST(req: NextRequest) {
           prisma.proctoringEvent.findFirst({ where: { studentId: student.id, incidentId } }),
           prisma.student.findUniqueOrThrow({ where: { id: student.id } }),
         ]);
-        return successResponse({ eventId: existing?.id ?? null, duplicate: true, violationCount: current.violationCount, violationCycleCount: current.violationCycleCount, isLocked: current.isLocked });
+        let finalStudent = current;
+        let screenshotLock = false;
+        if (!current.isLocked && eventType === "screenshot" && isScreenshotDetectionEnabled(policy)) {
+          finalStudent = await prisma.student.update({
+            where: { id: student.id },
+            data: { isLocked: true },
+          });
+          screenshotLock = true;
+          const io = (globalThis as any).io;
+          io?.of("/teacher-dashboard").to(`exam:${exam.id}`).emit("screenshot_detected", {
+            studentId: student.id, name: student.name, nisn: student.nisn, timestamp: new Date().toISOString(), violationCount: finalStudent.violationCount,
+          });
+          io?.of("/student-session").to(`student:${student.id}`).emit("student_locked", {
+            message: "Shortcut screenshot terdeteksi dan sesi dikunci.",
+            isLocked: true, violationCycleCount: finalStudent.violationCycleCount,
+          });
+        }
+        return successResponse({
+          eventId: existing?.id ?? null,
+          duplicate: true,
+          violationCount: finalStudent.violationCount,
+          violationCycleCount: finalStudent.violationCycleCount,
+          recoveryRequired: finalStudent.recoveryRequired,
+          isLocked: finalStudent.isLocked,
+          screenshotEnforced: screenshotLock,
+        });
       }
       throw err;
     }
@@ -91,6 +106,7 @@ export async function POST(req: NextRequest) {
       io?.of("/teacher-dashboard").to(`exam:${exam.id}`).emit("student_violation", {
         studentId: student.id, name: student.name, nisn: student.nisn,
         violationCount: result.updated.violationCount, violationCycleCount: result.updated.violationCycleCount,
+        recoveryRequired: result.updated.recoveryRequired,
         isLocked: result.updated.isLocked,
         event: { id: result.event.id, incidentId: result.event.incidentId, eventType: result.event.eventType, timestamp: result.event.timestamp.toISOString(), durationMs: result.event.durationMs, metadata: result.event.metadata },
       });
@@ -102,7 +118,15 @@ export async function POST(req: NextRequest) {
       message: result.screenshotLock ? "Shortcut screenshot terdeteksi dan sesi dikunci." : "Batas pelanggaran tercapai dan sesi dikunci.",
       isLocked: true, violationCycleCount: result.updated.violationCycleCount,
     });
-    return successResponse({ eventId: result.event.id, incidentId: idempotencyKey, violationCount: result.updated.violationCount, violationCycleCount: result.updated.violationCycleCount, isLocked: result.updated.isLocked, screenshotEnforced: result.screenshotLock });
+    return successResponse({
+      eventId: result.event.id,
+      incidentId: idempotencyKey,
+      violationCount: result.updated.violationCount,
+      violationCycleCount: result.updated.violationCycleCount,
+      recoveryRequired: result.updated.recoveryRequired,
+      isLocked: result.updated.isLocked,
+      screenshotEnforced: result.screenshotLock,
+    });
   } catch (err: any) {
     if (err instanceof AppError) return errorResponse(err.code, err.message, err.statusCode, err.details);
     return errorResponse("INTERNAL_SERVER_ERROR", safeErrorMessage(err, "Gagal mencatat event proctoring"), 500);

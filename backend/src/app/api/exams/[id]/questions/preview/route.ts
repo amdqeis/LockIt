@@ -30,6 +30,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         durationMinutes: exam.durationMinutes,
         status: exam.status,
         accessCode: exam.accessCode,
+        settings: exam.settings,
         totalQuestions: questions.length,
         totalPoints,
       },

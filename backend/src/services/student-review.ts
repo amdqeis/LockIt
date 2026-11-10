@@ -1,12 +1,14 @@
 import { prisma } from "@/lib/prisma";
 import { AppError } from "@/lib/errors";
 import { calculateScore, calculateQuestionScore } from "./score-calculation";
+import { parseStudentAssignment, applyAssignmentToQuestions } from "@/lib/student-assignment";
 
 type ReviewStudent = {
   id: string;
   name: string;
   nisn: string;
   status: string;
+  assignedQuestions?: unknown;
   exam: {
     id: string;
     title: string;
@@ -28,7 +30,17 @@ export async function buildStudentReview(student: ReviewStudent) {
   }
 
   const showScoreToStudent = settings.show_score_to_student !== false;
-  const [questions, answers] = await Promise.all([
+  let assignedQuestionsRaw = student.assignedQuestions;
+  if (assignedQuestionsRaw === undefined) {
+    const s = await prisma.student.findUnique({
+      where: { id: student.id },
+      select: { assignedQuestions: true },
+    });
+    assignedQuestionsRaw = s?.assignedQuestions ?? null;
+  }
+  const assignment = parseStudentAssignment(assignedQuestionsRaw);
+
+  const [rawQuestions, answers] = await Promise.all([
     prisma.question.findMany({
       where: { examId: student.exam.id },
       orderBy: { orderIndex: "asc" },
@@ -55,6 +67,7 @@ export async function buildStudentReview(student: ReviewStudent) {
     }),
   ]);
 
+  const questions = applyAssignmentToQuestions(rawQuestions, assignment);
   const answersByQuestion = new Map(answers.map((answer) => [answer.questionId, answer]));
   const formattedQuestions = questions.map((question) => {
     const answer = answersByQuestion.get(question.id);

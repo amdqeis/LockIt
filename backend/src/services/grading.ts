@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { calculateScore, calculateQuestionScore } from "./score-calculation";
+import { parseStudentAssignment, applyAssignmentToQuestions } from "@/lib/student-assignment";
 
 export interface StudentScoreSummary {
   studentId: string;
@@ -33,7 +34,8 @@ export async function autoGradeStudent(studentId: string): Promise<StudentScoreS
     throw new Error("Data mahasiswa tidak ditemukan");
   }
 
-  const questions = student.exam.questions;
+  const assignment = parseStudentAssignment(student.assignedQuestions);
+  const questions = applyAssignmentToQuestions(student.exam.questions, assignment);
   const answerMap = new Map(student.answers.map((a) => [a.questionId, a]));
 
   const answerUpdates: { id: string; isCorrect: boolean }[] = [];
@@ -102,13 +104,14 @@ export async function autoGradeExam(examId: string): Promise<StudentScoreSummary
     }),
   ]);
 
-  const autoGradableQuestions = allQuestions.filter((q) => q.type !== "short_answer");
-
-  // Collect answer updates to do in bulk
   const answerUpdates: { id: string; isCorrect: boolean }[] = [];
   const results: StudentScoreSummary[] = [];
 
   for (const student of allStudents) {
+    const assignment = parseStudentAssignment(student.assignedQuestions);
+    const studentQuestions = applyAssignmentToQuestions(allQuestions, assignment);
+    const autoGradableQuestions = studentQuestions.filter((q) => q.type !== "short_answer");
+
     const answerMap = new Map(student.answers.map((a) => [a.questionId, a]));
     const studentUpdates = new Map<string, boolean>();
 
@@ -129,7 +132,7 @@ export async function autoGradeExam(examId: string): Promise<StudentScoreSummary
     }
 
     const scoringAnswers = student.answers.map(answer => studentUpdates.has(answer.id) ? { ...answer, isCorrect: studentUpdates.get(answer.id)! } : answer);
-    const score = calculateScore(allQuestions, scoringAnswers);
+    const score = calculateScore(studentQuestions, scoringAnswers);
 
     results.push({
       studentId: student.id,
@@ -137,7 +140,7 @@ export async function autoGradeExam(examId: string): Promise<StudentScoreSummary
       nisn: student.nisn,
       status: student.status,
       ...score,
-      totalQuestions: allQuestions.length,
+      totalQuestions: studentQuestions.length,
       violationCount: student.violationCount,
       submittedAt: student.submittedAt,
     });
@@ -175,7 +178,9 @@ export async function readStudentGradingSummaries(examId: string): Promise<Stude
   const results: StudentScoreSummary[] = [];
 
   for (const student of allStudents) {
-    const score = calculateScore(allQuestions, student.answers);
+    const assignment = parseStudentAssignment(student.assignedQuestions);
+    const studentQuestions = applyAssignmentToQuestions(allQuestions, assignment);
+    const score = calculateScore(studentQuestions, student.answers);
 
     results.push({
       studentId: student.id,
@@ -183,7 +188,7 @@ export async function readStudentGradingSummaries(examId: string): Promise<Stude
       nisn: student.nisn,
       status: student.status,
       ...score,
-      totalQuestions: allQuestions.length,
+      totalQuestions: studentQuestions.length,
       violationCount: student.violationCount,
       submittedAt: student.submittedAt,
     });

@@ -26,6 +26,35 @@ export function shouldIgnoreLegacyProctoringEvent(eventType: string, metadata?: 
   return eventType === "screenshot" && !isSupportedScreenshotMetadata(metadata);
 }
 
+export function isViolation(eventType: string, policy: Record<string, unknown>): boolean {
+  switch (eventType) {
+    case "right_click":
+      return policy.detect_right_click !== false;
+    case "devtools":
+      return policy.detect_devtools !== false;
+    case "tab_switch":
+      return policy.detect_tab_switch !== false;
+    case "window_blur":
+      return policy.detect_focus_loss !== undefined
+        ? policy.detect_focus_loss !== false
+        : (policy.detect_window_blur !== undefined
+            ? policy.detect_window_blur !== false
+            : policy.detect_tab_switch !== false);
+    case "fullscreen_exit":
+      return policy.detect_fullscreen_exit !== false;
+    case "fullscreen_denied":
+      return false;
+    case "screenshot":
+      return isScreenshotDetectionEnabled(policy);
+    case "ip_change":
+      return policy.detect_ip_change !== false;
+    case "split_screen":
+      return policy.detect_split_screen !== false;
+    default:
+      return false;
+  }
+}
+
 export function canResumeStudent(input: {
   studentStatus: string;
   examStatus: string;

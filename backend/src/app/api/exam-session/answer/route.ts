@@ -6,6 +6,7 @@ import { successResponse, errorResponse, safeErrorMessage } from "@/lib/response
 import { checkRateLimit } from "@/lib/rate-limit";
 import { AppError } from "@/lib/errors";
 import { validateChoiceAnswer } from "@/lib/student-answer";
+import { parseStudentAssignment } from "@/lib/student-assignment";
 
 const answerSchema = z.object({
   questionId: z.string().uuid("ID soal tidak valid"),
@@ -74,6 +75,11 @@ export async function POST(req: NextRequest) {
 
     if (!question || question.examId !== exam.id) {
       return errorResponse("QUESTION_NOT_FOUND", "Soal tidak ditemukan pada ujian ini", 404);
+    }
+
+    const assignment = parseStudentAssignment(student.assignedQuestions);
+    if (assignment && assignment.questionIds.length > 0 && !assignment.questionIds.includes(questionId)) {
+      return errorResponse("QUESTION_NOT_ASSIGNED", "Soal tidak termasuk dalam penugasan peserta", 400);
     }
 
     let cleanOption: string | null = null;

@@ -283,6 +283,9 @@ model Student {
   isLocked          Boolean       @default(false) @map("is_locked")
   violationCount    Int           @default(0) @map("violation_count")
   violationCycleCount Int         @default(0) @map("violation_cycle_count")
+  recoveryRequired  Boolean       @default(false) @map("recovery_required")
+  recoveredCycleCount Int         @default(0) @map("recovered_cycle_count")
+  assignedQuestions Json?         @map("assigned_questions")
   ipAddress         String?       @map("ip_address")
   userAgent         String?       @map("user_agent")
   joinedAt          DateTime      @default(now()) @map("joined_at") @db.Timestamptz

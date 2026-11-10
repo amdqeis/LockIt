@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { successResponse, errorResponse, safeErrorMessage } from "@/lib/response";
 import { AppError } from "@/lib/errors";
 import { calculateScore } from "@/services/score-calculation";
+import { parseStudentAssignment, applyAssignmentToQuestions } from "@/lib/student-assignment";
 import { z } from "zod";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -40,6 +41,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
           isLocked: true,
           violationCount: true,
           violationCycleCount: true,
+          recoveryRequired: true,
+          assignedQuestions: true,
           ipAddress: true,
           acceptedAt: true,
           kickedAt: true,
@@ -69,16 +72,18 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       }),
     ]);
 
-    const totalQuestions = questions.length;
-
     const formattedStudents = students.map((s) => {
+      const assignment = parseStudentAssignment(s.assignedQuestions);
+      const studentQuestions = applyAssignmentToQuestions(questions, assignment);
+      const assignedIds = new Set(assignment ? assignment.questionIds : questions.map(q => q.id));
+
       const answeredCount = s.answers.filter(
-        (a) => a.selectedOption !== null && a.selectedOption.trim() !== ""
+        (a) => assignedIds.has(a.questionId) && a.selectedOption !== null && a.selectedOption.trim() !== ""
       ).length;
 
       let score: number | null = null;
       if (s.status === "submitted") {
-        score = calculateScore(questions, s.answers).finalScore;
+        score = calculateScore(studentQuestions, s.answers).finalScore;
       }
 
       return {
@@ -89,6 +94,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         isLocked: s.isLocked,
         violationCount: s.violationCount,
         violationCycleCount: s.violationCycleCount,
+        recoveryRequired: s.recoveryRequired,
         ipAddress: s.ipAddress,
         acceptedAt: s.acceptedAt,
         kickedAt: s.kickedAt,
@@ -96,7 +102,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         joinedAt: s.joinedAt,
         submittedAt: s.submittedAt,
         answeredCount,
-        totalQuestions,
+        totalQuestions: studentQuestions.length,
         score,
         lastSeen: (globalThis as any).studentLastHeartbeat?.get(s.id)
           ? new Date((globalThis as any).studentLastHeartbeat.get(s.id)).toISOString()

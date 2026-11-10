@@ -35,6 +35,8 @@ const createExamSchema = z.object({
       detect_fullscreen_exit: z.boolean().default(true),
       detect_screenshot: z.boolean().default(true),
       detect_ip_change: z.boolean().default(true),
+      detect_focus_loss: z.boolean().default(true),
+      detect_split_screen: z.boolean().default(true),
     })
     .passthrough()
     .default({
@@ -47,6 +49,8 @@ const createExamSchema = z.object({
       detect_fullscreen_exit: true,
       detect_screenshot: true,
       detect_ip_change: true,
+      detect_focus_loss: true,
+      detect_split_screen: true,
     }),
   settings: z
     .object({
@@ -58,6 +62,13 @@ const createExamSchema = z.object({
       bank_title: z.string().optional(),
       show_score_to_student: z.boolean().default(true),
       allow_answer_review: z.boolean().default(false),
+      question_selection: z
+        .object({
+          mode: z.enum(["manual", "random_once", "random_per_student"]).default("manual"),
+          count: z.number().int().positive().max(200).nullable().optional(),
+        })
+        .nullable()
+        .optional(),
     })
     .passthrough()
     .default({
@@ -67,6 +78,7 @@ const createExamSchema = z.object({
       auto_save_interval_seconds: 30,
       show_score_to_student: true,
       allow_answer_review: false,
+      question_selection: { mode: "manual" },
     }),
   questions: z.array(z.any()).optional(),
 });
@@ -227,6 +239,17 @@ export async function POST(req: NextRequest) {
       if (bank && subject && bank.subjectId !== subject.id) throw new AppError("VALIDATION_ERROR", "Bank soal tidak berada dalam mata pelajaran yang dipilih.", 400);
       const selected = bank ? bank.questions.filter(q => !selection.questionIds || selection.questionIds.includes(q.id)) : [];
       if (bank && (!selected.length || (selection.questionIds && selected.length !== new Set(selection.questionIds).size))) throw new AppError("VALIDATION_ERROR", "Pilih soal yang tersedia dalam bank.", 400);
+      if (bank && selected.length > 200) throw new AppError("VALIDATION_ERROR", "Kandidat soal tidak boleh melebihi batas 200 soal.", 400);
+
+      const qSel = (settings as any)?.question_selection;
+      if (qSel && bank) {
+        const count = typeof qSel.count === "number" ? qSel.count : selected.length;
+        if (qSel.mode === "random_per_student" || qSel.mode === "random_once") {
+          if (count < 1 || count > selected.length) {
+            throw new AppError("VALIDATION_ERROR", "Jumlah soal harus antara 1 dan jumlah kandidat soal yang tersedia.", 400);
+          }
+        }
+      }
 
       const resolvedClassName = classroom ? classroom.name : (selection.className ?? null);
       const resolvedSubjectName = subject ? (subject.gradeLevel ? `${subject.name} · ${subject.gradeLevel.name}` : subject.name) : null;
