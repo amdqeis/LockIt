@@ -15,6 +15,12 @@ const stepNames = ["Kode ujian", "Identitas", "Menunggu persetujuan"];
 
 export default function Home() {
   const router = useRouter();
+  const [isRedirecting] = useState(() => {
+    if (typeof document !== "undefined" && document.cookie.includes("hasTeacherSession=1")) {
+      return true;
+    }
+    return false;
+  });
   const [step, setStep] = useState<Step>("code");
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
@@ -39,9 +45,24 @@ export default function Home() {
   const acknowledgementRef = useRef<HTMLInputElement>(null);
   const interacted = useRef(false);
 
+  useEffect(() => {
+    if (isRedirecting) {
+      router.replace("/dashboard");
+    }
+  }, [isRedirecting, router]);
+
   const applyWaiting = useCallback((value: Waiting) => {
-    setWaiting(value); setWaitingError(""); setSessionUnavailable(false); setCode(value.exam.accessCode); setName(value.student.name); setNisn(value.student.nisn);
-    if (["active", "disconnected"].includes(value.student.status) && value.exam.status === "active") { router.replace("/exam/session"); return; }
+    const isExamInProgress = ["active", "disconnected"].includes(value.student.status) && value.exam.status === "active";
+    if (isExamInProgress) {
+      router.replace("/exam/session");
+      return;
+    }
+    setWaiting(value);
+    setWaitingError("");
+    setSessionUnavailable(false);
+    setCode(value.exam.accessCode);
+    setName(value.student.name);
+    setNisn(value.student.nisn);
     setStep("waiting");
   }, [router]);
 
@@ -52,12 +73,28 @@ export default function Home() {
 
   useEffect(() => {
     let active = true;
-    void api<Waiting>("/api/exam-session/waiting").then(value => { if (active && !interacted.current) applyWaiting(value); }).catch((err: unknown) => {
-      if (active && err instanceof ApiError && err.status !== 401 && err.code !== "ALREADY_SUBMITTED") setWaitingError(err.message);
+    void api<Waiting>("/api/exam-session/waiting").then(value => {
+      if (!active) return;
+      const isExamInProgress = ["active", "disconnected"].includes(value.student.status) && value.exam.status === "active";
+      if (isExamInProgress) {
+        router.replace("/exam/session");
+        return;
+      }
+      if (!interacted.current) {
+        applyWaiting(value);
+      }
+    }).catch((err: unknown) => {
+      if (active && err instanceof ApiError && err.status !== 401 && err.code !== "ALREADY_SUBMITTED") {
+        setWaitingError(err.message);
+      }
     });
-    if (new URLSearchParams(window.location.search).has("selesai")) Promise.resolve().then(() => { if (active) setNotice("Ujian telah dikumpulkan. Riwayat Anda tersedia di bawah."); });
+    if (new URLSearchParams(window.location.search).has("selesai")) {
+      Promise.resolve().then(() => {
+        if (active) setNotice("Ujian telah dikumpulkan. Riwayat Anda tersedia di bawah.");
+      });
+    }
     return () => { active = false; };
-  }, [applyWaiting]);
+  }, [applyWaiting, router]);
 
   useEffect(() => {
     if (step !== "waiting" || sessionUnavailable) return;
@@ -121,6 +158,10 @@ export default function Home() {
   const ended = !!waiting && (["ended", "archived"].includes(waiting.exam.status) || !!waiting.exam.endTime && Date.parse(waiting.exam.endTime) <= Date.parse(waiting.exam.serverTime));
   const studentStatus = waiting?.student.status || "waiting";
   const title = sessionUnavailable ? "Sesi tidak tersedia" : ended ? "Ujian telah berakhir" : studentStatus === "rejected" ? "Permintaan belum disetujui" : studentStatus === "accepted" ? "Anda sudah disetujui" : studentStatus === "kicked" ? "Sesi telah dihentikan" : "Menunggu persetujuan";
+
+  if (isRedirecting) {
+    return <main className="page-shell" />;
+  }
 
   return <main className="page-shell">
     <motion.header className="site-header" initial={reduceMotion ? false : { opacity: 0.7, y: -6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: reduceMotion ? 0 : 0.32, ease: [0.22, 1, 0.36, 1] }}><Image className="brand-logo" src="/eduquas-logo.png" width={264} height={62} alt="EduQuas" priority /></motion.header>

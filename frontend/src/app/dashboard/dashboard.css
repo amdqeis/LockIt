@@ -392,7 +392,7 @@
 .staff-app input:not([type=checkbox]):not([type=radio]),
 .staff-app textarea,
 .staff-app select,
-.staff-login input {
+.staff-login input:not([type=checkbox]):not([type=radio]) {
   width: 100%;
   font: inherit;
   color: #17171a;
@@ -405,11 +405,13 @@
   font-size: 11px;
 }
 .staff-app input[type=checkbox],
-.staff-app input[type=radio] {
+.staff-app input[type=radio],
+.staff-login input[type=checkbox] {
   accent-color: #6755a0;
   width: 16px;
   height: 16px;
   flex: none;
+  cursor: pointer;
 }
 .staff-app textarea {
   min-height: 72px;
@@ -455,10 +457,12 @@
 }
 .staff-check {
   display: flex !important;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px !important;
   font-weight: 400 !important;
   font-size: 11px;
+  cursor: pointer;
+  user-select: none;
 }
 .staff-check span {
   min-width: 0;

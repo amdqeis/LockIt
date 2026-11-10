@@ -46,9 +46,13 @@ export async function POST(req: NextRequest) {
     });
 
     // 2. Issue new tokens (Rotation)
+    const isRememberMe = (storedToken.expiresAt.getTime() - storedToken.createdAt.getTime()) > 2 * 24 * 60 * 60 * 1000;
+    const refreshDurationMs = isRememberMe
+      ? 30 * 24 * 60 * 60 * 1000
+      : 24 * 60 * 60 * 1000;
     const newRawRefreshToken = generateRefreshTokenString();
     const newTokenHash = hashRefreshToken(newRawRefreshToken);
-    const newExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    const newExpiresAt = new Date(Date.now() + refreshDurationMs);
 
     await prisma.refreshToken.create({
       data: {
@@ -79,7 +83,7 @@ export async function POST(req: NextRequest) {
       secure: process.env.NODE_ENV === "production",
       sameSite: "strict",
       path: "/api/auth",
-      expires: newExpiresAt,
+      ...(isRememberMe ? { expires: newExpiresAt } : {}),
     });
 
     response.cookies.set("hasTeacherSession", "1", {
@@ -87,7 +91,7 @@ export async function POST(req: NextRequest) {
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       path: "/",
-      expires: newExpiresAt,
+      ...(isRememberMe ? { expires: newExpiresAt } : {}),
     });
 
     return response;

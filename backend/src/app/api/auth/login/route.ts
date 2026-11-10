@@ -14,6 +14,7 @@ import { createRequestLogger } from "@/lib/logger";
 const loginSchema = z.object({
   email: z.string().email("Format email tidak valid"),
   password: z.string().min(1, "Password wajib diisi"),
+  rememberMe: z.boolean().optional().default(false),
 });
 
 export async function POST(req: NextRequest) {
@@ -46,7 +47,7 @@ export async function POST(req: NextRequest) {
       return errorResponse("VALIDATION_ERROR", "Data login tidak valid", 400, parsed.error.flatten().fieldErrors);
     }
 
-    const { email, password } = parsed.data;
+    const { email, password, rememberMe } = parsed.data;
 
     const teacher = await prisma.teacher.findUnique({
       where: { email: email.toLowerCase() },
@@ -77,10 +78,13 @@ export async function POST(req: NextRequest) {
       role: teacher.role,
     });
 
-    // 2. Generate Refresh Token (7 days)
+    // 2. Generate Refresh Token (30 days if rememberMe, otherwise 24h session)
+    const refreshDurationMs = rememberMe
+      ? 30 * 24 * 60 * 60 * 1000
+      : 24 * 60 * 60 * 1000;
     const rawRefreshToken = generateRefreshTokenString();
     const tokenHash = hashRefreshToken(rawRefreshToken);
-    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    const expiresAt = new Date(Date.now() + refreshDurationMs);
 
     await prisma.refreshToken.create({
       data: {
@@ -118,7 +122,7 @@ export async function POST(req: NextRequest) {
       secure: process.env.NODE_ENV === "production",
       sameSite: "strict",
       path: "/api/auth",
-      expires: expiresAt,
+      ...(rememberMe ? { expires: expiresAt } : {}),
     });
 
     // Session presence indicator for frontend middleware route guard
@@ -127,7 +131,7 @@ export async function POST(req: NextRequest) {
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       path: "/",
-      expires: expiresAt,
+      ...(rememberMe ? { expires: expiresAt } : {}),
     });
 
     // LOW-02: Emit request ID ke response header untuk tracing

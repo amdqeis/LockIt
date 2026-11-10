@@ -150,3 +150,8 @@
 - Keputusan: Mengosongkan schema `public` pada database `eduquas` secara transaksional, lalu menjalankan `bootstrap-database.mjs` setelah baseline hash cocok; seed demo tidak dijalankan.
 - Alasan: Riwayat/checksum deployment tidak cocok dan migration pertama memerlukan tabel lama (`students`), sehingga replay migration dari schema kosong bukan jalur bootstrap yang valid.
 - Ditolak: Mengubah checksum `_prisma_migrations` secara manual atau menjalankan `migrate reset`; prosedur bootstrap repo menjaga schema saat ini dan mencatat tujuh migration baseline dengan benar.
+
+### 2026-11-10 — Opsi Ingat Saya dan auto-forward halaman utama
+- Keputusan: Menyediakan opsi "Ingat saya" pada login guru/admin yang memperpanjang masa berlaku refresh token dan cookie menjadi 30 hari persistent (dibanding 24 jam session cookie jika tidak dicentang). Pada rute "/", gunakan Next.js middleware di server dan guard di client untuk langsung me-redirect guru ke "/dashboard" jika memiliki sesi guru, serta siswa yang berstatus ujian aktif ("active"/"disconnected" dan exam "active") langsung ke "/exam/session".
+- Alasan: Guru tidak perlu login berulang saat membuka browser kembali dan tidak diarahkan ke portal siswa ketika mengakses root domain; siswa yang berada di tengah pengerjaan ujian terlindungi dari kedipan formulir kode ujian dan langsung kembali ke sesi pengerjaannya.
+- Ditolak: Menyimpan status remember me di localStorage klien, atau me-redirect siswa hanya berdasarkan kepemilikan cookie tanpa memverifikasi keaktifan sesi ujian di server.
