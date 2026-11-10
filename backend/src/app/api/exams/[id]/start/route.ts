@@ -20,8 +20,12 @@ export async function POST(
       },
     });
 
-    if (!exam || (teacher.role !== "ADMIN" && exam.teacherId !== teacher.teacherId)) {
+    if (!exam) {
       return errorResponse("NOT_FOUND", "Ujian tidak ditemukan", 404);
+    }
+
+    if (exam.status === "draft" && (!exam.classroomId || !exam.subjectId)) {
+      return errorResponse("VALIDATION_ERROR", "Ujian draf harus dilengkapi rombel dan mata pelajaran sebelum dimulai.", 400);
     }
 
     if (exam.status !== "draft" && exam.status !== "active") {

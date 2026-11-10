@@ -23,6 +23,7 @@ model Teacher {
   // ─── RBAC ────────────────────────────────────────
   role         TeacherRole @default(TEACHER)
   isActive     Boolean     @default(true) @map("is_active")
+  sessionVersion String    @default(uuid()) @map("session_version")
   phone        String?
   lastLoginAt  DateTime?   @map("last_login_at") @db.Timestamptz
   // ─────────────────────────────────────────────────
@@ -74,6 +75,7 @@ model Exam {
   status          ExamStatus @default(draft)
   violationPolicy Json       @default("{\"max_violations\": 3, \"action\": \"lock\", \"notify_student\": false}") @map("violation_policy")
   settings        Json       @default("{}")
+  classroomId     String?    @map("classroom_id")
   subjectId       String?    @map("subject_id")
   subjectName     String?    @map("subject_name")
   className       String?    @map("class_name")
@@ -84,12 +86,14 @@ model Exam {
   scheduledStartAt DateTime? @map("scheduled_start_at") @db.Timestamptz
   passingScore    Int?       @map("passing_score")
   revision        Int        @default(1)
+  updatedBy       String?    @map("updated_by")
   startTime       DateTime?  @map("start_time") @db.Timestamptz
   endTime         DateTime?  @map("end_time") @db.Timestamptz
   createdAt       DateTime   @default(now()) @map("created_at") @db.Timestamptz
   updatedAt       DateTime   @updatedAt @map("updated_at") @db.Timestamptz
 
   teacher          Teacher           @relation(fields: [teacherId], references: [id], onDelete: Restrict)
+  classroom        Classroom?        @relation(fields: [classroomId], references: [id], onDelete: Restrict)
   subjectFolder    Subject?          @relation(fields: [subjectId], references: [id], onDelete: SetNull)
   questions        Question[]
   students         Student[]
@@ -98,6 +102,7 @@ model Exam {
 
   @@index([teacherId])
   @@index([status])
+  @@index([classroomId])
   @@map("exams")
 }
 
@@ -126,14 +131,55 @@ model Question {
   @@map("questions")
 }
 
+// ─── MASTER TINGKAT & KELAS ────────────────────────
+model GradeLevel {
+  id             String      @id @default(uuid())
+  name           String
+  normalizedName String      @unique @map("normalized_name")
+  isArchived     Boolean     @default(false) @map("is_archived")
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime    @updatedAt @map("updated_at") @db.Timestamptz
+
+  classrooms     Classroom[]
+  subjects       Subject[]
+
+  @@index([isArchived])
+  @@map("grade_levels")
+}
+
+model Classroom {
+  id             String     @id @default(uuid())
+  gradeLevelId   String     @map("grade_level_id")
+  name           String
+  normalizedName String     @map("normalized_name")
+  isArchived     Boolean    @default(false) @map("is_archived")
+  createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime   @updatedAt @map("updated_at") @db.Timestamptz
+
+  gradeLevel     GradeLevel @relation(fields: [gradeLevelId], references: [id], onDelete: Restrict)
+  exams          Exam[]
+
+  @@unique([gradeLevelId, normalizedName])
+  @@index([isArchived])
+  @@map("classrooms")
+}
+
 // Bank soal dapat digunakan bersama oleh guru dan admin. Soal ujian tetap snapshot.
 model Subject {
-  id        String         @id @default(uuid())
-  name      String         @unique
-  createdAt DateTime       @default(now()) @map("created_at") @db.Timestamptz
-  banks     QuestionBank[]
-  exams     Exam[]
+  id             String         @id @default(uuid())
+  gradeLevelId   String?        @map("grade_level_id")
+  name           String
+  normalizedName String?        @map("normalized_name")
+  isArchived     Boolean        @default(false) @map("is_archived")
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
+  gradeLevel     GradeLevel?    @relation(fields: [gradeLevelId], references: [id], onDelete: Restrict)
+  banks          QuestionBank[]
+  exams          Exam[]
+
+  @@unique([gradeLevelId, normalizedName])
+  @@index([isArchived])
   @@map("subjects")
 }
 
@@ -278,10 +324,12 @@ model Answer {
 
 // ─── IDENTITAS BROWSER SISWA ────────────────────────────────────────────────
 model BrowserIdentity {
-  id        String   @id @default(uuid())
-  tokenHash String   @unique @map("token_hash")
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
-  expiresAt DateTime @map("expires_at") @db.Timestamptz
+  id              String   @id @default(uuid())
+  tokenHash       String   @unique @map("token_hash")
+  lastStudentName String?  @map("last_student_name")
+  lastStudentNisn String?  @map("last_student_nisn")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+  expiresAt       DateTime @map("expires_at") @db.Timestamptz
 
   students BrowserStudent[]
 

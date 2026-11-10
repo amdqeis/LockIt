@@ -9,7 +9,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const teacher = await authenticateTeacher(req);
     const { id, sid } = await params;
     const exam = await prisma.exam.findUnique({ where: { id } });
-    if (!exam || (teacher.role !== "ADMIN" && exam.teacherId !== teacher.teacherId)) return errorResponse("NOT_FOUND", "Ujian tidak ditemukan", 404);
+    if (!exam) return errorResponse("NOT_FOUND", "Ujian tidak ditemukan", 404);
     if (exam.status !== "active" || !exam.endTime || exam.endTime <= new Date()) return errorResponse("INVALID_STATE", "Peserta hanya dapat dibuka selama ujian berlangsung", 409);
     const student = await prisma.student.findFirst({ where: { id: sid, examId: id } });
     if (!student) return errorResponse("NOT_FOUND", "Data peserta tidak ditemukan di ujian ini", 404);

@@ -13,7 +13,7 @@ export async function GET(
     const { id, sid } = await params;
 
     const exam = await prisma.exam.findUnique({ where: { id } });
-    if (!exam || (teacher.role !== "ADMIN" && exam.teacherId !== teacher.teacherId)) {
+    if (!exam) {
       return errorResponse("NOT_FOUND", "Ujian tidak ditemukan", 404);
     }
 

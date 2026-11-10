@@ -17,6 +17,7 @@ services:
     volumes:
       - question_bank_media:/app/storage/question-bank
       - exam_uploads:/app/public/uploads/exams
+      - backup_storage:/app/storage/backups
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:3000/api/health >/dev/null || exit 1"]
       interval: 10s
@@ -51,6 +52,7 @@ services:
 volumes:
   question_bank_media:
   exam_uploads:
+  backup_storage:
 
 networks:
   caddy_net:

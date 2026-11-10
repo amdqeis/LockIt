@@ -11,6 +11,9 @@ const querySchema = z.object({
   mode: z.enum(["list", "matrix"]).default("list"),
   page: z.coerce.number().int().min(1).max(100000).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(25),
+  classroomId: z.string().trim().max(100).optional(),
+  subjectId: z.string().trim().max(100).optional(),
+  gradeLevelId: z.string().trim().max(100).optional(),
   subject: z.string().trim().max(100).optional(),
   className: z.string().trim().max(100).optional(),
   academicYear: z.string().trim().max(30).optional(),
@@ -26,13 +29,20 @@ function csvCell(value: unknown) {
 
 export async function GET(req: NextRequest) {
   try {
-    const teacher = await authenticateTeacher(req);
+    await authenticateTeacher(req);
     const parsed = querySchema.safeParse(Object.fromEntries(req.nextUrl.searchParams));
     if (!parsed.success) return errorResponse("VALIDATION_ERROR", "Filter hasil tidak valid", 400, parsed.error.flatten());
-    const { mode, page, limit, subject, className, academicYear, semester, category, search, format } = parsed.data;
+    const { mode, page, limit, classroomId, subjectId, gradeLevelId, subject, className, academicYear, semester, category, search, format } = parsed.data;
     const where: Prisma.ExamWhereInput = {
       status: { in: ["ended", "archived"] },
-      ...(teacher.role === "ADMIN" ? {} : { teacherId: teacher.teacherId }),
+      ...(classroomId ? { classroomId } : {}),
+      ...(subjectId ? { subjectId } : {}),
+      ...(gradeLevelId ? {
+        OR: [
+          { classroom: { gradeLevelId } },
+          { subjectFolder: { gradeLevelId } },
+        ],
+      } : {}),
       ...(subject ? { subjectName: subject } : {}), ...(className ? { className } : {}),
       ...(academicYear ? { academicYear } : {}), ...(semester ? { semester } : {}), ...(category ? { category } : {}),
       ...(search ? { OR: ["title", "subjectName", "className", "category", "academicYear"].map(field => ({ [field]: { contains: search, mode: "insensitive" } })) } : {}),

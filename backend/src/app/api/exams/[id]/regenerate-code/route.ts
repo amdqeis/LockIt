@@ -14,7 +14,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       where: { id },
     });
 
-    if (!exam || (teacher.role !== "ADMIN" && exam.teacherId !== teacher.teacherId)) {
+    if (!exam) {
       return errorResponse("NOT_FOUND", "Ujian tidak ditemukan", 404);
     }
 

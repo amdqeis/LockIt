@@ -11,7 +11,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     const teacher = await authenticateTeacher(_req);
     const { id, sid } = await params;
     const exam = await prisma.exam.findUnique({ where: { id }, include: { _count: { select: { questions: true } } } });
-    if (!exam || (teacher.role !== "ADMIN" && exam.teacherId !== teacher.teacherId)) return errorResponse("NOT_FOUND", "Ujian tidak ditemukan", 404);
+    if (!exam) return errorResponse("NOT_FOUND", "Ujian tidak ditemukan", 404);
     if (exam.status !== "active" || !exam.endTime || exam.endTime <= new Date()) return errorResponse("INVALID_STATE", "Mulai ujian secara global sebelum membuka sesi peserta", 409);
     if (exam._count.questions === 0) return errorResponse("NO_QUESTIONS", "Ujian belum memiliki soal", 400);
 

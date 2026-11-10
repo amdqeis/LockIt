@@ -26,7 +26,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       },
     });
 
-    if (!exam || (teacher.role !== "ADMIN" && exam.teacherId !== teacher.teacherId)) {
+    if (!exam) {
       return errorResponse("NOT_FOUND", "Ujian tidak ditemukan", 404);
     }
 
@@ -45,6 +45,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
     // Validate state machine transitions
     if (currentStatus === "draft" && nextStatus === "active") {
+      if (!exam.classroomId || !exam.subjectId) {
+        return errorResponse("VALIDATION_ERROR", "Ujian draf harus dilengkapi rombel dan mata pelajaran sebelum diaktifkan.", 400);
+      }
       let questionCount = exam._count.questions;
 
       // If exam doesn't have questions yet but questions payload was provided, populate them

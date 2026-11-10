@@ -22,6 +22,7 @@ export async function POST(req: NextRequest) {
     if (!(file instanceof File) || file.size > 20 * 1024 * 1024) return errorResponse("INVALID_XML", "Pilih XML berukuran maksimal 20 MB", 400);
     const subject = await prisma.subject.findUnique({ where: { id: subjectId } });
     if (!subject) return errorResponse("NOT_FOUND", "Mata pelajaran tidak ditemukan", 404);
+    if (!subject.gradeLevelId) return errorResponse("VALIDATION_ERROR", "Tujuan impor wajib berupa mata pelajaran yang sudah terhubung dengan tingkat.", 400);
     const bytes = Buffer.from(await file.arrayBuffer());
     const archive = validateBankXml(bytes);
     const importKey = createHash("sha256").update(subjectId).update(bytes).digest("hex");

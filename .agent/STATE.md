@@ -1,6 +1,6 @@
 # EduQuas
 
-- Status: Opsi "Ingat saya" pada form login guru/admin telah ditambahkan dengan token dan cookie persistent 30 hari (vs session cookie 24 jam jika tidak dicentang).
-- Pengalihan Rute: Akses ke "/" kini otomatis mem-forward guru/admin yang sudah login ke "/dashboard", serta mem-forward siswa yang sedang aktif ujian langsung ke "/exam/session" via middleware server dan guard client.
-- Verifikasi Teknis: 3 unit test otentikasi login/refresh di backend lulus 100%, `npm run type-check` pada frontend dan backend lulus 0 error, `npm run lint` pada frontend dan backend lulus 0 error/warning, detektor Impeccable mengonfirmasi 0 pelanggaran, serta build produksi kedua aplikasi berhasil.
-- Next steps: Pengujian user experience sesi ujian aktif secara end-to-end pada lingkungan staging/production.
+- Status: Rencana implementasi EduQuas untuk hierarki akademik (Tingkat → Mapel → Bank Soal, Ujian per Rombel), akses kolaboratif guru/admin, modul Backup & Restore, serta prefill identitas peserta telah selesai diimplementasikan penuh.
+- Frontend & Backend: Menu Kelas & Mapel (`AcademicManagement`) dan Backup & Restore (`BackupRestore`) telah ditambahkan, panel Ujian (`Exams`), Bank Soal (`Banks`), dan Hasil (`Results`) telah mengadopsi hierarki rombel dan penanganan revisi `409 Conflict`, serta halaman join siswa memuat profil otomatis tanpa mengunci pengeditan.
+- Verifikasi Teknis: `npm run type-check --prefix backend` dan `npm run lint --prefix backend` lulus 0 error, 35 backend tests lulus, `npm run type-check --prefix frontend` dan `npm run lint --prefix frontend` lulus 0 error, `npm run build --prefix frontend` sukses, dan detektor Impeccable mengonfirmasi 0 pelanggaran.
+- Next steps: Verifikasi operasional alur pencadangan dan pemulihan arsip di server produksi.

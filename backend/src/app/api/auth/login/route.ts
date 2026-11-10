@@ -76,6 +76,7 @@ export async function POST(req: NextRequest) {
       email: teacher.email,
       fullName: teacher.fullName,
       role: teacher.role,
+      sessionVersion: teacher.sessionVersion,
     });
 
     // 2. Generate Refresh Token (30 days if rememberMe, otherwise 24h session)

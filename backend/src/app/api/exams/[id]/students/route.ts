@@ -22,7 +22,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const studentWhere = { examId: id, ...(search.data ? { OR: [{ name: { contains: search.data, mode: "insensitive" as const } }, { nisn: { contains: search.data } }] } : {}) };
 
     const exam = await prisma.exam.findUnique({ where: { id } });
-    if (!exam || (teacher.role !== "ADMIN" && exam.teacherId !== teacher.teacherId)) {
+    if (!exam) {
       return errorResponse("NOT_FOUND", "Ujian tidak ditemukan", 404);
     }
 

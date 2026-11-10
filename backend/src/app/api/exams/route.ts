@@ -12,6 +12,7 @@ const createExamSchema = z.object({
   title: z.string().min(3, "Judul ujian minimal 3 karakter"),
   description: z.string().nullable().optional(),
   durationMinutes: z.number().int().min(5, "Durasi minimal 5 menit").max(360, "Durasi maksimal 360 menit"),
+  classroomId: z.string().min(1).nullable().optional(),
   subjectId: z.string().min(1).nullable().optional(),
   className: z.string().trim().min(1).max(100).nullable().optional(),
   academicYear: z.string().trim().min(1).max(30).nullable().optional(),
@@ -75,15 +76,26 @@ export async function GET(req: NextRequest) {
     const teacher = await authenticateTeacher(req);
     const searchParams = req.nextUrl.searchParams;
     const status = searchParams.get("status");
-    // RBAC: ADMIN dapat melihat semua ujian; TEACHER hanya ujian miliknya
     const teacherIdFilter = searchParams.get("teacherId");
+    const classroomIdFilter = searchParams.get("classroomId");
+    const subjectIdFilter = searchParams.get("subjectId");
+    const gradeLevelIdFilter = searchParams.get("gradeLevelId");
 
     const where: any = {};
-    if (teacher.role !== "ADMIN") {
-      where.teacherId = teacher.teacherId;
-    } else if (teacherIdFilter) {
-      // Admin bisa filter by teacherId opsional
+    if (teacherIdFilter) {
       where.teacherId = teacherIdFilter;
+    }
+    if (classroomIdFilter) {
+      where.classroomId = classroomIdFilter;
+    }
+    if (subjectIdFilter) {
+      where.subjectId = subjectIdFilter;
+    }
+    if (gradeLevelIdFilter) {
+      where.OR = [
+        { classroom: { gradeLevelId: gradeLevelIdFilter } },
+        { subjectFolder: { gradeLevelId: gradeLevelIdFilter } },
+      ];
     }
     if (status) {
       where.status = status;
@@ -193,13 +205,25 @@ export async function POST(req: NextRequest) {
 
     const exam = await retrySerializable(() => prisma.$transaction(async (tx) => {
       const selection = parsed.data;
-      const subject = selection.subjectId ? await tx.subject.findUnique({ where: { id: selection.subjectId } }) : null;
+      const classroom = selection.classroomId ? await tx.classroom.findUnique({ where: { id: selection.classroomId }, include: { gradeLevel: true } }) : null;
+      if (selection.classroomId && !classroom) throw new AppError("NOT_FOUND", "Rombel tidak ditemukan", 404);
+
+      const subject = selection.subjectId ? await tx.subject.findUnique({ where: { id: selection.subjectId }, include: { gradeLevel: true } }) : null;
       if (selection.subjectId && !subject) throw new AppError("NOT_FOUND", "Mata pelajaran tidak ditemukan", 404);
-      const bank = selection.bankId ? await tx.questionBank.findUnique({ where: { id: selection.bankId }, include: { questions: { orderBy: { orderIndex: "asc" } } } }) : null;
+
+      if (classroom && subject && classroom.gradeLevelId !== subject.gradeLevelId) {
+        throw new AppError("VALIDATION_ERROR", "Rombel dan mata pelajaran harus berada dalam tingkat yang sama.", 400);
+      }
+
+      const bank = selection.bankId ? await tx.questionBank.findUnique({ where: { id: selection.bankId }, include: { questions: { orderBy: { orderIndex: "asc" } }, subjectFolder: true } }) : null;
       if (selection.bankId && (!bank || bank.revision !== selection.bankRevision)) throw new AppError("CONFLICT", "Bank soal berubah. Muat ulang dan pilih soal kembali.", 409);
       if (bank && subject && bank.subjectId !== subject.id) throw new AppError("VALIDATION_ERROR", "Bank soal tidak berada dalam mata pelajaran yang dipilih.", 400);
       const selected = bank ? bank.questions.filter(q => !selection.questionIds || selection.questionIds.includes(q.id)) : [];
       if (bank && (!selected.length || (selection.questionIds && selected.length !== new Set(selection.questionIds).size))) throw new AppError("VALIDATION_ERROR", "Pilih soal yang tersedia dalam bank.", 400);
+
+      const resolvedClassName = classroom ? classroom.name : (selection.className ?? null);
+      const resolvedSubjectName = subject ? (subject.gradeLevel ? `${subject.name} · ${subject.gradeLevel.name}` : subject.name) : null;
+
       const created = await tx.exam.create({
         data: {
           teacherId: teacher.teacherId,
@@ -208,11 +232,18 @@ export async function POST(req: NextRequest) {
           durationMinutes,
           accessCode,
           status: "draft",
-          subjectId: subject?.id, subjectName: subject?.name,
-          className: selection.className, academicYear: selection.academicYear, semester: selection.semester,
-          category: selection.category, categoryNumber: selection.categoryNumber,
+          classroomId: classroom?.id ?? null,
+          className: resolvedClassName,
+          subjectId: subject?.id ?? null,
+          subjectName: resolvedSubjectName,
+          academicYear: selection.academicYear,
+          semester: selection.semester,
+          category: selection.category,
+          categoryNumber: selection.categoryNumber,
           scheduledStartAt: selection.scheduledStartAt ? new Date(selection.scheduledStartAt) : null,
           passingScore: selection.passingScore,
+          updatedBy: teacher.teacherId,
+          revision: 1,
           violationPolicy: { ...violationPolicy, detect_copy_paste: false } as any,
           settings: settings as any,
         },

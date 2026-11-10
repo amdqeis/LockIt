@@ -44,6 +44,26 @@ export default function Home() {
   const headingRef = useRef<HTMLHeadingElement>(null);
   const acknowledgementRef = useRef<HTMLInputElement>(null);
   const interacted = useRef(false);
+  const nameEdited = useRef(false);
+  const nisnEdited = useRef(false);
+
+  useEffect(() => {
+    let active = true;
+    void api<{ name: string | null; nisn: string | null }>("/api/student-profile")
+      .then((profile) => {
+        if (!active) return;
+        if (profile.name && !nameEdited.current) {
+          setName(profile.name);
+        }
+        if (profile.nisn && !nisnEdited.current) {
+          setNisn(profile.nisn);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (isRedirecting) {
@@ -178,8 +198,8 @@ export default function Home() {
             <MotionButton className="primary-button" type="submit" disabled={busy} aria-busy={busy}>{busy ? "Memeriksa kode…" : "Lanjutkan"}</MotionButton>
           </form></>}
         {step === "identity" && <><MotionButton className="back-button" type="button" onClick={() => { setStep("code"); setError(""); requestAnimationFrame(() => codeRef.current?.focus()); }}>← Kembali ke kode</MotionButton><h1 id="entry-title">Isi identitas</h1><p className="lead">{exam?.title || waiting?.exam.title || "Ujian"}</p>
-          <form onSubmit={confirmIdentity} noValidate className="identity-form"><label htmlFor="student-name">Nama lengkap</label><input ref={nameRef} id="student-name" value={name} maxLength={100} autoComplete="name" placeholder="Masukkan nama lengkap" onChange={event => { setName(event.target.value); setError(""); setField(null); }} aria-invalid={field === "name"} aria-describedby={field === "name" ? "identity-error" : undefined} />
-            <label htmlFor="student-nisn">NISN</label><input ref={nisnRef} id="student-nisn" value={nisn} inputMode="numeric" maxLength={10} placeholder="10 digit NISN" onChange={event => { setNisn(event.target.value.replace(/\D/g, "").slice(0, 10)); setError(""); setField(null); }} aria-invalid={field === "nisn"} aria-describedby={field === "nisn" ? "identity-error" : undefined} />
+          <form onSubmit={confirmIdentity} noValidate className="identity-form"><label htmlFor="student-name">Nama lengkap</label><input ref={nameRef} id="student-name" value={name} maxLength={100} autoComplete="name" placeholder="Masukkan nama lengkap" onChange={event => { nameEdited.current = true; setName(event.target.value); setError(""); setField(null); }} aria-invalid={field === "name"} aria-describedby={field === "name" ? "identity-error" : undefined} />
+            <label htmlFor="student-nisn">NISN</label><input ref={nisnRef} id="student-nisn" value={nisn} inputMode="numeric" maxLength={10} placeholder="10 digit NISN" onChange={event => { nisnEdited.current = true; setNisn(event.target.value.replace(/\D/g, "").slice(0, 10)); setError(""); setField(null); }} aria-invalid={field === "nisn"} aria-describedby={field === "nisn" ? "identity-error" : undefined} />
             {error && <p className="error" id="identity-error" role="alert">{error}</p>}
             <MotionButton className="primary-button" type="submit">Lanjutkan</MotionButton>
           </form></>}

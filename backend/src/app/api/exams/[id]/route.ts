@@ -12,6 +12,8 @@ const updateExamSchema = z.object({
   description: z.string().nullable().optional(),
   durationMinutes: z.number().int().min(5).max(360).optional(),
   revision: z.number().int().positive().optional(),
+  classroomId: z.string().min(1).nullable().optional(),
+  subjectId: z.string().min(1).nullable().optional(),
   className: z.string().trim().min(1).max(100).nullable().optional(),
   academicYear: z.string().trim().min(1).max(30).nullable().optional(),
   semester: z.enum(["ganjil", "genap"]).nullable().optional(),
@@ -69,8 +71,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       },
     });
 
-    // RBAC: ADMIN bypass ownership; TEACHER hanya bisa akses ujiannya sendiri
-    if (!exam || (teacher.role !== "ADMIN" && exam.teacherId !== teacher.teacherId)) {
+    // Collaborative access: Guru & Admin dapat melihat semua ujian
+    if (!exam) {
       return errorResponse("NOT_FOUND", "Ujian tidak ditemukan", 404);
     }
 
@@ -93,8 +95,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       include: { _count: { select: { students: true } } },
     });
 
-    // RBAC: ADMIN bypass ownership
-    if (!exam || (teacher.role !== "ADMIN" && exam.teacherId !== teacher.teacherId)) {
+    // Collaborative access: Guru & Admin dapat mengedit semua ujian
+    if (!exam) {
       return errorResponse("NOT_FOUND", "Ujian tidak ditemukan", 404);
     }
 
@@ -121,13 +123,19 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       );
     }
 
-    const updateData: any = {};
+    if (parsed.data.revision && parsed.data.revision !== exam.revision) {
+      return errorResponse("CONFLICT", "Ujian telah berubah. Muat ulang sebelum menyimpan.", 409);
+    }
+
+    const updateData: any = {
+      updatedBy: teacher.teacherId,
+    };
     const normalizedViolationPolicy = parsed.data.violationPolicy
       ? { ...parsed.data.violationPolicy, detect_copy_paste: false }
       : undefined;
 
     if (exam.status === "active") {
-      // When exam is active, only violation policy and settings can be modified
+      // When exam is active, only violation policy and review/score display settings can be modified
       if (normalizedViolationPolicy) {
         updateData.violationPolicy = {
           ...(typeof exam.violationPolicy === "object" && exam.violationPolicy !== null ? exam.violationPolicy : {}),
@@ -135,9 +143,15 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         };
       }
       if (parsed.data.settings) {
+        const currentSettings = typeof exam.settings === "object" && exam.settings !== null ? exam.settings as any : {};
         updateData.settings = {
-          ...(typeof exam.settings === "object" && exam.settings !== null ? exam.settings : {}),
-          ...parsed.data.settings,
+          ...currentSettings,
+          show_score_to_student: parsed.data.settings.show_score_to_student !== undefined
+            ? parsed.data.settings.show_score_to_student
+            : currentSettings.show_score_to_student,
+          allow_answer_review: parsed.data.settings.allow_answer_review !== undefined
+            ? parsed.data.settings.allow_answer_review
+            : currentSettings.allow_answer_review,
         };
       }
     } else {
@@ -145,7 +159,33 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       if (parsed.data.title !== undefined) updateData.title = parsed.data.title;
       if (parsed.data.description !== undefined) updateData.description = parsed.data.description;
       if (parsed.data.durationMinutes !== undefined) updateData.durationMinutes = parsed.data.durationMinutes;
-      for (const key of ["className", "academicYear", "semester", "category", "categoryNumber", "passingScore"] as const) {
+
+      const targetClassroomId = parsed.data.classroomId !== undefined ? parsed.data.classroomId : exam.classroomId;
+      const targetSubjectId = parsed.data.subjectId !== undefined ? parsed.data.subjectId : exam.subjectId;
+
+      let classroom = null;
+      if (targetClassroomId) {
+        classroom = await prisma.classroom.findUnique({ where: { id: targetClassroomId }, include: { gradeLevel: true } });
+        if (!classroom) return errorResponse("NOT_FOUND", "Rombel tidak ditemukan", 404);
+        updateData.classroomId = classroom.id;
+        updateData.className = classroom.name;
+      } else if (parsed.data.className !== undefined) {
+        updateData.className = parsed.data.className;
+      }
+
+      let subject = null;
+      if (targetSubjectId) {
+        subject = await prisma.subject.findUnique({ where: { id: targetSubjectId }, include: { gradeLevel: true } });
+        if (!subject) return errorResponse("NOT_FOUND", "Mata pelajaran tidak ditemukan", 404);
+        updateData.subjectId = subject.id;
+        updateData.subjectName = subject.gradeLevel ? `${subject.name} · ${subject.gradeLevel.name}` : subject.name;
+      }
+
+      if (classroom && subject && classroom.gradeLevelId !== subject.gradeLevelId) {
+        return errorResponse("VALIDATION_ERROR", "Rombel dan mata pelajaran harus berada dalam tingkat yang sama.", 400);
+      }
+
+      for (const key of ["academicYear", "semester", "category", "categoryNumber", "passingScore"] as const) {
         if (parsed.data[key] !== undefined) updateData[key] = parsed.data[key];
       }
       if (parsed.data.scheduledStartAt !== undefined) updateData.scheduledStartAt = parsed.data.scheduledStartAt ? new Date(parsed.data.scheduledStartAt) : null;
@@ -243,8 +283,8 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       include: { _count: { select: { students: true } } },
     });
 
-    // RBAC: ADMIN bypass ownership
-    if (!exam || (teacher.role !== "ADMIN" && exam.teacherId !== teacher.teacherId)) {
+    // Collaborative access: Guru & Admin dapat mengedit semua ujian
+    if (!exam) {
       return errorResponse("NOT_FOUND", "Ujian tidak ditemukan", 404);
     }
 

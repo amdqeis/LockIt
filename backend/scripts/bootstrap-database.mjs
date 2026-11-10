@@ -4,7 +4,7 @@ import { createRequire } from "node:module";
 import { databaseIsEmpty, hash, migrations, prisma } from "./migration-guard.mjs";
 
 // This snapshot may only initialize a new, completely empty database.
-const schemaHash = "4f8b0a30f8b88fc007ce2bdf63c9ae20c416b19a959ec920828808a92c0e227e";
+const schemaHash = "884b80de96e22a554ae5f9868b193fa30bc3149adfd2434323caa513efed6d47";
 const prismaCli = createRequire(import.meta.url).resolve("prisma/build/index.js");
 const baseline = [
   ["20261027_rename_session_token_to_hash", "b70d42aca88198a1b75c6c01a0562c9a1de3c06a1df580ab4e3945da2b7e9045"],
@@ -14,6 +14,7 @@ const baseline = [
   ["20261107_add_question_bank", "d2f03855b99313cc28b2f39459fc893fcc8dc76b5ac764e4eadc007747ef7e9a"],
   ["20261108_exam_admission_violation_cycles", "d20d4cefde63bb8ef4f07c95963e931614de679335f58720474dac899f6758ba"],
   ["20261109_dashboard_metadata", "798b3f57ec763a9ac3f37b515292cd3e42b485a8773f72620d36c3746306db86"],
+  ["20261110_academic_hierarchy_and_backup", "f3085fd1e296350831b39e906cf2785b22ae664533f40fadfdfad4690154a871"],
 ];
 function run(...args) {
   const result = spawnSync(process.execPath, [prismaCli, ...args], { stdio: "inherit", env: process.env });

@@ -20,8 +20,18 @@ export async function PATCH(req: NextRequest, { params }: Context) {
     const input = bankSchema.partial().extend({ revision: z.number().int().positive() }).parse(await req.json());
     const { revision, ...data } = input;
     if (data.subjectId) {
+      const current = await prisma.questionBank.findUnique({
+        where: { id },
+        include: { subjectFolder: true },
+      });
+      if (!current) return errorResponse("NOT_FOUND", "Bank soal tidak ditemukan", 404);
+
       const folder = await prisma.subject.findUnique({ where: { id: data.subjectId } });
       if (!folder) return errorResponse("NOT_FOUND", "Mata pelajaran tidak ditemukan", 404);
+
+      if (current.subjectFolder?.gradeLevelId && folder.gradeLevelId && current.subjectFolder.gradeLevelId !== folder.gradeLevelId) {
+        return errorResponse("VALIDATION_ERROR", "Pemindahan bank antar-mapel dibatasi dalam tingkat yang sama.", 400);
+      }
       data.subject = folder.name;
     }
     const changed = await prisma.questionBank.updateMany({ where: { id, revision }, data: { ...data, updatedBy: teacher.teacherId, revision: { increment: 1 } } });

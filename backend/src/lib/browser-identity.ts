@@ -15,7 +15,7 @@ export async function findBrowserIdentity(req: NextRequest) {
 
   const identity = await prisma.browserIdentity.findUnique({
     where: { tokenHash: hashBrowserToken(token) },
-    select: { id: true, expiresAt: true },
+    select: { id: true, expiresAt: true, lastStudentName: true, lastStudentNisn: true },
   });
 
   if (!identity || identity.expiresAt.getTime() <= Date.now()) return null;
@@ -25,14 +25,27 @@ export async function findBrowserIdentity(req: NextRequest) {
 export async function associateStudentWithBrowser(
   req: NextRequest,
   studentId: string,
-  response: NextResponse
+  response: NextResponse,
+  studentName?: string,
+  studentNisn?: string
 ): Promise<void> {
   const existingIdentity = await findBrowserIdentity(req);
   if (existingIdentity) {
-    await prisma.browserStudent.upsert({
-      where: { browserId_studentId: { browserId: existingIdentity.id, studentId } },
-      create: { browserId: existingIdentity.id, studentId },
-      update: {},
+    await prisma.$transaction(async (tx) => {
+      await tx.browserStudent.upsert({
+        where: { browserId_studentId: { browserId: existingIdentity.id, studentId } },
+        create: { browserId: existingIdentity.id, studentId },
+        update: {},
+      });
+      if (studentName || studentNisn) {
+        await tx.browserIdentity.update({
+          where: { id: existingIdentity.id },
+          data: {
+            ...(studentName ? { lastStudentName: studentName } : {}),
+            ...(studentNisn ? { lastStudentNisn: studentNisn } : {}),
+          },
+        });
+      }
     });
     return;
   }
@@ -41,7 +54,12 @@ export async function associateStudentWithBrowser(
   const expiresAt = new Date(Date.now() + BROWSER_IDENTITY_TTL_SECONDS * 1000);
   await prisma.$transaction(async (tx) => {
     const identity = await tx.browserIdentity.create({
-      data: { tokenHash: hashBrowserToken(token), expiresAt },
+      data: {
+        tokenHash: hashBrowserToken(token),
+        expiresAt,
+        lastStudentName: studentName || null,
+        lastStudentNisn: studentNisn || null,
+      },
     });
     await tx.browserStudent.create({
       data: { browserId: identity.id, studentId },

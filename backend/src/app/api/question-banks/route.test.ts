@@ -6,14 +6,26 @@ process.env.JWT_ACCESS_SECRET = "test-access-secret";
 process.env.JWT_REFRESH_SECRET = "test-refresh-secret";
 process.env.STUDENT_SESSION_SECRET = "test-student-secret";
 const queries: Record<string, unknown>[] = [];
-(globalThis as unknown as { prisma: unknown }).prisma = { questionBank: {
-  findUnique: async ({ where }: { where: { id: string } }) => where.id === "one" ? { id: "one" } : null,
-  findMany: async (query: Record<string, unknown>) => { queries.push(query); return [{ id: "one" }, { id: "two" }, { id: "three" }]; },
-} };
+(globalThis as unknown as { prisma: unknown }).prisma = {
+  teacher: {
+    findUnique: async ({ where }: { where: { id: string } }) => ({
+      id: where.id,
+      email: "teacher@example.invalid",
+      fullName: "Teacher",
+      role: "TEACHER",
+      isActive: true,
+      sessionVersion: "session-1",
+    }),
+  },
+  questionBank: {
+    findUnique: async ({ where }: { where: { id: string } }) => where.id === "one" ? { id: "one" } : null,
+    findMany: async (query: Record<string, unknown>) => { queries.push(query); return [{ id: "one" }, { id: "two" }, { id: "three" }]; },
+  },
+};
 const dependencies = Promise.all([import("./route"), import("@/lib/auth")]);
 async function request(query: string) {
   const [{ GET }, { generateAccessToken }] = await dependencies;
-  const token = generateAccessToken({ teacherId: "teacher-1", email: "teacher@example.invalid", fullName: "Teacher", role: "TEACHER" });
+  const token = generateAccessToken({ teacherId: "teacher-1", email: "teacher@example.invalid", fullName: "Teacher", role: "TEACHER", sessionVersion: "session-1" });
   return GET(new NextRequest(`http://localhost/api/question-banks${query}`, { headers: { Authorization: `Bearer ${token}` } }));
 }
 test("bank pagination returns only bounded summaries", async () => {

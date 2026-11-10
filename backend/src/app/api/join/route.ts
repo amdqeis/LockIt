@@ -261,7 +261,7 @@ export async function POST(req: NextRequest) {
         serverTime: new Date().toISOString(),
       },
     });
-    await associateStudentWithBrowser(req, student.id, response);
+    await associateStudentWithBrowser(req, student.id, response, student.name, student.nisn);
 
     // Bug fix: gunakan freshToken (JWT asli), BUKAN student.sessionTokenHash.
     // Hash hanya disimpan di DB untuk verifikasi; browser butuh JWT asli untuk autentikasi.

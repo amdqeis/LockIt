@@ -10,14 +10,27 @@ const queries: Record<string, unknown>[] = [];
 const createdExams: Record<string, unknown>[] = [];
 const fakePrisma = {
   $transaction: async (fn: (tx: any) => Promise<any>) => fn(fakePrisma),
+  teacher: {
+    findUnique: async ({ where }: { where: { id: string } }) => ({
+      id: where.id,
+      email: "teacher@example.invalid",
+      fullName: "Teacher",
+      role: "TEACHER",
+      isActive: true,
+      sessionVersion: "session-1",
+    }),
+  },
+  classroom: {
+    findUnique: async ({ where }: { where: { id: string } }) => null,
+  },
   subject: {
-    findUnique: async ({ where }: { where: { id: string } }) => where.id === "sub-1" ? { id: "sub-1", name: "Matematika" } : null,
+    findUnique: async ({ where }: { where: { id: string } }) => where.id === "sub-1" ? { id: "sub-1", name: "Matematika", gradeLevel: { id: "gl-1", name: "Tingkat X" } } : null,
   },
   questionBank: {
     findUnique: async ({ where }: { where: { id: string } }) => where.id === "bank-1" ? { id: "bank-1", revision: 1, subjectId: "sub-1", questions: [{ id: "q-1", orderIndex: 1, questionText: "Soal 1", options: [], correctAnswer: "A", points: 10 }] } : null,
   },
   exam: {
-    findFirst: async ({ where }: { where: { id?: string; teacherId?: string } }) => where.id === "owned" && where.teacherId === "teacher-1" ? { id: "owned" } : null,
+    findFirst: async ({ where }: { where: { id?: string; teacherId?: string } }) => where.id === "owned" ? { id: "owned" } : null,
     findMany: async (query: Record<string, unknown>) => {
       queries.push(query);
       return [{ id: "one" }, { id: "two" }, { id: "three" }];
@@ -41,13 +54,13 @@ const dependencies = Promise.all([import("./route"), import("@/lib/auth")]);
 
 async function request(url: string, role: "TEACHER" | "ADMIN" = "TEACHER") {
   const [{ GET }, { generateAccessToken }] = await dependencies;
-  const token = generateAccessToken({ teacherId: "teacher-1", email: "teacher@example.invalid", fullName: "Teacher", role });
+  const token = generateAccessToken({ teacherId: "teacher-1", email: "teacher@example.invalid", fullName: "Teacher", role, sessionVersion: "session-1" });
   return GET(new NextRequest(`http://localhost/api/exams${url}`, { headers: { Authorization: `Bearer ${token}` } }));
 }
 
 async function postRequest(body: unknown, role: "TEACHER" | "ADMIN" = "TEACHER") {
   const [{ POST }, { generateAccessToken }] = await dependencies;
-  const token = generateAccessToken({ teacherId: "teacher-1", email: "teacher@example.invalid", fullName: "Teacher", role });
+  const token = generateAccessToken({ teacherId: "teacher-1", email: "teacher@example.invalid", fullName: "Teacher", role, sessionVersion: "session-1" });
   return POST(new NextRequest("http://localhost/api/exams", {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
@@ -55,7 +68,7 @@ async function postRequest(body: unknown, role: "TEACHER" | "ADMIN" = "TEACHER")
   }));
 }
 
-test("pagination returns a bounded page and preserves teacher ownership", async () => {
+test("pagination returns a bounded page and preserves collaborative access", async () => {
   queries.length = 0;
   const response = await request("?limit=2&status=active");
   const body = await response.json();
@@ -64,7 +77,7 @@ test("pagination returns a bounded page and preserves teacher ownership", async 
   assert.equal(body.data.nextCursor, "two");
   assert.equal(response.headers.get("cache-control"), "private, no-store");
   assert.equal(queries[0].take, 3);
-  assert.deepEqual(queries[0].where, { teacherId: "teacher-1", status: "active" });
+  assert.deepEqual(queries[0].where, { status: "active" });
   assert.ok(queries[0].select);
 });
 
@@ -88,7 +101,7 @@ test("paginated exam filters are applied before loading results", async () => {
   const response = await request("?limit=2&status=draft&subject=Matematika&className=X%20A&academicYear=2026%2F2027&semester=ganjil&category=Quiz&search=UTS");
   assert.equal(response.status, 200);
   assert.deepEqual(queries[0].where, {
-    teacherId: "teacher-1", status: "draft", subjectName: "Matematika", className: "X A",
+    status: "draft", subjectName: "Matematika", className: "X A",
     academicYear: "2026/2027", semester: "ganjil", category: "Quiz",
     OR: ["title", "subjectName", "className", "category", "academicYear"].map(field => ({ [field]: { contains: "UTS", mode: "insensitive" } })),
   });

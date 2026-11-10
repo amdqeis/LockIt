@@ -67,6 +67,7 @@ export async function POST(req: NextRequest) {
       email:     storedToken.teacher.email,
       fullName:  storedToken.teacher.fullName,
       role:      storedToken.teacher.role,
+      sessionVersion: storedToken.teacher.sessionVersion,
     });
 
     const response = successResponse({

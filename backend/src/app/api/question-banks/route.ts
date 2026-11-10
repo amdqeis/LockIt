@@ -23,7 +23,21 @@ export async function GET(req: NextRequest) {
       const items = banks.slice(0, limit);
       return successResponse({ items, nextCursor: banks.length > limit ? items[items.length - 1]?.id ?? null : null }, 200, { "Cache-Control": "private, no-store" });
     }
-    const banks = await prisma.questionBank.findMany({ orderBy: { updatedAt: "desc" }, include: { _count: { select: { questions: true } }, questions: { select: { points: true } } } });
+    const banks = await prisma.questionBank.findMany({
+      orderBy: { updatedAt: "desc" },
+      include: {
+        subjectFolder: {
+          select: {
+            id: true,
+            name: true,
+            gradeLevelId: true,
+            gradeLevel: { select: { id: true, name: true } },
+          },
+        },
+        _count: { select: { questions: true } },
+        questions: { select: { points: true } },
+      },
+    });
     return successResponse(banks);
   } catch (err) { return bankError(err); }
 }
@@ -31,9 +45,36 @@ export async function POST(req: NextRequest) {
   try {
     const teacher = await bankTeacher(req);
     const input = bankSchema.parse(await req.json());
-    const folder = input.subjectId ? await prisma.subject.findUnique({ where: { id: input.subjectId } }) : null;
-    if (input.subjectId && !folder) return errorResponse("NOT_FOUND", "Mata pelajaran tidak ditemukan", 404);
-    const bank = await prisma.questionBank.create({ data: { ...input, subject: folder?.name ?? input.subject, createdBy: teacher.teacherId, updatedBy: teacher.teacherId } });
+    if (!input.subjectId) {
+      return errorResponse("VALIDATION_ERROR", "Mata pelajaran wajib dipilih untuk membuat bank soal.", 400);
+    }
+    const folder = await prisma.subject.findUnique({
+      where: { id: input.subjectId },
+      include: { gradeLevel: true },
+    });
+    if (!folder) return errorResponse("NOT_FOUND", "Mata pelajaran tidak ditemukan", 404);
+    if (!folder.gradeLevelId) {
+      return errorResponse("VALIDATION_ERROR", "Mata pelajaran harus terhubung dengan tingkat.", 400);
+    }
+    const bank = await prisma.questionBank.create({
+      data: {
+        ...input,
+        subject: folder.name,
+        subjectId: folder.id,
+        createdBy: teacher.teacherId,
+        updatedBy: teacher.teacherId,
+      },
+      include: {
+        subjectFolder: {
+          select: {
+            id: true,
+            name: true,
+            gradeLevelId: true,
+            gradeLevel: { select: { id: true, name: true } },
+          },
+        },
+      },
+    });
     return successResponse(bank, 201);
   } catch (err) { return bankError(err); }
 }

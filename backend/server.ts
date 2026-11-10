@@ -8,6 +8,13 @@ import { Server as SocketIOServer } from "socket.io";
 import { verifyAccessToken, verifyStudentSessionToken, hashStudentToken } from "./src/lib/auth";
 import { prisma } from "./src/lib/prisma";
 import { rescheduleActiveExamsOnBoot, cleanupExpiredTokens } from "./src/lib/scheduler";
+import {
+  isMaintenanceActive,
+  getMaintenanceReason,
+  incrementActiveWrites,
+  decrementActiveWrites,
+  recoverRestoreJournalOnBoot,
+} from "./src/lib/backup-restore";
 
 const dev = process.env.NODE_ENV !== "production";
 const hostname = "localhost";
@@ -21,9 +28,51 @@ const studentLastHeartbeat = new Map<string, number>();
 (globalThis as any).studentLastHeartbeat = studentLastHeartbeat;
 
 app.prepare().then(async () => {
+  await recoverRestoreJournalOnBoot().catch((err) => {
+    console.error("[BootRecovery] Error during boot journal recovery:", err);
+  });
+
   const httpServer = createServer(async (req, res) => {
+    const isWrite = ["POST", "PUT", "PATCH", "DELETE"].includes(req.method || "");
+    if (isWrite) {
+      incrementActiveWrites();
+      let decremented = false;
+      const done = () => {
+        if (!decremented) {
+          decremented = true;
+          decrementActiveWrites();
+        }
+      };
+      res.on("finish", done);
+      res.on("close", done);
+    }
+
     try {
       const parsedUrl = parse(req.url!, true);
+      const urlPath = parsedUrl.pathname || "";
+
+      if (isMaintenanceActive()) {
+        const isExempt =
+          urlPath.startsWith("/api/admin/backups/job-status") ||
+          urlPath.startsWith("/api/health");
+
+        if (!isExempt) {
+          res.statusCode = 503;
+          res.setHeader("Content-Type", "application/json");
+          res.setHeader("Retry-After", "3");
+          res.end(
+            JSON.stringify({
+              success: false,
+              error: {
+                code: "SERVICE_MAINTENANCE",
+                message: getMaintenanceReason() || "Sistem sedang dalam proses pemeliharaan (backup/restore). Silakan coba beberapa saat lagi.",
+              },
+            })
+          );
+          return;
+        }
+      }
+
       await handle(req, res, parsedUrl);
     } catch (err) {
       console.error("Error occurred handling", req.url, err);
@@ -69,7 +118,15 @@ app.prepare().then(async () => {
         return next(new Error("Token tidak valid atau kedaluwarsa"));
       }
 
-      socket.data.teacher = payload;
+      const teacher = await prisma.teacher.findUnique({
+        where: { id: payload.teacherId },
+        select: { id: true, email: true, fullName: true, role: true, isActive: true, sessionVersion: true },
+      });
+      if (!teacher || !teacher.isActive || (payload.sessionVersion && teacher.sessionVersion !== payload.sessionVersion)) {
+        return next(new Error("Token tidak valid atau sesi dibatalkan"));
+      }
+
+      socket.data.teacher = { ...payload, role: teacher.role, sessionVersion: teacher.sessionVersion };
       next();
     } catch {
       next(new Error("Autentikasi gagal"));
@@ -85,8 +142,8 @@ app.prepare().then(async () => {
         const { examId } = data;
         const exam = await prisma.exam.findUnique({ where: { id: examId } });
 
-        if (!exam || (teacher.role !== "ADMIN" && exam.teacherId !== teacher.teacherId)) {
-          socket.emit("error", { message: "Akses dashboard ujian ditolak" });
+        if (!exam) {
+          socket.emit("error", { message: "Ujian tidak ditemukan" });
           return;
         }
 

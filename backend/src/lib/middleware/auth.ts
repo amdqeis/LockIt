@@ -22,7 +22,24 @@ export async function authenticateTeacher(req: NextRequest): Promise<TeacherJwtP
     throw new UnauthorizedError("Token tidak valid atau telah kedaluwarsa.");
   }
 
-  return payload;
+  const teacher = await prisma.teacher.findUnique({
+    where: { id: payload.teacherId },
+    select: { id: true, email: true, fullName: true, role: true, isActive: true, sessionVersion: true },
+  });
+
+  if (!teacher || !teacher.isActive) {
+    throw new UnauthorizedError("Akun guru tidak aktif atau tidak ditemukan.");
+  }
+
+  if (payload.sessionVersion && teacher.sessionVersion !== payload.sessionVersion) {
+    throw new UnauthorizedError("Sesi telah dibatalkan atau dipulihkan. Silakan login kembali.");
+  }
+
+  return {
+    ...payload,
+    role: teacher.role,
+    sessionVersion: teacher.sessionVersion,
+  };
 }
 
 // ─── RBAC GUARD ──────────────────────────────────────────────────────────────

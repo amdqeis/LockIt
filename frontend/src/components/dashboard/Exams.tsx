@@ -13,11 +13,13 @@ import { queryCache } from "@/lib/data-cache";
 import { ExamListSkeleton, ExamQuestionSkeleton } from "@/components/skeletons";
 import type { Question } from "@/lib/api";
 import { ErrorText, Icon, message } from "./Dashboard";
-import type { Bank, Exam, Subject } from "./types";
+import type { Bank, Classroom, Exam, GradeLevel, Subject } from "./types";
 
 type Form = {
   title: string;
   description: string;
+  gradeLevelId: string;
+  classroomId: string;
   subjectId: string;
   className: string;
   academicYear: string;
@@ -41,11 +43,32 @@ type Form = {
   ip: boolean;
 };
 
+type HierarchicalSubject = {
+  subjectId: string | null;
+  subjectName: string;
+  gradeLevelName: string | null;
+  totalExams: number;
+  activeExams: number;
+  exams: Exam[];
+};
+
+type HierarchicalClassroom = {
+  classroomId: string | null;
+  className: string;
+  gradeLevelId: string | null;
+  gradeLevelName: string | null;
+  totalExams: number;
+  activeExams: number;
+  subjects: HierarchicalSubject[];
+};
+
 const currentPeriod = getCurrentAcademicPeriod();
 
 const initial: Form = {
   title: "",
   description: "",
+  gradeLevelId: "",
+  classroomId: "",
   subjectId: "",
   className: "",
   academicYear: currentPeriod.academicYear,
@@ -86,6 +109,9 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
   const [view, setView] = useState<Exam | null>(null);
   const [preview, setPreview] = useState<Question[] | null>(null);
   const [form, setForm] = useState<Form>(initial);
+
+  const [gradeLevels, setGradeLevels] = useState<GradeLevel[]>([]);
+  const [classrooms, setClassrooms] = useState<Classroom[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [banks, setBanks] = useState<Bank[]>([]);
   const [bank, setBank] = useState<Bank | null>(null);
@@ -94,8 +120,21 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
+  // View mode and groups
+  const [viewMode, setViewMode] = useState<"hierarchy" | "flat">("hierarchy");
+  const [groups, setGroups] = useState<HierarchicalClassroom[]>([]);
+  const [groupsLoading, setGroupsLoading] = useState(false);
+
+  // Duplicate modal
+  const [duplicateModalExam, setDuplicateModalExam] = useState<Exam | null>(null);
+  const [dupTargetClassroomId, setDupTargetClassroomId] = useState("");
+  const [dupTitle, setDupTitle] = useState("");
+  const [dupSubjectId, setDupSubjectId] = useState("");
+  const [dupBusy, setDupBusy] = useState(false);
+
   const [filters, setFilters] = useState(() => ({
     status: searchParams.get("status") || "",
+    gradeLevelId: searchParams.get("gradeLevelId") || "",
     subject: searchParams.get("subject") || "",
     className: searchParams.get("className") || "",
     academicYear: searchParams.get("academicYear") || "",
@@ -119,6 +158,28 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
   });
   const requestNumber = useRef(0);
 
+  // Load master data
+  useEffect(() => {
+    let active = true;
+    Promise.all([
+      staffApi<GradeLevel[]>("/api/academic/grade-levels"),
+      staffApi<Classroom[]>("/api/academic/classrooms"),
+      staffApi<Subject[]>("/api/subjects"),
+      staffApi<Bank[]>("/api/question-banks"),
+    ])
+      .then(([gls, cls, subs, bks]) => {
+        if (!active) return;
+        setGradeLevels(gls);
+        setClassrooms(cls);
+        setSubjects(subs);
+        setBanks(bks);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const parameters = useMemo(() => {
     const params = new URLSearchParams({ limit: "25" });
     if (filter.trim()) params.set("search", filter.trim());
@@ -137,23 +198,43 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
     if (!cached || force) {
       if (!shown.length) setListLoading(true);
     }
+
+    const groupParams = new URLSearchParams();
+    if (filter.trim()) groupParams.set("search", filter.trim());
+    if (filters.gradeLevelId) groupParams.set("gradeLevelId", filters.gradeLevelId);
+    if (filters.subject) groupParams.set("subject", filters.subject);
+    if (filters.className) groupParams.set("className", filters.className);
+    if (filters.academicYear) groupParams.set("academicYear", filters.academicYear);
+    if (filters.semester) groupParams.set("semester", filters.semester);
+    if (filters.category) groupParams.set("category", filters.category);
+    if (filters.status) groupParams.set("status", filters.status);
+
     try {
-      const data = await queryCache.fetch<{ items: Exam[]; nextCursor: string | null }>(
-        currentKey,
-        () => staffApi<{ items: Exam[]; nextCursor: string | null }>(currentKey),
-        60000
-      );
+      setGroupsLoading(true);
+      const [data, groupData] = await Promise.all([
+        queryCache.fetch<{ items: Exam[]; nextCursor: string | null }>(
+          currentKey,
+          () => staffApi<{ items: Exam[]; nextCursor: string | null }>(currentKey),
+          60000
+        ),
+        staffApi<HierarchicalClassroom[]>(`/api/exams/groups?${groupParams}`).catch(() => []),
+      ]);
+
       if (request === requestNumber.current) {
         setShown(data.items);
         setNextCursor(data.nextCursor);
+        setGroups(groupData);
         setError("");
       }
     } catch (e) {
       if (request === requestNumber.current) setError(message(e));
     } finally {
-      if (request === requestNumber.current) setListLoading(false);
+      if (request === requestNumber.current) {
+        setListLoading(false);
+        setGroupsLoading(false);
+      }
     }
-  }, [parameters, shown.length]);
+  }, [parameters, filter, filters, shown.length]);
 
   useEffect(() => {
     const url = new URLSearchParams(parameters);
@@ -303,6 +384,7 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
       const payload = {
         title: form.title.trim(),
         description: form.description.trim() || null,
+        classroomId: form.classroomId || null,
         className: form.className.trim(),
         academicYear: (form.academicYear || currentPeriod.academicYear).trim(),
         semester: form.semester,
@@ -340,8 +422,13 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
       setForm(initial);
       setActiveStep(0);
       await reload();
-    } catch (err) {
-      setError(message(err));
+    } catch (err: unknown) {
+      const errorObj = err as { status?: number; message?: string };
+      if (errorObj?.status === 409 || errorObj?.message?.includes("Bank soal berubah")) {
+        setError("Bank soal telah diperbarui. Pilihan input ujian Anda tetap tersimpan. Silakan periksa kembali dan muat ulang soal.");
+      } else {
+        setError(message(err));
+      }
     } finally {
       setBusy(false);
     }
@@ -352,6 +439,7 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
     const policy = exam.violationPolicy || {};
     const date = exam.scheduledStartAt ? new Date(exam.scheduledStartAt) : null;
     const local = date ? new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16) : "";
+    const cls = classrooms.find(c => c.id === exam.classroomId);
 
     setEditing(exam);
     setIsCreating(false);
@@ -361,6 +449,8 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
       ...initial,
       title: exam.title,
       description: exam.description || "",
+      gradeLevelId: cls?.gradeLevelId || exam.classroom?.gradeLevelId || "",
+      classroomId: exam.classroomId || "",
       subjectId: exam.subjectId || "",
       className: exam.className || "",
       academicYear: exam.academicYear || "",
@@ -397,14 +487,33 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
     }
   }
 
-  async function duplicate(id: string) {
+  function openDuplicateModal(exam: Exam) {
+    setDuplicateModalExam(exam);
+    setDupTitle(`${exam.title} (Salinan)`);
+    setDupTargetClassroomId(exam.classroomId || "");
+    setDupSubjectId(exam.subjectId || "");
+    setError("");
+  }
+
+  async function handleConfirmDuplicate(e: React.FormEvent) {
+    e.preventDefault();
+    if (!duplicateModalExam) return;
+    setDupBusy(true);
+    setError("");
     try {
-      await staffSend(`/api/exams/${id}/duplicate`, "POST");
+      await staffSend(`/api/exams/${duplicateModalExam.id}/duplicate`, "POST", {
+        title: dupTitle.trim(),
+        targetClassroomId: dupTargetClassroomId || undefined,
+        subjectId: dupSubjectId || undefined,
+      });
+      setDuplicateModalExam(null);
       queryCache.invalidate("/api/exams");
       queryCache.invalidate("/api/dashboard/overview");
       await reload(true);
-    } catch (e) {
-      setError(message(e));
+    } catch (err) {
+      setError(message(err));
+    } finally {
+      setDupBusy(false);
     }
   }
 
@@ -485,36 +594,77 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
 
                   <div className="exam-creator-grid">
                     <div className="exam-creator-field">
-                      <label htmlFor="exam-subject">Mata pelajaran *</label>
+                      <label htmlFor="exam-grade-level">Tingkat *</label>
                       <select
-                        id="exam-subject"
+                        id="exam-grade-level"
                         required
                         disabled={!!editing}
-                        value={form.subjectId}
+                        value={form.gradeLevelId}
                         onChange={e => {
-                          change("subjectId", e.target.value);
+                          const gId = e.target.value;
+                          change("gradeLevelId", gId);
+                          change("classroomId", "");
+                          change("className", "");
+                          change("subjectId", "");
                           change("bankId", "");
                         }}
                       >
-                        <option value="">-- Pilih mata pelajaran --</option>
-                        {subjects.map(s => (
-                          <option key={s.id} value={s.id}>
-                            {s.name}
+                        <option value="">-- Pilih Tingkat --</option>
+                        {gradeLevels.map(gl => (
+                          <option key={gl.id} value={gl.id}>
+                            {gl.name}
                           </option>
                         ))}
                       </select>
                     </div>
 
                     <div className="exam-creator-field">
-                      <label htmlFor="exam-class">Kelas / Rombel *</label>
-                      <input
+                      <label htmlFor="exam-class">Rombel Kelas *</label>
+                      <select
                         id="exam-class"
                         required
-                        placeholder="Contoh: 10-A, 11-IPA 1"
-                        value={form.className}
-                        onChange={e => change("className", e.target.value)}
-                      />
+                        disabled={!!editing || !form.gradeLevelId}
+                        value={form.classroomId}
+                        onChange={e => {
+                          const cId = e.target.value;
+                          const cls = classrooms.find(c => c.id === cId);
+                          change("classroomId", cId);
+                          change("className", cls?.name || "");
+                        }}
+                      >
+                        <option value="">{form.gradeLevelId ? "-- Pilih Rombel --" : "-- Pilih Tingkat Terlebih Dahulu --"}</option>
+                        {classrooms
+                          .filter(c => !form.gradeLevelId || c.gradeLevelId === form.gradeLevelId)
+                          .map(c => (
+                            <option key={c.id} value={c.id}>
+                              {c.name}
+                            </option>
+                          ))}
+                      </select>
                     </div>
+                  </div>
+
+                  <div className="exam-creator-field">
+                    <label htmlFor="exam-subject">Mata pelajaran *</label>
+                    <select
+                      id="exam-subject"
+                      required
+                      disabled={!!editing || !form.gradeLevelId}
+                      value={form.subjectId}
+                      onChange={e => {
+                        change("subjectId", e.target.value);
+                        change("bankId", "");
+                      }}
+                    >
+                      <option value="">{form.gradeLevelId ? "-- Pilih Mata Pelajaran --" : "-- Pilih Tingkat Terlebih Dahulu --"}</option>
+                      {subjects
+                        .filter(s => !form.gradeLevelId || s.gradeLevelId === form.gradeLevelId)
+                        .map(s => (
+                          <option key={s.id} value={s.id}>
+                            {s.name}{s.gradeLevel ? ` · ${s.gradeLevel.name}` : ""}
+                          </option>
+                        ))}
+                    </select>
                   </div>
 
                   <div className="exam-creator-field">
@@ -948,17 +1098,58 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
 
       <ErrorText error={error} />
 
-      <input
-        className="staff-search"
-        placeholder="Cari nama, kelas, mata pelajaran, atau periode"
-        aria-label="Cari ujian"
-        value={filter}
-        onChange={e => {
-          setFilter(e.target.value);
-          setCursors([null]);
-          setCursorIndex(0);
-        }}
-      />
+      {/* Grade Selector Filter */}
+      <div className="grade-selector-strip" style={{ marginBottom: "12px" }}>
+        <span className="grade-selector-label">Filter Tingkat:</span>
+        <div className="grade-pills">
+          <button
+            type="button"
+            className={`grade-pill ${!filters.gradeLevelId ? "active" : ""}`}
+            onClick={() => setExamFilter("gradeLevelId", "")}
+          >
+            Semua Tingkat
+          </button>
+          {gradeLevels.map((gl) => (
+            <button
+              key={gl.id}
+              type="button"
+              className={`grade-pill ${gl.id === filters.gradeLevelId ? "active" : ""}`}
+              onClick={() => setExamFilter("gradeLevelId", gl.id)}
+            >
+              {gl.name}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: "10px", alignItems: "center", marginBottom: "10px", flexWrap: "wrap" }}>
+        <input
+          className="staff-search"
+          style={{ flex: 1, minWidth: "240px", margin: 0 }}
+          placeholder="Cari nama, rombel, mata pelajaran, atau periode"
+          aria-label="Cari ujian"
+          value={filter}
+          onChange={e => {
+            setFilter(e.target.value);
+            setCursors([null]);
+            setCursorIndex(0);
+          }}
+        />
+        <div className="staff-segment" style={{ margin: 0 }}>
+          <MotionButton
+            className={viewMode === "hierarchy" ? "active" : ""}
+            onClick={() => setViewMode("hierarchy")}
+          >
+            Hierarki Rombel
+          </MotionButton>
+          <MotionButton
+            className={viewMode === "flat" ? "active" : ""}
+            onClick={() => setViewMode("flat")}
+          >
+            Daftar Datar
+          </MotionButton>
+        </div>
+      </div>
 
       <details className="staff-filter-panel">
         <summary>Filter ujian</summary>
@@ -1000,79 +1191,233 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
         </div>
       </details>
 
-      {listLoading && !shown.length ? (
-        <ExamListSkeleton />
-      ) : shown.length ? (
-        <>
-          <div className="staff-list">
-            {shown.map(exam => (
-              <div className="staff-row staff-exam-row" key={exam.id}>
-                <span>
-                  <strong>{exam.title}</strong>
-                  <small>
-                    {exam.subjectName || "Belum dikelompokkan"} · {exam.className || "Kelas belum ditentukan"} ·{" "}
-                    {exam._count.questions} soal
-                  </small>
-                </span>
-                <span className="staff-status">
-                  {{ draft: "Persiapan", active: "Berlangsung", ended: "Selesai", archived: "Diarsipkan" }[exam.status]}
-                </span>
-                <div className="staff-row-actions">
-                  <MotionButton onClick={() => void openPreview(exam)}>Preview</MotionButton>
-                  {exam.status === "draft" && <MotionButton onClick={() => editExam(exam)}>Edit</MotionButton>}
-                  <MotionButton onClick={() => duplicate(exam.id)}>Duplikasi</MotionButton>
-                  <Link href={`/dashboard/monitoring?exam=${encodeURIComponent(exam.id)}`}>Monitoring</Link>
+      {/* Render Mode: Hierarki Rombel */}
+      {viewMode === "hierarchy" ? (
+        groupsLoading && !groups.length ? (
+          <ExamListSkeleton />
+        ) : groups.length ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: "14px", marginTop: "10px" }}>
+            {groups.map((group) => (
+              <div key={group.classroomId || group.className} className="classroom-group-card">
+                <div className="classroom-group-header">
+                  <div className="classroom-group-title">
+                    <h3>{group.className}</h3>
+                    {group.gradeLevelName && (
+                      <span className="classroom-grade-badge">{group.gradeLevelName}</span>
+                    )}
+                  </div>
+                  <span className="classroom-group-stats">
+                    {group.totalExams} ujian · {group.activeExams} berlangsung
+                  </span>
+                </div>
+
+                <div className="subject-group-list">
+                  {group.subjects.map((sub: HierarchicalSubject) => (
+                    <div key={sub.subjectId || sub.subjectName} className="subject-group-card">
+                      <div className="subject-group-head">
+                        <h4>{sub.subjectName}</h4>
+                        <span className="subject-group-meta">{sub.exams.length} ujian</span>
+                      </div>
+
+                      <div className="hierarchical-exams-list">
+                        {sub.exams.map((exam: Exam) => (
+                          <div key={exam.id} className="hierarchical-exam-item">
+                            <div className="hierarchical-exam-info">
+                              <strong>{exam.title}</strong>
+                              <div className="hierarchical-exam-meta">
+                                <span className="staff-status">
+                                  {{ draft: "Persiapan", active: "Berlangsung", ended: "Selesai", archived: "Diarsipkan" }[exam.status]}
+                                </span>
+                                <span>·</span>
+                                <span>Kode: {exam.accessCode}</span>
+                                <span>·</span>
+                                <span>{exam._count.questions} soal</span>
+                                <span>·</span>
+                                <span>{exam.durationMinutes} menit</span>
+                              </div>
+                            </div>
+                            <div className="staff-row-actions">
+                              <MotionButton onClick={() => void openPreview(exam)}>Preview</MotionButton>
+                              {exam.status === "draft" && <MotionButton onClick={() => editExam(exam)}>Edit</MotionButton>}
+                              <MotionButton onClick={() => openDuplicateModal(exam)}>Duplikasi</MotionButton>
+                              <Link href={`/dashboard/monitoring?exam=${encodeURIComponent(exam.id)}`} className="action-link highlight">
+                                Monitoring
+                              </Link>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             ))}
           </div>
-          <nav className="staff-pagination" aria-label="Halaman ujian">
-            <span>{shown.length} ujian pada halaman ini</span>
-            <div>
-              <MotionButton
-                className="staff-secondary"
-                disabled={cursorIndex === 0}
-                onClick={() => setCursorIndex(i => i - 1)}
-              >
-                Sebelumnya
-              </MotionButton>
-              <MotionButton
-                className="staff-secondary"
-                disabled={!nextCursor}
-                onClick={() => {
-                  if (!nextCursor) return;
-                  setCursors(current => [...current.slice(0, cursorIndex + 1), nextCursor]);
-                  setCursorIndex(i => i + 1);
-                }}
-              >
-                Berikutnya
-              </MotionButton>
-            </div>
-          </nav>
-        </>
+        ) : (
+          <div className="staff-empty">
+            <h3>{filter ? "Ujian tidak ditemukan" : "Belum ada ujian"}</h3>
+            <p>{filter ? "Coba kata pencarian lain." : "Buat ujian untuk mulai mengatur peserta dan soal."}</p>
+          </div>
+        )
       ) : (
-        <div className="staff-empty">
-          <h3>{filter ? "Ujian tidak ditemukan" : "Belum ada ujian"}</h3>
-          <p>{filter ? "Coba kata pencarian lain." : "Buat ujian untuk mulai mengatur peserta dan soal."}</p>
-          {!filter && (
-            <div style={{ marginTop: 14 }}>
-              <MotionButton
-                className="staff-primary"
-                onClick={() => {
-                  setError("");
-                  setEditing(null);
-                  setReplaceQuestions(false);
-                  setForm(initial);
-                  setActiveStep(0);
-                  setIsCreating(true);
-                }}
-              >
-                <Icon name="plus" size={16} /> Buat Ujian Baru
-              </MotionButton>
+        /* Render Mode: Daftar Datar */
+        listLoading && !shown.length ? (
+          <ExamListSkeleton />
+        ) : shown.length ? (
+          <>
+            <div className="staff-list">
+              {shown.map(exam => (
+                <div className="staff-row staff-exam-row" key={exam.id}>
+                  <span>
+                    <strong>{exam.title}</strong>
+                    <small>
+                      {exam.subjectName || "Belum dikelompokkan"} · {exam.className || "Kelas belum ditentukan"} ·{" "}
+                      {exam._count.questions} soal
+                    </small>
+                  </span>
+                  <span className="staff-status">
+                    {{ draft: "Persiapan", active: "Berlangsung", ended: "Selesai", archived: "Diarsipkan" }[exam.status]}
+                  </span>
+                  <div className="staff-row-actions">
+                    <MotionButton onClick={() => void openPreview(exam)}>Preview</MotionButton>
+                    {exam.status === "draft" && <MotionButton onClick={() => editExam(exam)}>Edit</MotionButton>}
+                    <MotionButton onClick={() => openDuplicateModal(exam)}>Duplikasi</MotionButton>
+                    <Link href={`/dashboard/monitoring?exam=${encodeURIComponent(exam.id)}`}>Monitoring</Link>
+                  </div>
+                </div>
+              ))}
             </div>
-          )}
-        </div>
+            <nav className="staff-pagination" aria-label="Halaman ujian">
+              <span>{shown.length} ujian pada halaman ini</span>
+              <div>
+                <MotionButton
+                  className="staff-secondary"
+                  disabled={cursorIndex === 0}
+                  onClick={() => setCursorIndex(i => i - 1)}
+                >
+                  Sebelumnya
+                </MotionButton>
+                <MotionButton
+                  className="staff-secondary"
+                  disabled={!nextCursor}
+                  onClick={() => {
+                    if (!nextCursor) return;
+                    setCursors(current => [...current.slice(0, cursorIndex + 1), nextCursor]);
+                    setCursorIndex(i => i + 1);
+                  }}
+                >
+                  Berikutnya
+                </MotionButton>
+              </div>
+            </nav>
+          </>
+        ) : (
+          <div className="staff-empty">
+            <h3>{filter ? "Ujian tidak ditemukan" : "Belum ada ujian"}</h3>
+            <p>{filter ? "Coba kata pencarian lain." : "Buat ujian untuk mulai mengatur peserta dan soal."}</p>
+          </div>
+        )
       )}
+
+      {/* Modal: Duplikasi Ujian */}
+      <Dialog
+        open={!!duplicateModalExam}
+        title="Duplikasi Ujian"
+        onClose={() => setDuplicateModalExam(null)}
+      >
+        <form onSubmit={handleConfirmDuplicate} className="academic-modal-form">
+          <p>
+            Duplikasi ujian <strong>{duplicateModalExam?.title}</strong> ke rombel lain.
+          </p>
+
+          <label htmlFor="dup-title">Judul Ujian Baru</label>
+          <input
+            id="dup-title"
+            required
+            className="staff-input"
+            value={dupTitle}
+            onChange={(e) => setDupTitle(e.target.value)}
+          />
+
+          <label htmlFor="dup-classroom">Rombel Tujuan</label>
+          <select
+            id="dup-classroom"
+            required
+            className="staff-input"
+            value={dupTargetClassroomId}
+            onChange={(e) => {
+              setDupTargetClassroomId(e.target.value);
+              const targetCls = classrooms.find(c => c.id === e.target.value);
+              const sourceCls = duplicateModalExam?.classroomId ? classrooms.find(c => c.id === duplicateModalExam.classroomId) : null;
+              if (targetCls && sourceCls && targetCls.gradeLevelId !== sourceCls.gradeLevelId) {
+                setDupSubjectId("");
+              } else {
+                setDupSubjectId(duplicateModalExam?.subjectId || "");
+              }
+            }}
+          >
+            <option value="">-- Pilih Rombel Tujuan --</option>
+            {classrooms.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name} {c.gradeLevel ? `· ${c.gradeLevel.name}` : ""}
+              </option>
+            ))}
+          </select>
+
+          {(() => {
+            const targetCls = classrooms.find(c => c.id === dupTargetClassroomId);
+            const sourceCls = duplicateModalExam?.classroomId ? classrooms.find(c => c.id === duplicateModalExam.classroomId) : null;
+            const isCrossGrade = targetCls && sourceCls && targetCls.gradeLevelId !== sourceCls.gradeLevelId;
+
+            if (isCrossGrade) {
+              const matchingSubjects = subjects.filter(s => s.gradeLevelId === targetCls.gradeLevelId);
+              return (
+                <div style={{ marginTop: 8 }}>
+                  <p className="staff-note" style={{ background: "#fffbeb", borderColor: "#fef3c7", color: "#92400e" }}>
+                    Duplikasi ke tingkat berbeda mewajibkan pemilihan mata pelajaran dari tingkat yang dituju.
+                  </p>
+                  <label htmlFor="dup-subject">Mata Pelajaran Tingkat Tujuan</label>
+                  <select
+                    id="dup-subject"
+                    required
+                    className="staff-input"
+                    value={dupSubjectId}
+                    onChange={(e) => setDupSubjectId(e.target.value)}
+                  >
+                    <option value="">-- Pilih Mata Pelajaran --</option>
+                    {matchingSubjects.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name} · {targetCls.gradeLevel?.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              );
+            }
+            return null;
+          })()}
+
+          <ErrorText error={error} />
+
+          <div className="modal-actions">
+            <button
+              type="button"
+              className="staff-secondary"
+              disabled={dupBusy}
+              onClick={() => setDuplicateModalExam(null)}
+            >
+              Batal
+            </button>
+            <button
+              type="submit"
+              className="staff-primary"
+              disabled={dupBusy || !dupTargetClassroomId || !dupTitle.trim()}
+            >
+              {dupBusy ? "Menduplikasi..." : "Duplikasi Ujian"}
+            </button>
+          </div>
+        </form>
+      </Dialog>
 
       {/* Modal: Detail / Pratinjau Ujian */}
       <Dialog open={!!view} title="Detail ujian" onClose={() => setView(null)}>

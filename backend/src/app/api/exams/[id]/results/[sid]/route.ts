@@ -16,7 +16,7 @@ export async function GET(
     const { id, sid } = await params;
 
     const exam = await prisma.exam.findUnique({ where: { id } });
-    if (!exam || (teacher.role !== "ADMIN" && exam.teacherId !== teacher.teacherId)) {
+    if (!exam) {
       return errorResponse("NOT_FOUND", "Ujian tidak ditemukan", 404);
     }
 
@@ -79,7 +79,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const teacher = await authenticateTeacher(req);
     const { id, sid } = await params;
     const exam = await prisma.exam.findUnique({ where: { id }, select: { teacherId: true } });
-    if (!exam || (teacher.role !== "ADMIN" && exam.teacherId !== teacher.teacherId)) return errorResponse("NOT_FOUND", "Ujian tidak ditemukan", 404);
+    if (!exam) return errorResponse("NOT_FOUND", "Ujian tidak ditemukan", 404);
     const parsed = z.object({ questionId: z.string().uuid(), isCorrect: z.boolean().nullable() }).safeParse(await req.json().catch(() => null));
     if (!parsed.success) return errorResponse("VALIDATION_ERROR", "Penilaian tidak valid", 400);
     const student = await prisma.student.findFirst({ where: { id: sid, examId: id, status: "submitted" }, select: { id: true } });

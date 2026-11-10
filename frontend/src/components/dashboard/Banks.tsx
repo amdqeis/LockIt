@@ -11,7 +11,7 @@ import { queryCache } from "@/lib/data-cache";
 import { BankListSkeleton } from "@/components/skeletons";
 import EquationEditor, { docToText } from "./EquationEditor";
 import { ErrorText, Icon, message } from "./Dashboard";
-import type { Bank, BankQuestion, Subject } from "./types";
+import type { Bank, BankQuestion, GradeLevel, Subject } from "./types";
 import { exportBankXml, importBankXml, readBankXml, type Backup } from "./bankXml";
 
 const blankDoc = (text = ""): JSONContent => ({
@@ -43,6 +43,9 @@ const stepNames = ["Buat Soal", "Pratinjau Siswa", "Konfirmasi Unggah"];
 export function Banks({ teacherId }: { teacherId: string }) {
   const searchParams = useSearchParams();
   const reduceMotion = useReducedMotion();
+
+  const [gradeLevels, setGradeLevels] = useState<GradeLevel[]>([]);
+  const [selectedGradeId, setSelectedGradeId] = useState<string>(() => searchParams.get("gradeLevelId") || "");
 
   const [subjects, setSubjects] = useState<Subject[]>(() => {
     const initial = queryCache.get<Subject[]>("/api/subjects");
@@ -97,11 +100,24 @@ export function Banks({ teacherId }: { teacherId: string }) {
   });
   const listRequest = useRef(0);
 
+  useEffect(() => {
+    let active = true;
+    staffApi<GradeLevel[]>("/api/academic/grade-levels")
+      .then((gls) => {
+        if (active) setGradeLevels(gls);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const load = useCallback(async (force = false) => {
     const request = ++listRequest.current;
     const params = new URLSearchParams({ limit: "25" });
     if (folder && folder !== "unassigned") params.set("subjectId", folder);
     else if (folder === "unassigned") params.set("subjectId", "unassigned");
+    if (selectedGradeId) params.set("gradeLevelId", selectedGradeId);
     const cursor = cursors[cursorIndex];
     if (cursor) params.set("cursor", cursor);
     const banksKey = `/api/question-banks?${params}`;
@@ -132,13 +148,16 @@ export function Banks({ teacherId }: { teacherId: string }) {
     } finally {
       if (request === listRequest.current) setListLoading(false);
     }
-  }, [folder, cursors, cursorIndex, banks.length]);
+  }, [folder, selectedGradeId, cursors, cursorIndex, banks.length]);
 
   useEffect(() => {
+    const params = new URLSearchParams();
+    if (folder) params.set("folder", folder);
+    if (selectedGradeId) params.set("gradeLevelId", selectedGradeId);
     window.history.replaceState(
       window.history.state,
       "",
-      `/dashboard/bank-soal${folder ? `?folder=${encodeURIComponent(folder)}` : ""}`
+      `/dashboard/bank-soal${params.size ? `?${params}` : ""}`
     );
     const timer = window.setTimeout(() => void load(), 0);
     const counter = listRequest;
@@ -146,7 +165,7 @@ export function Banks({ teacherId }: { teacherId: string }) {
       window.clearTimeout(timer);
       counter.current++;
     };
-  }, [folder, load]);
+  }, [folder, selectedGradeId, load]);
 
   function switchFolder(value: string | null) {
     setFolder(value);
@@ -1430,8 +1449,25 @@ export function Banks({ teacherId }: { teacherId: string }) {
 
   // ─── NORMAL BANK LIST VIEW ─────────────────────────────────────────────────
   const visible = banks;
+  const selectedGrade = gradeLevels.find((gl) => gl.id === selectedGradeId);
+  const currentSubject = subjects.find((s) => s.id === folder);
+  const displayedSubjects = selectedGradeId
+    ? subjects.filter((s) => s.gradeLevelId === selectedGradeId)
+    : subjects;
+
+  const targetGradeId = moveBank?.subjectFolder?.gradeLevelId;
+  const allowedMoveSubjects = targetGradeId
+    ? subjects.filter((s) => s.gradeLevelId === targetGradeId && s.id !== moveBank?.subjectId)
+    : subjects.filter((s) => s.id !== moveBank?.subjectId);
+
   return (
     <>
+      <nav className="bank-breadcrumb" aria-label="Navigasi hierarki bank soal" style={{ display: "flex", gap: "6px", alignItems: "center", fontSize: "11px", color: "#64636c", marginBottom: "8px" }}>
+        <span>Bank Soal</span>
+        {selectedGrade && <><span>/</span><span>{selectedGrade.name}</span></>}
+        {currentSubject && <><span>/</span><strong>{currentSubject.name}</strong></>}
+      </nav>
+
       <div className="staff-section-head">
         <div>
           <h2>Bank soal</h2>
@@ -1458,6 +1494,30 @@ export function Banks({ teacherId }: { teacherId: string }) {
         </div>
       </div>
 
+      {/* Grade Selector Filter */}
+      <div className="grade-selector-strip" style={{ marginBottom: "12px" }}>
+        <span className="grade-selector-label">Filter Tingkat:</span>
+        <div className="grade-pills">
+          <button
+            type="button"
+            className={`grade-pill ${!selectedGradeId ? "active" : ""}`}
+            onClick={() => { setSelectedGradeId(""); switchFolder(null); }}
+          >
+            Semua Tingkat
+          </button>
+          {gradeLevels.map((gl) => (
+            <button
+              key={gl.id}
+              type="button"
+              className={`grade-pill ${gl.id === selectedGradeId ? "active" : ""}`}
+              onClick={() => { setSelectedGradeId(gl.id); switchFolder(null); }}
+            >
+              {gl.name}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {notice && <p role="status" className="staff-note" style={{ background: "#edfdf5", borderColor: "#c6f6d5", color: "#22543d" }}>{notice}</p>}
       <ErrorText error={!selected && !folderOpen && !bankOpen && !backup && !moveBank && !deleteFolder && !viewingBank ? error : ""} />
 
@@ -1465,13 +1525,13 @@ export function Banks({ teacherId }: { teacherId: string }) {
         <MotionButton className={!folder ? "active" : ""} onClick={() => switchFolder(null)}>
           Semua bank
         </MotionButton>
-        {subjects.map((s) => (
+        {displayedSubjects.map((s) => (
           <MotionButton
             className={folder === s.id ? "active" : ""}
             key={s.id}
             onClick={() => switchFolder(s.id)}
           >
-            {s.name} <span>{s._count.banks}</span>
+            {s.name}{s.gradeLevel ? ` · ${s.gradeLevel.name}` : ""} <span>{s._count.banks}</span>
           </MotionButton>
         ))}
         <MotionButton className={folder === "unassigned" ? "active" : ""} onClick={() => switchFolder("unassigned")}>
@@ -1483,7 +1543,7 @@ export function Banks({ teacherId }: { teacherId: string }) {
       {folder && folder !== "unassigned" && (
         <div className="staff-section-head" style={{ marginTop: 10, marginBottom: 14 }}>
           <div>
-            <h3>{subjects.find((s) => s.id === folder)?.name || "Folder"}</h3>
+            <h3>{currentSubject ? `${currentSubject.name}${currentSubject.gradeLevel ? ` · ${currentSubject.gradeLevel.name}` : ""}` : "Folder"}</h3>
             <p>{visible.length} bank soal pada mata pelajaran ini</p>
           </div>
           <div className="staff-action-wrap">
@@ -1524,10 +1584,10 @@ export function Banks({ teacherId }: { teacherId: string }) {
             {visible.map((b) => (
               <div className="staff-row staff-exam-row" key={b.id}>
                 <span>
-                  <strong>{b.title}</strong>
+                  <strong>{b.title} — {b.subjectFolder?.name || b.subject}{b.subjectFolder?.gradeLevel ? ` · ${b.subjectFolder.gradeLevel.name}` : (b.targetGrade ? ` · Tingkat ${b.targetGrade}` : "")}</strong>
                   <small>
-                    {b._count.questions} soal · {b.subject}
-                    {b.targetGrade ? ` · Tingkat ${b.targetGrade}` : ""}
+                    {b._count.questions} soal · {b.subjectFolder?.name || b.subject}
+                    {b.subjectFolder?.gradeLevel ? ` · Tingkat ${b.subjectFolder.gradeLevel.name}` : (b.targetGrade ? ` · Tingkat ${b.targetGrade}` : "")}
                   </small>
                 </span>
                 <div className="staff-row-actions">
@@ -1684,14 +1744,18 @@ export function Banks({ teacherId }: { teacherId: string }) {
       {/* Dialog Pindahkan Bank */}
       <Dialog open={!!moveBank} title="Pindahkan bank soal" onClose={() => setMoveBank(null)}>
         <form className="staff-form" onSubmit={move}>
-          <p>Pilih mata pelajaran untuk {moveBank?.title}.</p>
+          <p>
+            Pindahkan <strong>{moveBank?.title}</strong> ke mata pelajaran lain dalam tingkat yang sama.
+          </p>
           <label>
             Mata pelajaran tujuan
             <select required value={destination} onChange={(e) => setDestination(e.target.value)}>
-              <option value="">Pilih mata pelajaran</option>
-              {subjects.map((subject) => (
+              <option value="">
+                {allowedMoveSubjects.length ? "Pilih mata pelajaran tujuan" : "Tidak ada mata pelajaran lain pada tingkat yang sama"}
+              </option>
+              {allowedMoveSubjects.map((subject) => (
                 <option key={subject.id} value={subject.id}>
-                  {subject.name}
+                  {subject.name}{subject.gradeLevel ? ` · ${subject.gradeLevel.name}` : ""}
                 </option>
               ))}
             </select>
@@ -1701,7 +1765,7 @@ export function Banks({ teacherId }: { teacherId: string }) {
             <MotionButton type="button" className="staff-secondary" onClick={() => setMoveBank(null)}>
               Batal
             </MotionButton>
-            <MotionButton className="staff-primary" disabled={busy || destination === moveBank?.subjectId}>
+            <MotionButton className="staff-primary" disabled={busy || !destination || destination === moveBank?.subjectId}>
               Pindahkan
             </MotionButton>
           </div>
@@ -1727,6 +1791,21 @@ export function Banks({ teacherId }: { teacherId: string }) {
               {warning}
             </p>
           ))}
+          <label>
+            Mata pelajaran tujuan
+            <select
+              value={folder || ""}
+              onChange={(e) => switchFolder(e.target.value)}
+              required
+            >
+              <option value="" disabled>Pilih mata pelajaran tujuan...</option>
+              {subjects.filter(s => s.gradeLevelId != null).map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}{s.gradeLevel ? ` · ${s.gradeLevel.name}` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
           <ErrorText error={error} />
           <div className="staff-dialog-actions">
             <MotionButton
@@ -1738,7 +1817,11 @@ export function Banks({ teacherId }: { teacherId: string }) {
             >
               Batal
             </MotionButton>
-            <MotionButton className="staff-primary" disabled={busy} onClick={() => void confirmImport()}>
+            <MotionButton
+              className="staff-primary"
+              disabled={busy || !folder || folder === "unassigned" || !subjects.some(s => s.id === folder && s.gradeLevelId)}
+              onClick={() => void confirmImport()}
+            >
               {busy ? "Mengimpor…" : "Impor sebagai draf"}
             </MotionButton>
           </div>

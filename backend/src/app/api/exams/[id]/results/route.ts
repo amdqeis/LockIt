@@ -17,9 +17,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       return errorResponse("NOT_FOUND", "Ujian tidak ditemukan", 404);
     }
 
-    if (teacher.role !== "ADMIN" && results.exam.teacherId !== teacher.teacherId) {
-      return errorResponse("NOT_FOUND", "Ujian tidak ditemukan", 404);
-    }
 
     return successResponse(results);
   } catch (err: any) {
