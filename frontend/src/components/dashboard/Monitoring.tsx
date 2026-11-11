@@ -194,9 +194,8 @@ export function Monitoring() {
   }, [id, loadList]);
 
   const gradeLevelStats = useMemo(() => {
-    const levels = groups.some(g => !g.gradeLevelId) ? [...gradeLevels, { id: "__unmapped__", name: "Perlu dipetakan" }] : gradeLevels;
-    return levels.map((gl) => {
-      const matchingGroups = groups.filter(g => gl.id === "__unmapped__" ? !g.gradeLevelId : g.gradeLevelId === gl.id);
+    return gradeLevels.map((gl) => {
+      const matchingGroups = groups.filter(g => g.gradeLevelId === gl.id);
       matchingGroups.push(...classrooms.filter(c => c.gradeLevelId === gl.id && !matchingGroups.some(g => g.classroomId === c.id))
         .map(c => ({ classroomId: c.id, className: c.name, gradeLevelId: c.gradeLevelId, gradeLevelName: gl.name, totalExams: 0, activeExams: 0, subjects: [] })));
       const totalClasses = matchingGroups.length;
@@ -685,7 +684,7 @@ export function Monitoring() {
                   <HierarchyCard
                     key={gl.id}
                     index={index}
-                    name={gl.id === "__unmapped__" ? gl.name : `Tingkat ${gl.name}`}
+                    name={`Tingkat ${gl.name}`}
                     count={`${gl.activeExams} berlangsung · ${gl.draftExams} akan datang`}
                     detail={`${gl.totalClasses} kelas · ${gl.totalExams} total ujian`}
                     onClick={() => setSelectedGradeId(gl.id)}

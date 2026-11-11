@@ -4491,37 +4491,6 @@ math-field::part(menu-toggle) {
   gap: 10px;
 }
 
-/* Legacy Mapping Card */
-.academic-legacy-card {
-  background: #ffffff;
-  border: 1px solid #e9e9ec;
-  border-radius: 18px;
-  padding: 18px 22px;
-  box-shadow: 0 2px 8px rgba(25, 24, 33, 0.02);
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-.academic-legacy-header-btn {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  background: none;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-  text-align: left;
-}
-.academic-legacy-badge {
-  font-size: 11px;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 9999px;
-  background: #f4f3f7;
-  color: #514175;
-}
 
 /* Fallback Grade Selector Strip */
 .grade-selector-strip {
@@ -4647,8 +4616,6 @@ math-field::part(menu-toggle) {
 .academic-subject-field input,
 .bank-master-field select { width: 100%; min-height: 38px; padding: 8px 10px; border: 1px solid #c9c7cf; border-radius: 8px; background: #fff; color: #17171a; font: inherit; }
 .academic-subject-create .staff-error { margin: 6px 0 0; }
-.academic-legacy-toggle { align-self: flex-start; padding: 8px 0; border: 0; background: none; color: #514175; font-weight: 650; text-align: left; }
-.academic-legacy-toggle:hover { text-decoration: underline; }
 .bank-master-field { flex: 1 1 180px; min-width: 0; }
 .bank-master-note { flex-basis: 100%; margin: 2px 0 0; color: #514b5f; font-size: 11px; }
 .bank-master-note a { color: #514175; text-decoration: underline; }
@@ -4768,74 +4735,6 @@ math-field::part(menu-toggle) {
   margin: 0 0 12px;
 }
 
-/* Legacy Mapping */
-.legacy-summary-strip {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-.legacy-summary-card {
-  padding: 12px 16px;
-  background: #ffffff;
-  border: 1px solid #e7e6ea;
-  border-radius: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 180px;
-}
-.legacy-summary-card small {
-  font-size: 10px;
-  color: #64636c;
-}
-.legacy-summary-card strong {
-  font-size: 18px;
-  font-weight: 700;
-  color: #17171a;
-}
-.legacy-section {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 10px;
-}
-.legacy-section h4 {
-  font-size: 13px;
-  font-weight: 650;
-  margin: 0 0 4px;
-}
-.legacy-card {
-  flex-wrap: wrap;
-}
-.legacy-mapping-controls,
-.legacy-exam-controls {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.legacy-select {
-  height: 30px;
-  padding: 0 10px;
-  border: 1px solid #d5d4dc;
-  border-radius: 6px;
-  font-size: 11px;
-  background: #ffffff;
-  color: #17171a;
-}
-.legacy-apply-btn {
-  height: 30px;
-  padding: 0 12px;
-  font-size: 11px;
-}
-.legacy-clean-notice {
-  font-size: 11px;
-  color: #166534;
-  padding: 8px 12px;
-  background: #f0fdf4;
-  border-radius: 6px;
-  margin: 0;
-}
 
 /* Modals */
 .academic-modal-form {

@@ -137,9 +137,8 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
   const { selectedGradeId, selectedClassroomId, setSelectedGradeId, setSelectedClassroomId } = useHierarchyNavigation();
 
   const gradeLevelExamStats = useMemo(() => {
-    const levels = groups.some(g => !g.gradeLevelId) ? [...gradeLevels, { id: "__unmapped__", name: "Perlu dipetakan" }] : gradeLevels;
-    return levels.map((gl) => {
-      const matchingGroups = groups.filter(g => gl.id === "__unmapped__" ? !g.gradeLevelId : g.gradeLevelId === gl.id);
+    return gradeLevels.map((gl) => {
+      const matchingGroups = groups.filter(g => g.gradeLevelId === gl.id);
       matchingGroups.push(...classrooms.filter(c => c.gradeLevelId === gl.id && !matchingGroups.some(g => g.classroomId === c.id))
         .map(c => ({ classroomId: c.id, className: c.name, gradeLevelId: c.gradeLevelId, gradeLevelName: gl.name, totalExams: 0, activeExams: 0, subjects: [] })));
       const totalClasses = matchingGroups.length;
@@ -231,11 +230,8 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
     if (viewMode === "flat" && selectedClassroomId) {
       if (classrooms.some(c => c.id === selectedClassroomId)) params.set("classroomId", selectedClassroomId);
       else {
-        const missingName = groups.some(g => !g.classroomId && g.className === selectedClassroomId && g.gradeLevelId === (selectedGradeId === "__unmapped__" ? null : selectedGradeId) && g.classNameMissing);
-        if (missingName) params.set("missingClassName", "true"); else params.set("className", selectedClassroomId);
-        params.set("unmappedClassroom", "true");
-        if (selectedGradeId === "__unmapped__") params.set("unmappedGrade", "true");
-        else if (selectedGradeId) params.set("gradeLevelId", selectedGradeId);
+        params.set("className", selectedClassroomId);
+        if (selectedGradeId) params.set("gradeLevelId", selectedGradeId);
       }
     }
     if (filter.trim()) params.set("search", filter.trim());
@@ -246,7 +242,7 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
     const cursor = cursors[cursorIndex];
     if (cursor) params.set("cursor", cursor);
     return params.toString();
-  }, [filter, filters, cursors, cursorIndex, viewMode, selectedClassroomId, selectedGradeId, classrooms, groups]);
+  }, [filter, filters, cursors, cursorIndex, viewMode, selectedClassroomId, selectedGradeId, classrooms]);
 
   const reload = useCallback(async (force = false) => {
     const request = ++requestNumber.current;
@@ -1464,7 +1460,7 @@ export function Exams({ teacherRole }: { teacherRole?: "ADMIN" | "TEACHER" } = {
           /* TAHAP 1: PILIHAN TINGKATAN (STYLE OVERVIEW CARDS) */
           <div>
             <div className="drilldown-grid">
-              {gradeLevelExamStats.map((gl, index) => <HierarchyCard key={gl.id} index={index} name={gl.id === "__unmapped__" ? gl.name : `Tingkat ${gl.name}`} count={`${gl.totalExams} ujian`} detail={`${gl.totalClasses} kelas · ${gl.activeExams} berlangsung`} onClick={() => setSelectedGradeId(gl.id)} />)}
+              {gradeLevelExamStats.map((gl, index) => <HierarchyCard key={gl.id} index={index} name={`Tingkat ${gl.name}`} count={`${gl.totalExams} ujian`} detail={`${gl.totalClasses} kelas · ${gl.activeExams} berlangsung`} onClick={() => setSelectedGradeId(gl.id)} />)}
             </div>
             {gradeLevelExamStats.length === 0 && (
               <div className="staff-empty">

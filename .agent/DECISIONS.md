@@ -210,3 +210,14 @@
 - Keputusan: Memindahkan proses build image Docker sepenuhnya ke GitHub Actions (`ghcr.io/amdqeis/lockit/...`) dengan Docker Buildx, tag `sha-<short-sha>` dan `latest`, serta cache layer `type=gha`; VPS hanya menjalankan `docker compose pull` dan `docker compose up -d`; `docker-compose.yml` memakai `image:` dengan logging rotation `max-size: 10m`, `max-file: 3`; menambahkan dispatch manual dengan input `image_tag` untuk rollback instan.
 - Alasan: Menghilangkan penumpukan build cache Docker (~10 GB) di disk VPS, mempercepat deployment di server produksi, menjamin image bersifat immutable untuk rollback deterministik, dan mencegah disk penuh akibat log kontainer yang tidak dirotasi.
 - Ditolak: Mempertahankan `docker compose build` di VPS, menjalankan `docker system prune -a --volumes` yang berisiko menghapus volume data aplikasi, dan menggunakan tag `latest` tanpa kontrol tag SHA.
+
+### 2026-11-11 — Penyederhanaan alur Bank Soal berbasis Tingkat dan Mata Pelajaran
+- Keputusan: Menghapus drilldown kelas pada modul Bank Soal (`/dashboard/bank-soal`) dan menggantinya langsung dengan grid kartu Mata Pelajaran per tingkat; menghapus seluruh teks redundan "bank bersama" pada kartu maupun banner; menyelaraskan navigasi breadcrumb ke hierarki Tingkatan / Tingkat / Mata Pelajaran.
+- Alasan: Bank soal berelasi dengan mata pelajaran dan berlaku untuk keseluruhan tingkat, bukan entitas kelas spesifik; menampilkan pilihan kelas membingungkan guru karena seluruh kelas dalam satu tingkat mengakses bank soal yang sama persis.
+- Ditolak: Mempertahankan drilldown per kelas pada modul bank soal dengan status duplikat bank bersama di tiap kartu kelas.
+
+### 2026-11-11 — Penghapusan seluruh elemen dan kartu data perlu dipetakan
+- Keputusan: Menghapus seluruh elemen UI, kartu drilldown, tombol collapsible, dan styling yang berkaitan dengan "Data yang perlu dipetakan" / data lama tidak terpetakan di modul Manajemen Akademik (`/dashboard/kelas-mapel`), Ujian (`/dashboard/ujian`), Monitoring (`/dashboard/monitoring`), dan Hasil Ujian (`/dashboard/hasil`). Menghapus CSS dead-code terkait legacy mapping di `dashboard.css`.
+- Alasan: Semua data akademik (tingkat, kelas, mata pelajaran, ujian, dan bank soal) telah terstruktur dan ditetapkan sedari awal dalam relasi hierarki, sehingga kartu penanganan data tidak terpetakan menjadi redundan dan mengacaukan antarmuka pengguna.
+- Ditolak: Mempertahankan kartu penanganan khusus 'Perlu dipetakan' di halaman manajemen dan drilldown statistik.
+

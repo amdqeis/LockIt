@@ -124,11 +124,8 @@ export function Results() {
     if (selectedClassroomId) {
       if (classrooms.some(c => c.id === selectedClassroomId)) params.set("classroomId", selectedClassroomId);
       else {
-        const missingName = hierarchicalGroups.some(g => !g.classroomId && g.className === selectedClassroomId && g.gradeLevelId === (selectedGradeId === "__unmapped__" ? null : selectedGradeId) && g.classNameMissing);
-        if (missingName) params.set("missingClassName", "true"); else params.set("className", selectedClassroomId);
-        params.set("unmappedClassroom", "true");
-        if (selectedGradeId === "__unmapped__") params.set("unmappedGrade", "true");
-        else if (selectedGradeId) params.set("gradeLevelId", selectedGradeId);
+        params.set("className", selectedClassroomId);
+        if (selectedGradeId) params.set("gradeLevelId", selectedGradeId);
       }
     }
     if (query.trim()) params.set("search", query.trim());
@@ -141,7 +138,7 @@ export function Results() {
       params.set("semester", semester);
     }
     return params.toString();
-  }, [filters, mode, page, query, selectedClassroomId, selectedGradeId, classrooms, hierarchicalGroups]);
+  }, [filters, mode, page, query, selectedClassroomId, selectedGradeId, classrooms]);
 
   const load = useCallback(async (force = false) => {
     const request = ++requestNumber.current;
@@ -224,11 +221,8 @@ export function Results() {
       const exportParams = new URLSearchParams({ format: "csv", csvLayout: "grouped", mode: "list" });
       if (classroomId) exportParams.set("classroomId", classroomId);
       else if (!customExamId && label && label !== "global") {
-        const missingName = hierarchicalGroups.some(g => !g.classroomId && g.className === label && g.gradeLevelId === (selectedGradeId === "__unmapped__" ? null : selectedGradeId) && g.classNameMissing);
-        if (missingName) exportParams.set("missingClassName", "true"); else exportParams.set("className", label);
-        exportParams.set("unmappedClassroom", "true");
-        if (selectedGradeId === "__unmapped__") exportParams.set("unmappedGrade", "true");
-        else if (selectedGradeId) exportParams.set("gradeLevelId", selectedGradeId);
+        exportParams.set("className", label);
+        if (selectedGradeId) exportParams.set("gradeLevelId", selectedGradeId);
       }
       if (customExamId) exportParams.set("examId", customExamId);
       const blob = await staffDownload(`/api/dashboard/results?${exportParams.toString()}`);
@@ -252,9 +246,8 @@ export function Results() {
 
   // Grade level stats calculation
   const gradeLevelStats = useMemo(() => {
-    const levels = hierarchicalGroups.some(g => !g.gradeLevelId) ? [...gradeLevels, { id: "__unmapped__", name: "Perlu dipetakan" }] : gradeLevels;
-    return levels.map((gl) => {
-      const matchingGroups = hierarchicalGroups.filter(g => gl.id === "__unmapped__" ? !g.gradeLevelId : g.gradeLevelId === gl.id);
+    return gradeLevels.map((gl) => {
+      const matchingGroups = hierarchicalGroups.filter(g => g.gradeLevelId === gl.id);
       matchingGroups.push(...classrooms.filter(c => c.gradeLevelId === gl.id && !matchingGroups.some(g => g.classroomId === c.id))
         .map(c => ({ classroomId: c.id, className: c.name, gradeLevelId: c.gradeLevelId, gradeLevelName: gl.name, totalExams: 0, totalCompletedStudents: 0, averageScore: null, subjects: [] })));
       const totalClasses = matchingGroups.length;
@@ -402,7 +395,7 @@ export function Results() {
           /* TAHAP 1: BOX PILIHAN TINGKATAN (STYLE OVERVIEW CARDS) */
           <div>
             <div className="drilldown-grid">
-              {gradeLevelStats.map((gl, index) => <HierarchyCard key={gl.id} index={index} name={gl.id === "__unmapped__" ? gl.name : `Tingkat ${gl.name}`} count={`${gl.totalCompletedStudents} pengerjaan`} detail={`${gl.totalClasses} kelas · ${gl.totalExams} ujian`} onClick={() => setSelectedGradeId(gl.id)} />)}
+              {gradeLevelStats.map((gl, index) => <HierarchyCard key={gl.id} index={index} name={`Tingkat ${gl.name}`} count={`${gl.totalCompletedStudents} pengerjaan`} detail={`${gl.totalClasses} kelas · ${gl.totalExams} ujian`} onClick={() => setSelectedGradeId(gl.id)} />)}
             </div>
             {gradeLevelStats.length === 0 && (
               <div className="staff-empty">

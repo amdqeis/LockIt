@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { motion, useReducedMotion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { staffApi, staffSend } from "@/lib/staff-api";
 import { queryCache } from "@/lib/data-cache";
 import { Dialog } from "@/components/Dialog";
@@ -40,47 +40,21 @@ type Subject = {
   _count?: { banks: number; exams: number };
 };
 
-type LegacyMappingReport = {
-  summary: {
-    unmappedSubjectsCount: number;
-    unmappedExamsCount: number;
-    unmappedBanksCount: number;
-    totalUnmapped: number;
-  };
-  unmappedSubjects: Array<{ id: string; name: string; _count: { banks: number; exams: number } }>;
-  unmappedExams: Array<{
-    id: string;
-    title: string;
-    status: string;
-    className: string | null;
-    subjectName: string | null;
-    classroomId: string | null;
-    subjectId: string | null;
-    revision: number;
-  }>;
-  availableGradeLevels: Array<{ id: string; name: string }>;
-  availableClassrooms: Array<{ id: string; name: string; gradeLevelId: string }>;
-  availableSubjects: Array<{ id: string; name: string; gradeLevelId: string | null; gradeLevel: { id: string; name: string } | null }>;
-};
-
 type Props = {
   teacherRole?: "ADMIN" | "TEACHER";
 };
 
 export function AcademicManagement({ teacherRole }: Props = {}) {
   void teacherRole;
-  const reduceMotion = useReducedMotion();
   const [gradeLevels, setGradeLevels] = useState<GradeLevel[]>([]);
   const { selectedGradeId, selectedClassroomId, setSelectedGradeId, setSelectedClassroomId } = useHierarchyNavigation();
   const selectedGradeRef = useRef(selectedGradeId);
   const [loadedGradeId, setLoadedGradeId] = useState("");
   const [gradeLoadError, setGradeLoadError] = useState("");
   const [gradeLoadVersion, setGradeLoadVersion] = useState(0);
-  const [legacyOpen, setLegacyOpen] = useState(false);
 
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
-  const [legacyReport, setLegacyReport] = useState<LegacyMappingReport | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -100,8 +74,6 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
   const [editingSubject, setEditingSubject] = useState<Subject | null>(null);
   const [subjectError, setSubjectError] = useState("");
   const [subjectBusy, setSubjectBusy] = useState(false);
-
-  const [mappingBusy, setMappingBusy] = useState(false);
 
   const loadGradeLevels = useCallback(async () => {
     try {
@@ -127,15 +99,6 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
     try {
       const data = await staffApi<Subject[]>(`/api/subjects?gradeLevelId=${encodeURIComponent(gradeId)}&includeArchived=true`);
       if (selectedGradeRef.current === gradeId) setSubjects(data);
-    } catch (err) {
-      setError(message(err));
-    }
-  }, []);
-
-  const loadLegacyReport = useCallback(async () => {
-    try {
-      const data = await staffApi<LegacyMappingReport>("/api/academic/legacy-mapping");
-      setLegacyReport(data);
     } catch (err) {
       setError(message(err));
     }
@@ -177,19 +140,6 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
       });
     return () => { active = false; };
   }, [selectedGradeId, gradeLoadVersion]);
-
-  useEffect(() => {
-    if (!legacyOpen) return;
-    let active = true;
-    staffApi<LegacyMappingReport>("/api/academic/legacy-mapping")
-      .then((data) => {
-        if (active) setLegacyReport(data);
-      })
-      .catch((err) => {
-        if (active) setError(message(err));
-      });
-    return () => { active = false; };
-  }, [legacyOpen]);
 
   const selectedGrade = gradeLevels.find(g => g.id === selectedGradeId);
   const selectedClassroom = classrooms.find(c => c.id === selectedClassroomId);
@@ -318,69 +268,6 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
       if (selectedGradeId) await loadSubjects(selectedGradeId);
     } catch (err) {
       setError(message(err));
-    }
-  }
-
-  // Legacy Mapping Actions
-  async function handleAutoMap() {
-    setMappingBusy(true);
-    setError("");
-    try {
-      const res = await staffSend<{ mappedSubjects: number; mappedExams: number; totalMapped: number }>("/api/academic/legacy-mapping", "POST", {
-        action: "autoMapUnambiguous",
-      });
-      setSuccessNotice(`Pemetaan otomatis selesai: ${res.mappedSubjects} mata pelajaran dan ${res.mappedExams} ujian berhasil dipetakan.`);
-      await loadLegacyReport();
-      if (selectedGradeId) {
-        await loadClassrooms(selectedGradeId);
-        await loadSubjects(selectedGradeId);
-      }
-    } catch (err) {
-      setError(message(err));
-    } finally {
-      setMappingBusy(false);
-    }
-  }
-
-  async function handleMapSubject(subjectId: string, targetGradeId: string) {
-    if (!targetGradeId) return;
-    setMappingBusy(true);
-    setError("");
-    try {
-      await staffSend("/api/academic/legacy-mapping", "POST", {
-        action: "mapSubject",
-        subjectId,
-        gradeLevelId: targetGradeId,
-      });
-      setSuccessNotice("Mata pelajaran berhasil dipetakan ke tingkat.");
-      await loadLegacyReport();
-      if (selectedGradeId) await loadSubjects(selectedGradeId);
-    } catch (err) {
-      setError(message(err));
-    } finally {
-      setMappingBusy(false);
-    }
-  }
-
-  async function handleMapExam(examId: string, revision: number, targetClassroomId: string, targetSubjectId: string) {
-    if (!targetClassroomId || !targetSubjectId) return;
-    setMappingBusy(true);
-    setError("");
-    try {
-      await staffSend("/api/academic/legacy-mapping", "POST", {
-        action: "mapExam",
-        examId,
-        revision,
-        classroomId: targetClassroomId,
-        subjectId: targetSubjectId,
-      });
-      setSuccessNotice("Ujian berhasil dipetakan ke kelas dan mata pelajaran.");
-      await loadLegacyReport();
-      if (selectedGradeId) await loadClassrooms(selectedGradeId);
-    } catch (err) {
-      setError(message(err));
-    } finally {
-      setMappingBusy(false);
     }
   }
 
@@ -676,142 +563,6 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
         </motion.div>
       ) : null}
 
-      {/* Legacy Mapping Section in Card */}
-      <div className="academic-legacy-card">
-        <motion.button
-          type="button"
-          className="academic-legacy-header-btn"
-          aria-expanded={legacyOpen}
-          whileTap={reduceMotion ? undefined : { scale: 0.99 }}
-          onClick={() => setLegacyOpen(!legacyOpen)}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <strong style={{ fontSize: "13px", color: "#17171a" }}>Data yang Perlu Dipetakan</strong>
-            {legacyReport && legacyReport.summary.totalUnmapped > 0 && (
-              <span className="academic-legacy-badge">{legacyReport.summary.totalUnmapped} data</span>
-            )}
-          </div>
-          <span className="action-link" style={{ fontSize: "11px" }}>
-            {legacyOpen ? "Tutup data yang perlu dipetakan" : "Buka data yang perlu dipetakan"}
-          </span>
-        </motion.button>
-
-        <AnimatePresence initial={false}>
-          {legacyOpen && (
-            <motion.section
-              key="legacy-panel"
-              aria-label="Data Perlu Dipetakan"
-              initial={reduceMotion ? false : { height: 0, opacity: 0 }}
-              animate={{ height: "auto", opacity: 1 }}
-              exit={reduceMotion ? undefined : { height: 0, opacity: 0 }}
-              transition={{ duration: reduceMotion ? 0 : 0.24, ease: [0.22, 1, 0.36, 1] }}
-              style={{ display: "flex", flexDirection: "column", gap: "14px", marginTop: "8px", overflow: "hidden" }}
-            >
-              <div className="tab-content-head">
-                <div>
-                  <h3>Data yang Perlu Dipetakan</h3>
-                  <p>
-                    Data mata pelajaran atau ujian terdahulu yang belum terikat ke tingkat atau kelas tertentu.
-                  </p>
-                </div>
-                {legacyReport && legacyReport.summary.totalUnmapped > 0 && (
-                  <MotionButton
-                    className="staff-primary"
-                    disabled={mappingBusy}
-                    onClick={handleAutoMap}
-                  >
-                    {mappingBusy ? "Memetakan..." : "Petakan Otomatis yang Jelas"}
-                  </MotionButton>
-                )}
-              </div>
-
-              {legacyReport && (
-                <div className="legacy-summary-strip">
-                  <div className="legacy-summary-card">
-                    <small>Mata Pelajaran Tanpa Tingkat</small>
-                    <strong>{legacyReport.summary.unmappedSubjectsCount}</strong>
-                  </div>
-                  <div className="legacy-summary-card">
-                    <small>Ujian Tanpa Kelas/Mapel</small>
-                    <strong>{legacyReport.summary.unmappedExamsCount}</strong>
-                  </div>
-                </div>
-              )}
-
-              {/* Unmapped Subjects */}
-              <div className="legacy-section">
-                <h4>Mata Pelajaran Tanpa Tingkat</h4>
-                <div className="academic-list">
-                  {legacyReport?.unmappedSubjects.map((sub) => (
-                    <div key={sub.id} className="academic-item-card legacy-card">
-                      <div className="academic-item-main">
-                        <strong>{sub.name}</strong>
-                        <div className="academic-item-meta">
-                          <span>{sub._count.banks} bank soal</span>
-                          <span>·</span>
-                          <span>{sub._count.exams} ujian terkait</span>
-                        </div>
-                      </div>
-                      <div className="legacy-mapping-controls">
-                        <label htmlFor={`map-sub-${sub.id}`} className="sr-only">Pilih Tingkat</label>
-                        <select
-                          id={`map-sub-${sub.id}`}
-                          className="legacy-select"
-                          defaultValue=""
-                          disabled={mappingBusy}
-                          onChange={(e) => {
-                            if (e.target.value) handleMapSubject(sub.id, e.target.value);
-                          }}
-                        >
-                          <option value="" disabled>Petakan ke Tingkat...</option>
-                          {legacyReport.availableGradeLevels.map((gl) => (
-                            <option key={gl.id} value={gl.id}>{gl.name}</option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-                  ))}
-                  {legacyReport?.unmappedSubjects.length === 0 && (
-                    <p className="legacy-clean-notice">Semua mata pelajaran sudah memiliki tingkat.</p>
-                  )}
-                </div>
-              </div>
-
-              {/* Unmapped Exams */}
-              <div className="legacy-section">
-                <h4>Ujian Tanpa Kelas atau Mata Pelajaran</h4>
-                <div className="academic-list">
-                  {legacyReport?.unmappedExams.map((exam) => (
-                    <div key={exam.id} className="academic-item-card legacy-card">
-                      <div className="academic-item-main">
-                        <strong>{exam.title}</strong>
-                        <div className="academic-item-meta">
-                          <span>Kelas teks lama: {exam.className || "—"}</span>
-                          <span>·</span>
-                          <span>Mapel teks lama: {exam.subjectName || "—"}</span>
-                        </div>
-                      </div>
-                      <div className="legacy-exam-mapping-row">
-                        <LegacyExamMapper
-                          exam={exam}
-                          classrooms={legacyReport.availableClassrooms}
-                          subjects={legacyReport.availableSubjects}
-                          busy={mappingBusy}
-                          onMap={(classroomId, subjectId) => handleMapExam(exam.id, exam.revision, classroomId, subjectId)}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                  {legacyReport?.unmappedExams.length === 0 && (
-                    <p className="legacy-clean-notice">Semua ujian sudah terhubung ke kelas dan mata pelajaran.</p>
-                  )}
-                </div>
-              </div>
-            </motion.section>
-          )}
-        </AnimatePresence>
-      </div>
-
       {/* Grade Dialog */}
       <Dialog
         open={gradeModalOpen}
@@ -932,72 +683,6 @@ export function AcademicManagement({ teacherRole }: Props = {}) {
           </div>
         </form>
       </Dialog>
-    </div>
-  );
-}
-
-function LegacyExamMapper({
-  exam,
-  classrooms,
-  subjects,
-  busy,
-  onMap,
-}: {
-  exam: { id: string; classroomId: string | null; subjectId: string | null };
-  classrooms: Array<{ id: string; name: string; gradeLevelId: string }>;
-  subjects: Array<{ id: string; name: string; gradeLevelId: string | null; gradeLevel: { id: string; name: string } | null }>;
-  busy: boolean;
-  onMap: (classroomId: string, subjectId: string) => void;
-}) {
-  const [selectedClassroomId, setSelectedClassroomId] = useState(exam.classroomId || "");
-  const [selectedSubjectId, setSelectedSubjectId] = useState(exam.subjectId || "");
-
-  const selectedClassroom = classrooms.find((c) => c.id === selectedClassroomId);
-  const matchingSubjects = selectedClassroom
-    ? subjects.filter((s) => s.gradeLevelId === selectedClassroom.gradeLevelId)
-    : subjects;
-
-  return (
-    <div className="legacy-exam-controls">
-      <select
-        className="legacy-select"
-        value={selectedClassroomId}
-        disabled={busy}
-        onChange={(e) => {
-          setSelectedClassroomId(e.target.value);
-          setSelectedSubjectId("");
-        }}
-      >
-        <option value="">Pilih Kelas...</option>
-        {classrooms.map((c) => (
-          <option key={c.id} value={c.id}>
-            {c.name}
-          </option>
-        ))}
-      </select>
-
-      <select
-        className="legacy-select"
-        value={selectedSubjectId}
-        disabled={busy || !selectedClassroomId}
-        onChange={(e) => setSelectedSubjectId(e.target.value)}
-      >
-        <option value="">Pilih Mata Pelajaran...</option>
-        {matchingSubjects.map((s) => (
-          <option key={s.id} value={s.id}>
-            {s.name} {s.gradeLevel ? `· ${s.gradeLevel.name}` : ""}
-          </option>
-        ))}
-      </select>
-
-      <button
-        type="button"
-        className="staff-primary legacy-apply-btn"
-        disabled={busy || !selectedClassroomId || !selectedSubjectId}
-        onClick={() => onMap(selectedClassroomId, selectedSubjectId)}
-      >
-        Simpan Pemetaan
-      </button>
     </div>
   );
 }

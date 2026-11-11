@@ -9,7 +9,6 @@ const classes = [{ id: "class-a", name: "Kelas A", gradeLevelId: grade.id, _coun
 const subject = { id: "math", name: "Matematika", gradeLevelId: grade.id, gradeLevel: grade, _count: { banks: 1, exams: 1 } };
 const bank = { id: "bank-1", title: "Bank Aljabar", subject: "Matematika", subjectId: subject.id, subjectFolder: subject, revision: 1, _count: { questions: 1 } };
 const group = { classroomId: "class-a", className: "Kelas A", gradeLevelId: grade.id, gradeLevelName: "X", totalExams: 1, activeExams: 1, totalCompletedStudents: 1, averageScore: 90, subjects: [{ subjectId: subject.id, subjectName: subject.name, gradeLevelName: "X", totalExams: 1, activeExams: 1, totalCompletedStudents: 1, averageScore: 90, exams: [{ ...exam, completedStudents: 1, pendingGradingCount: 0, averageScore: 90 }] }] };
-const legacyGroup = { classroomId: null, className: "Perlu Dipetakan", classNameMissing: true, gradeLevelId: null, gradeLevelName: null, totalExams: 1, activeExams: 1, totalCompletedStudents: 1, averageScore: 80, subjects: [{ subjectId: null, subjectName: "Perlu Dipetakan", gradeLevelName: null, totalExams: 1, activeExams: 1, totalCompletedStudents: 1, averageScore: 80, exams: [{ ...exam, id: "legacy-exam", title: "Ujian Lama", className: null, completedStudents: 1, pendingGradingCount: 0, averageScore: 80 }] }] };
 
 (async () => {
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || "/usr/bin/chromium", headless: true, args: ["--no-sandbox"] });
@@ -34,9 +33,9 @@ const legacyGroup = { classroomId: null, className: "Perlu Dipetakan", className
     }
     else if (url.pathname === "/api/subjects") data = url.searchParams.get("gradeLevelId") === gradeXi.id ? [] : [subject];
     else if (url.pathname === "/api/question-banks") data = url.searchParams.has("limit") ? { items: [bank], nextCursor: null } : [bank];
-    else if (url.pathname === "/api/exams/groups") data = { groups: [group, legacyGroup] };
+    else if (url.pathname === "/api/exams/groups") data = { groups: [group] };
     else if (url.pathname === "/api/exams") { examRequests.push(url.searchParams); data = { items: [exam], nextCursor: null }; }
-    else if (url.pathname === "/api/dashboard/results/groups") data = { groups: [group, legacyGroup] };
+    else if (url.pathname === "/api/dashboard/results/groups") data = { groups: [group] };
     else if (url.pathname === "/api/dashboard/results") {
       if (url.searchParams.get("format") === "csv") {
         exports.push(url.searchParams);
@@ -62,6 +61,20 @@ const legacyGroup = { classroomId: null, className: "Perlu Dipetakan", className
       assert.ok(gradeBounds.width >= 44 && gradeBounds.height >= 44, `${path} grade target`);
       await gradeCard.focus();
       await page.keyboard.press("Enter");
+      if (path === "bank-soal") {
+        const subjectCard = page.getByRole("button", { name: /Matematika/ }).first();
+        await subjectCard.waitFor();
+        const subjectBounds = await subjectCard.boundingBox();
+        assert.ok(subjectBounds.width >= 44 && subjectBounds.height >= 44, `${path} subject target`);
+        assert.equal(new URL(page.url()).searchParams.get("gradeLevelId"), grade.id);
+        await subjectCard.click();
+        await page.waitForFunction(() => new URL(location.href).searchParams.get("subjectId") === "math");
+        await page.getByText("Bank Aljabar", { exact: false }).first().waitFor();
+        await page.getByRole("navigation", { name: "Lokasi navigasi" }).getByRole("button", { name: "X", exact: true }).click();
+        await subjectCard.waitFor();
+        assert.equal(new URL(page.url()).searchParams.has("subjectId"), false);
+        continue;
+      }
       const classCard = page.getByRole("button", { name: /Kelas A/ }).first();
       await classCard.waitFor();
       const classBounds = await classCard.boundingBox();
@@ -112,29 +125,6 @@ const legacyGroup = { classroomId: null, className: "Perlu Dipetakan", className
       await page.goBack();
       await page.waitForFunction(() => new URL(location.href).searchParams.get("classroomId") === "class-a");
     }
-    await page.goto(`${origin}/dashboard/hasil`);
-    await page.locator(".drilldown-card").filter({ hasText: "Perlu dipetakan" }).first().click();
-    await page.getByRole("button", { name: /Perlu Dipetakan/ }).first().click();
-    await page.getByText("Ujian Lama", { exact: false }).first().waitFor();
-    const legacyDownload = page.waitForEvent("download");
-    await page.getByRole("button", { name: "Ekspor CSV Kelas Ini" }).click();
-    await legacyDownload;
-    const legacyExport = exports.at(-1);
-    assert.equal(legacyExport.get("unmappedClassroom"), "true");
-    assert.equal(legacyExport.get("unmappedGrade"), "true");
-    assert.equal(legacyExport.get("missingClassName"), "true");
-    assert.equal(legacyExport.has("className"), false);
-    await page.goto(`${origin}/dashboard/ujian?className=Kelas%20Lain`);
-    await page.locator(".drilldown-card").filter({ hasText: "Perlu dipetakan" }).first().click();
-    await page.getByRole("button", { name: /Perlu Dipetakan/ }).first().click();
-    await page.getByRole("button", { name: "Semua Ujian" }).click();
-    assert.equal(await page.getByRole("button", { name: "Semua Ujian" }).getAttribute("aria-pressed"), "true");
-    await page.waitForTimeout(400);
-    const legacyExamRequest = examRequests.at(-1);
-    assert.equal(legacyExamRequest.get("unmappedClassroom"), "true");
-    assert.equal(legacyExamRequest.get("unmappedGrade"), "true");
-    assert.equal(legacyExamRequest.get("missingClassName"), "true");
-    assert.equal(legacyExamRequest.has("className"), false);
     await page.goto(`${origin}/dashboard/kelas-mapel`);
     failXi = true;
     await page.locator(".drilldown-card").filter({ hasText: "Tingkat XI" }).click();

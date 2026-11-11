@@ -133,9 +133,6 @@ function contrast(foreground, background) {
     assert.equal(await page.getByLabel('Nama mata pelajaran untuk Tingkat X').inputValue(), '');
     await page.getByRole('button', { name: 'Batal', exact: true }).click();
     assert.equal(await page.getByText('Biologi · Tingkat X').count(), 1);
-    await page.getByRole('button', { name: /Buka data yang perlu dipetakan/ }).click();
-    await page.getByRole('heading', { name: 'Data yang Perlu Dipetakan' }).waitFor();
-    await page.getByRole('button', { name: /Tutup/ }).click();
 
     await goToGrades();
     await chooseGrade('Tingkat XII');
@@ -208,7 +205,7 @@ function contrast(foreground, background) {
 
     await page.goto(`${origin}/dashboard/bank-soal`);
     await chooseGrade('Tingkat X');
-    await chooseClass();
+    await page.getByRole('button', { name: /Matematika/ }).first().click();
     await page.getByRole('button', { name: 'Edit', exact: true }).first().click();
     await page.getByRole('button', { name: 'Ubah judul bank soal' }).click();
     await page.locator('#new-bank-title').fill('Aljabar baru');
